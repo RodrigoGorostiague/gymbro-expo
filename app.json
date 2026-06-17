@@ -1,0 +1,47 @@
+{
+  "expo": {
+    "name": "GymBro",
+    "slug": "GymBro",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "dark",
+    "scheme": "gymbro",
+    "ios": {
+      "supportsTablet": true
+    },
+    "android": {
+      "adaptiveIcon": {
+        "backgroundColor": "#1A0A00",
+        "foregroundImage": "./assets/android-icon-foreground.png",
+        "backgroundImage": "./assets/android-icon-background.png",
+        "monochromeImage": "./assets/android-icon-monochrome.png"
+      },
+      "predictiveBackGestureEnabled": false
+    },
+    "web": {
+      "favicon": "./assets/favicon.png",
+      "bundler": "metro"
+    },
+    "plugins": [
+      "expo-router",
+      "expo-status-bar",
+      [
+        "expo-notifications",
+        {
+          "color": "#FF69B4",
+          "defaultChannel": "partner_messages",
+          "sounds": []
+        }
+      ]
+    ],
+    "extra": {
+      "firebaseApiKey": "AIzaSyDx1ndii4iuEpNJi171VqNJmet-61el06M",
+      "firebaseAuthDomain": "gym-bro-5453d.firebaseapp.com",
+      "firebaseProjectId": "gym-bro-5453d",
+      "firebaseStorageBucket": "gym-bro-5453d.firebasestorage.app",
+      "firebaseMessagingSenderId": "1074930468676",
+      "firebaseAppId": "1:1074930468676:web:becff7dd9435dc02fb3911"
+    }
+  }
+}
