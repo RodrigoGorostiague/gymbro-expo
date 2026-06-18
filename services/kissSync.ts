@@ -15,13 +15,24 @@ import {
   Timestamp,
 } from 'firebase/firestore';
 import Constants from 'expo-constants';
-import { UserProfile } from '../types';
-import { FIREBASE_COLLECTIONS, KISS_MESSAGE, PARTNER_PROFILE } from '../constants/kiss';
+import {
+  ShareNotificationType,
+  UserProfile,
+} from '../types';
+import {
+  FIREBASE_COLLECTIONS,
+  KISS_MESSAGE,
+  PARTNER_PROFILE,
+  SHARE_NOTIFICATION_TYPES,
+} from '../constants/kiss';
 import { PARTNER_NOTIFICATION_CHANNEL } from '../utils/notifications';
 
 export interface PartnerEventPayload {
   message: string;
   title: string;
+  type?: ShareNotificationType;
+  shareId?: string;
+  routineName?: string;
 }
 
 const extra = Constants.expoConfig?.extra ?? {};
@@ -81,14 +92,19 @@ export async function sendPartnerEvent(
   if (!firestore) throw new Error('Firebase no configurado');
 
   const to = PARTNER_PROFILE[from];
-  await addDoc(collection(firestore, FIREBASE_COLLECTIONS.kisses), {
+  const docData: Record<string, unknown> = {
     from,
     to,
     message: payload.message,
     title: payload.title,
     createdAt: serverTimestamp(),
     delivered: false,
-  });
+  };
+  if (payload.type) docData.type = payload.type;
+  if (payload.shareId) docData.shareId = payload.shareId;
+  if (payload.routineName) docData.routineName = payload.routineName;
+
+  await addDoc(collection(firestore, FIREBASE_COLLECTIONS.kisses), docData);
 }
 
 /** @deprecated use sendPartnerEvent */
@@ -96,6 +112,25 @@ export async function sendKissEvent(from: UserProfile): Promise<void> {
   await sendPartnerEvent(from, {
     message: KISS_MESSAGE,
     title: '💋 GymBro',
+  });
+}
+
+export async function sendShareNotification(
+  from: UserProfile,
+  type: ShareNotificationType,
+  shareId: string,
+  routineName: string,
+): Promise<void> {
+  const formatter = SHARE_NOTIFICATION_TYPES[type];
+  const message = formatter.message(from, routineName);
+  const title = formatter.title(from, routineName);
+
+  await sendPartnerEvent(from, {
+    message,
+    title,
+    type,
+    shareId,
+    routineName,
   });
 }
 
