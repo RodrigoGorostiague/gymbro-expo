@@ -5,6 +5,7 @@ import { StatusBar } from 'expo-status-bar';
 import { AuthProvider } from '../context/AuthContext';
 import { DataProvider } from '../context/DataContext';
 import { KissProvider } from '../context/KissContext';
+import { ShareProvider } from '../context/ShareContext';
 import { ShopProvider } from '../context/ShopContext';
 import { ThemeProvider, useTheme } from '../context/ThemeContext';
 
@@ -17,8 +18,9 @@ export default function RootLayout() {
   return (
     <AuthProvider>
       <KissProvider>
-        <DataProvider>
-          <ShopProvider>
+        <ShareProvider>
+          <DataProvider>
+            <ShopProvider>
             <ThemeProvider>
             <RootStatusBar />
             <Stack screenOptions={{ headerShown: false, animation: 'fade' }}>
@@ -37,9 +39,10 @@ export default function RootLayout() {
               options={{ animation: 'slide_from_right', presentation: 'fullScreenModal' }}
             />
             </Stack>
-          </ThemeProvider>
-        </ShopProvider>
-      </DataProvider>
+            </ThemeProvider>
+          </ShopProvider>
+        </DataProvider>
+      </ShareProvider>
       </KissProvider>
     </AuthProvider>
   );
