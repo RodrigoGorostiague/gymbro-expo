@@ -46,4 +46,22 @@ export const FIREBASE_COLLECTIONS = {
   pushTokens: 'pushTokens',
   kisses: 'kisses',
   equippedThemes: 'equippedThemes',
+  sharedRoutines: 'sharedRoutines',
+} as const;
+
+export const SHARE_NOTIFICATION_TYPES = {
+  routine_share: {
+    title: (from: string, routineName: string) => `${from} compartió '${routineName}' con vos`,
+    message: (from: string, routineName: string) => `${from} compartió '${routineName}' con vos`,
+  },
+  routine_accepted: {
+    title: (from: string, routineName: string) => `${from} aceptó tu rutina '${routineName}'`,
+    message: (from: string, routineName: string) => `${from} aceptó tu rutina '${routineName}'`,
+  },
+  routine_rejected: {
+    title: (from: string, routineName: string) =>
+      `${from} rechazó tu rutina '${routineName}' crudelmente`,
+    message: (from: string, routineName: string) =>
+      `${from} rechazó tu rutina '${routineName}' crudelmente`,
+  },
 } as const;
