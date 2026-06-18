@@ -19,11 +19,13 @@ import { useAuth } from '../../../context/AuthContext';
 import { useData } from '../../../context/DataContext';
 import { useShare } from '../../../context/ShareContext';
 import { useTheme } from '../../../context/ThemeContext';
+import { PARTNER_PROFILE } from '../../../constants/kiss';
 import { Routine } from '../../../types';
 
 export default function RoutinesScreen() {
   const { theme } = useTheme();
   const { user, welcomeMessage, setWelcomeMessage } = useAuth();
+  const partner = user ? PARTNER_PROFILE[user] : null;
   const { routines, deleteRoutine } = useData();
   const { pendingShares, hasPendingShare } = useShare();
   const [shareTarget, setShareTarget] = useState<Routine | null>(null);
@@ -105,6 +107,81 @@ export default function RoutinesScreen() {
                       </Text>
                     </View>
                   </View>
+                  {/* Share toggle button — CombineWithPartnerCard pattern */}
+                  {partner && (
+                    <HapticPressable
+                      onPress={() => setShareTarget(item)}
+                      disabled={item.isShared || hasPendingShare(item.name)}
+                      style={styles.shareToggleWrap}
+                    >
+                      <LinearGradient
+                        colors={
+                          item.isShared || hasPendingShare(item.name)
+                            ? [theme.glassBorder, theme.glassBorder]
+                            : [theme.primary, theme.accent]
+                        }
+                        start={{ x: 0, y: 0.5 }}
+                        end={{ x: 1, y: 0.5 }}
+                        style={styles.shareToggleBorder}
+                      >
+                        <View
+                          style={[
+                            styles.shareToggleInner,
+                            {
+                              backgroundColor:
+                                theme.blurTint === 'light'
+                                  ? 'rgba(255,255,255,0.65)'
+                                  : 'rgba(8,8,14,0.65)',
+                            },
+                          ]}
+                        >
+                          <Text
+                            style={[
+                              styles.shareToggleText,
+                              {
+                                color:
+                                  item.isShared || hasPendingShare(item.name)
+                                    ? theme.textMuted
+                                    : theme.text,
+                              },
+                            ]}
+                          >
+                            {item.isShared
+                              ? 'Compartida'
+                              : hasPendingShare(item.name)
+                                ? 'Pendiente de aceptación'
+                                : `Compartir con ${partner}`}
+                          </Text>
+                          <View
+                            style={[
+                              styles.shareTogglePill,
+                              {
+                                backgroundColor: item.isShared
+                                  ? theme.success
+                                  : hasPendingShare(item.name)
+                                    ? theme.glass
+                                    : theme.glass,
+                                borderColor: theme.glassBorder,
+                              },
+                            ]}
+                          >
+                            <Text
+                              style={[
+                                styles.shareTogglePillText,
+                                {
+                                  color: item.isShared
+                                    ? '#FFF'
+                                    : theme.textMuted,
+                                },
+                              ]}
+                            >
+                              {item.isShared ? '✓' : hasPendingShare(item.name) ? '⏳' : '🔗'}
+                            </Text>
+                          </View>
+                        </View>
+                      </LinearGradient>
+                    </HapticPressable>
+                  )}
                   <View style={styles.cardActions}>
                     <HapticPressable
                       onPress={() => router.push(`/routine/execute/${item.id}`)}
@@ -118,17 +195,6 @@ export default function RoutinesScreen() {
                       >
                         <Text style={styles.actionText}>▶ Ejecutar</Text>
                       </LinearGradient>
-                    </HapticPressable>
-                    <HapticPressable
-                      style={[
-                        styles.actionBtnOutline,
-                        { borderColor: theme.glassBorder },
-                        (item.isShared || hasPendingShare(item.name)) && styles.actionBtnDisabled,
-                      ]}
-                      onPress={() => setShareTarget(item)}
-                      disabled={item.isShared || hasPendingShare(item.name)}
-                    >
-                      <Text style={{ fontSize: 16 }}>🔗</Text>
                     </HapticPressable>
                     <HapticPressable
                       style={[styles.actionBtnOutline, { borderColor: theme.glassBorder }]}
@@ -193,8 +259,42 @@ const styles = StyleSheet.create({
   },
   cardActions: {
     flexDirection: 'row',
-    marginTop: 14,
+    marginTop: 10,
     gap: 10,
+  },
+  shareToggleWrap: {
+    marginTop: 12,
+    borderRadius: 14,
+    overflow: 'hidden',
+  },
+  shareToggleBorder: {
+    borderRadius: 14,
+    padding: 1.5,
+  },
+  shareToggleInner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    borderRadius: 12,
+  },
+  shareToggleText: {
+    fontSize: 14,
+    fontWeight: '700',
+    flex: 1,
+    paddingRight: 8,
+  },
+  shareTogglePill: {
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 10,
+    borderWidth: 1,
+  },
+  shareTogglePillText: {
+    fontSize: 11,
+    fontWeight: '800',
+    letterSpacing: 0.5,
   },
   actionWrap: {
     flex: 1,
@@ -213,9 +313,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  actionBtnDisabled: {
-    opacity: 0.4,
-  },
+
   actionText: {
     color: '#FFF',
     fontWeight: '700',
