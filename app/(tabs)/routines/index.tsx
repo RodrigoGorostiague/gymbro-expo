@@ -16,12 +16,14 @@ import { LogoutButton } from '../../../components/LogoutButton';
 import { GlassButton } from '../../../components/UI';
 import { useAuth } from '../../../context/AuthContext';
 import { useData } from '../../../context/DataContext';
+import { useShare } from '../../../context/ShareContext';
 import { useTheme } from '../../../context/ThemeContext';
 
 export default function RoutinesScreen() {
   const { theme } = useTheme();
   const { user, welcomeMessage, setWelcomeMessage } = useAuth();
   const { routines, deleteRoutine } = useData();
+  const { pendingShares } = useShare();
 
   useEffect(() => {
     if (user === 'brisas' && welcomeMessage) {
@@ -46,6 +48,16 @@ export default function RoutinesScreen() {
           subtitle="Mesociclos — carpetas de ejercicios"
           trailing={
             <>
+              {pendingShares.length > 0 && (
+                <HapticPressable
+                  onPress={() => router.push('/(tabs)/routines/pending-shares')}
+                  style={styles.pendingBtn}
+                >
+                  <Text style={[styles.pendingBadge, { backgroundColor: theme.primary }]}>
+                    {pendingShares.length}
+                  </Text>
+                </HapticPressable>
+              )}
               <LogoutButton />
               <GlassButton title="+ Nueva" onPress={() => router.push('/routine/create')} />
             </>
@@ -74,9 +86,16 @@ export default function RoutinesScreen() {
                       <Text style={styles.folderEmoji}>📁</Text>
                     </View>
                     <View style={styles.cardInfo}>
-                      <Text style={[styles.cardTitle, { color: theme.text }]}>
-                        {item.name}
-                      </Text>
+                      <View style={styles.cardTitleRow}>
+                        <Text style={[styles.cardTitle, { color: theme.text }]} numberOfLines={1}>
+                          {item.name}
+                        </Text>
+                        {item.isShared ? (
+                          <View style={[styles.sharedBadge, { backgroundColor: theme.primary }]}>
+                            <Text style={styles.sharedBadgeText}>Compartida</Text>
+                          </View>
+                        ) : null}
+                      </View>
                       <Text style={[styles.cardMeta, { color: theme.textMuted }]}>
                         {item.exercises.length} ejercicio
                         {item.exercises.length !== 1 ? 's' : ''}
@@ -192,5 +211,33 @@ const styles = StyleSheet.create({
   emptyText: {
     textAlign: 'center',
     lineHeight: 20,
+  },
+  pendingBtn: {
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+  },
+  pendingBadge: {
+    minWidth: 22,
+    height: 22,
+    borderRadius: 11,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 6,
+  },
+  cardTitleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  sharedBadge: {
+    borderRadius: 6,
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+  },
+  sharedBadgeText: {
+    color: '#FFF',
+    fontSize: 10,
+    fontWeight: '700',
+    letterSpacing: 0.3,
   },
 });
