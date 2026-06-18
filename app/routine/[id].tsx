@@ -1,6 +1,8 @@
 import React, { useEffect, useState } from 'react';
 import {
   Alert,
+  KeyboardAvoidingView,
+  Platform,
   ScrollView,
   StyleSheet,
   Text,
@@ -114,7 +116,15 @@ export default function EditRoutineScreen() {
           }
         />
 
-        <ScrollView contentContainerStyle={styles.scroll} showsVerticalScrollIndicator={false}>
+        <KeyboardAvoidingView
+          behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+          style={{ flex: 1 }}
+        >
+          <ScrollView
+            contentContainerStyle={styles.scroll}
+            keyboardShouldPersistTaps="handled"
+            showsVerticalScrollIndicator={false}
+          >
           <Text style={[styles.screenTitle, { color: theme.text }]}>Editar Rutina</Text>
           <Text style={[styles.screenSubtitle, { color: theme.textMuted }]}>
             Ejercicios y series
@@ -187,7 +197,8 @@ export default function EditRoutineScreen() {
           <GlassButton title="+ Agregar ejercicio" onPress={addExercise} variant="secondary" />
           <View style={styles.spacer} />
           <GlassButton title="Guardar rutina" onPress={save} />
-        </ScrollView>
+          </ScrollView>
+        </KeyboardAvoidingView>
       </SafeAreaView>
     </ThemeBackground>
   );
