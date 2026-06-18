@@ -17,6 +17,37 @@ export interface Routine {
   name: string;
   exercises: Exercise[];
   createdAt: string;
+  isShared?: boolean;
+  shareId?: string;
+}
+
+export type ShareStatus = 'pending' | 'accepted' | 'rejected';
+
+export interface SharedRoutineDoc {
+  id: string;
+  sharedBy: UserProfile;
+  sharedWith: UserProfile;
+  status: ShareStatus;
+  routine: { name: string; exercises: Exercise[] };
+  createdAt: number;
+  updatedAt: number;
+}
+
+export type ShareNotificationType =
+  | 'routine_share'
+  | 'routine_accepted'
+  | 'routine_rejected';
+
+export interface ShareNotification {
+  from: UserProfile;
+  to: UserProfile;
+  type: ShareNotificationType;
+  shareId: string;
+  routineName: string;
+  message: string;
+  title: string;
+  createdAt: number;
+  delivered: boolean;
 }
 
 export interface CompletedSet {
