@@ -14,9 +14,7 @@ import { AppNavBar } from '../../components/AppNavBar';
 import { GlassCard, ThemeBackground } from '../../components/GlassCard';
 import { HapticPressable } from '../../components/HapticPressable';
 import { GlassButton, GlassInput } from '../../components/UI';
-import { ShareRoutineModal } from '../../components/ShareRoutineModal';
 import { useData } from '../../context/DataContext';
-import { useShare } from '../../context/ShareContext';
 import { useTheme } from '../../context/ThemeContext';
 import { Exercise, ExerciseSet, Routine } from '../../types';
 import { generateId } from '../../utils/storage';
@@ -24,11 +22,9 @@ import { generateId } from '../../utils/storage';
 export default function EditRoutineScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const { getRoutine, updateRoutine } = useData();
-  const { hasPendingShare } = useShare();
   const { theme } = useTheme();
   const [name, setName] = useState('');
   const [exercises, setExercises] = useState<Exercise[]>([]);
-  const [shareModalVisible, setShareModalVisible] = useState(false);
 
   useEffect(() => {
     const routine = getRoutine(id);
@@ -108,27 +104,15 @@ export default function EditRoutineScreen() {
     );
   };
 
-  const routine = getRoutine(id);
-  const canShare = routine && !routine.isShared && !hasPendingShare(routine.name);
-
   return (
     <ThemeBackground>
       <SafeAreaView style={styles.safe}>
         <AppNavBar
           onBack={() => router.back()}
           trailing={
-            <View style={styles.trailing}>
-              <HapticPressable
-                onPress={() => setShareModalVisible(true)}
-                disabled={!canShare}
-                style={{ opacity: canShare ? 1 : 0.4, marginRight: 12 }}
-              >
-                <Text style={{ fontSize: 20 }}>🔗</Text>
-              </HapticPressable>
-              <HapticPressable onPress={() => router.push(`/routine/execute/${id}`)}>
-                <Text style={{ color: theme.primary, fontWeight: '800' }}>▶ Ejecutar</Text>
-              </HapticPressable>
-            </View>
+            <HapticPressable onPress={() => router.push(`/routine/execute/${id}`)}>
+              <Text style={{ color: theme.primary, fontWeight: '800' }}>▶ Ejecutar</Text>
+            </HapticPressable>
           }
         />
 
@@ -215,11 +199,6 @@ export default function EditRoutineScreen() {
           <GlassButton title="Guardar rutina" onPress={save} />
           </ScrollView>
         </KeyboardAvoidingView>
-        <ShareRoutineModal
-          visible={shareModalVisible}
-          routine={routine ?? null}
-          onClose={() => setShareModalVisible(false)}
-        />
       </SafeAreaView>
     </ThemeBackground>
   );
@@ -277,5 +256,4 @@ const styles = StyleSheet.create({
     marginTop: 4,
   },
   spacer: { height: 12 },
-  trailing: { flexDirection: 'row', alignItems: 'center' },
 });

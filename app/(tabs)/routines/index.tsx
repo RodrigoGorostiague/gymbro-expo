@@ -1,4 +1,4 @@
-import React, { useEffect } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   Alert,
   FlatList,
@@ -13,17 +13,20 @@ import { AppScreenHeader } from '../../../components/AppScreenHeader';
 import { GlassCard, ThemeBackground } from '../../../components/GlassCard';
 import { HapticPressable } from '../../../components/HapticPressable';
 import { LogoutButton } from '../../../components/LogoutButton';
+import { ShareRoutineModal } from '../../../components/ShareRoutineModal';
 import { GlassButton } from '../../../components/UI';
 import { useAuth } from '../../../context/AuthContext';
 import { useData } from '../../../context/DataContext';
 import { useShare } from '../../../context/ShareContext';
 import { useTheme } from '../../../context/ThemeContext';
+import { Routine } from '../../../types';
 
 export default function RoutinesScreen() {
   const { theme } = useTheme();
   const { user, welcomeMessage, setWelcomeMessage } = useAuth();
   const { routines, deleteRoutine } = useData();
-  const { pendingShares } = useShare();
+  const { pendingShares, hasPendingShare } = useShare();
+  const [shareTarget, setShareTarget] = useState<Routine | null>(null);
 
   useEffect(() => {
     if (user === 'brisas' && welcomeMessage) {
@@ -117,6 +120,17 @@ export default function RoutinesScreen() {
                       </LinearGradient>
                     </HapticPressable>
                     <HapticPressable
+                      style={[
+                        styles.actionBtnOutline,
+                        { borderColor: theme.glassBorder },
+                        (item.isShared || hasPendingShare(item.name)) && styles.actionBtnDisabled,
+                      ]}
+                      onPress={() => setShareTarget(item)}
+                      disabled={item.isShared || hasPendingShare(item.name)}
+                    >
+                      <Text style={{ fontSize: 16 }}>🔗</Text>
+                    </HapticPressable>
+                    <HapticPressable
                       style={[styles.actionBtnOutline, { borderColor: theme.glassBorder }]}
                       onPress={() => handleDelete(item.id, item.name)}
                     >
@@ -128,6 +142,11 @@ export default function RoutinesScreen() {
             )}
           />
         )}
+        <ShareRoutineModal
+          visible={shareTarget !== null}
+          routine={shareTarget}
+          onClose={() => setShareTarget(null)}
+        />
       </SafeAreaView>
     </ThemeBackground>
   );
@@ -193,6 +212,9 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  actionBtnDisabled: {
+    opacity: 0.4,
   },
   actionText: {
     color: '#FFF',
