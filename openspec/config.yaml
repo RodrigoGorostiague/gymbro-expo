@@ -1,0 +1,61 @@
+schema: spec-driven
+project: gymbro
+strict_tdd: false
+
+context: |
+  Expo SDK 56 app using Expo Router, React 19, React Native 0.85, and TypeScript strict mode.
+  Navigation lives under app/ with Stack + Tabs; app state is coordinated through React Context providers.
+  Local persistence uses AsyncStorage for routines, sessions, user state, and shop state.
+  Remote sync uses Firebase Firestore plus Expo notifications.
+  No automated test runner, linter, or formatter is configured; npx tsc --noEmit is the only detected quality gate.
+
+testing:
+  detected: 2026-06-18
+  strict_tdd: false
+  runner:
+    available: false
+    framework: none detected
+    command: ""
+  layers:
+    unit: false
+    integration: false
+    e2e: false
+  coverage:
+    available: false
+    command: ""
+  quality:
+    linter:
+      available: false
+      command: ""
+    typecheck:
+      available: true
+      command: npx tsc --noEmit
+    formatter:
+      available: false
+      command: ""
+
+rules:
+  proposal:
+    - Include rollback plan for risky changes.
+    - Respect the review budget and chained PR strategy when scope is large.
+  specs:
+    - Use Given/When/Then for scenarios.
+    - Use RFC 2119 keywords (MUST, SHOULD, MAY).
+  design:
+    - Document architecture decisions with rationale.
+    - Note Expo SDK 56 assumptions when platform behavior matters.
+  tasks:
+    - Group tasks by phase and keep each task completable in one session.
+    - Split large changes into reviewer-safe work units.
+  apply:
+    - Follow existing Expo Router, Context, and AsyncStorage patterns.
+    - Read Expo SDK 56 docs before changing Expo-dependent behavior.
+    tdd: false
+    test_command: ""
+    typecheck_command: npx tsc --noEmit
+  verify:
+    test_command: ""
+    build_command: npx tsc --noEmit
+    coverage_threshold: 0
+  archive:
+    - Warn before merging destructive deltas.

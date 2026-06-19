@@ -1,19 +1,34 @@
 import React, { useState } from 'react';
-import { KeyboardAvoidingView, Platform, ScrollView, StyleSheet, View } from 'react-native';
+import { KeyboardAvoidingView, Platform, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { router } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { AppScreenHeader } from '../../components/AppScreenHeader';
 import { GlassCard, ThemeBackground } from '../../components/GlassCard';
+import { MuscleGroupSelector } from '../../components/MuscleGroupSelector';
 import { GlassButton, GlassInput } from '../../components/UI';
 import { useData } from '../../context/DataContext';
+import { useTheme } from '../../context/ThemeContext';
+import { MuscleGroup } from '../../types';
 
 export default function CreateRoutineScreen() {
+  const { theme } = useTheme();
   const { addRoutine } = useData();
   const [name, setName] = useState('');
+  const [muscleGroups, setMuscleGroups] = useState<MuscleGroup[]>([]);
+  const [nameError, setNameError] = useState('');
+  const [muscleGroupsError, setMuscleGroupsError] = useState('');
 
   const handleCreate = () => {
-    if (!name.trim()) return;
-    const routine = addRoutine(name.trim());
+    const trimmedName = name.trim();
+
+    setNameError(trimmedName ? '' : 'Ingresá un nombre para la rutina.');
+    setMuscleGroupsError(
+      muscleGroups.length > 0 ? '' : 'Seleccioná al menos un grupo muscular.',
+    );
+
+    if (!trimmedName || muscleGroups.length === 0) return;
+
+    const routine = addRoutine(trimmedName, muscleGroups);
     router.replace(`/routine/${routine.id}`);
   };
 
@@ -29,15 +44,39 @@ export default function CreateRoutineScreen() {
             keyboardShouldPersistTaps="handled"
             showsVerticalScrollIndicator={false}
           >
-            <AppScreenHeader title="Nueva Rutina" subtitle="Nombre del mesociclo" />
+            <AppScreenHeader title="Nueva Rutina" subtitle="Nombre y grupos musculares" />
+
             <GlassCard>
               <GlassInput
                 placeholder="Ej: Push Day, Piernas, Full Body..."
                 value={name}
-                onChangeText={setName}
+                onChangeText={(text) => {
+                  setName(text);
+                  if (text.trim()) setNameError('');
+                }}
                 autoFocus
               />
+              {nameError ? (
+                <Text style={[styles.errorText, { color: theme.secondary }]}>{nameError}</Text>
+              ) : null}
             </GlassCard>
+
+            <GlassCard style={styles.sectionCard}>
+              <Text style={[styles.label, { color: theme.textMuted }]}>Grupos musculares</Text>
+              <MuscleGroupSelector
+                value={muscleGroups}
+                onChange={(next) => {
+                  setMuscleGroups(next);
+                  if (next.length > 0) setMuscleGroupsError('');
+                }}
+              />
+              {muscleGroupsError ? (
+                <Text style={[styles.errorText, { color: theme.secondary }]}>
+                  {muscleGroupsError}
+                </Text>
+              ) : null}
+            </GlassCard>
+
             <View style={styles.actions}>
               <GlassButton title="Crear rutina" onPress={handleCreate} />
               <View style={styles.spacer} />
@@ -57,6 +96,18 @@ const styles = StyleSheet.create({
   },
   scroll: {
     paddingBottom: 40,
+  },
+  sectionCard: {
+    marginTop: 14,
+  },
+  label: {
+    fontSize: 13,
+    marginBottom: 10,
+  },
+  errorText: {
+    marginTop: 10,
+    fontSize: 13,
+    fontWeight: '700',
   },
   actions: {
     marginTop: 24,

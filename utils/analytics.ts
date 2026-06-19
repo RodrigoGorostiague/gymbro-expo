@@ -1,5 +1,27 @@
 import { WorkoutSession } from '../types';
 
+export interface ExerciseProgressTarget {
+  catalogExerciseId?: string;
+  name: string;
+}
+
+function matchesExerciseTarget(
+  exercise: WorkoutSession['exercises'][number],
+  target: ExerciseProgressTarget,
+): boolean {
+  if (target.catalogExerciseId) {
+    if (exercise.catalogExerciseId === target.catalogExerciseId) {
+      return true;
+    }
+
+    if (exercise.catalogExerciseId) {
+      return false;
+    }
+  }
+
+  return exercise.name.toLowerCase() === target.name.toLowerCase();
+}
+
 export function startOfWeek(date: Date): Date {
   const d = new Date(date);
   const day = d.getDay();
@@ -74,7 +96,7 @@ export interface ExerciseProgressPoint {
 
 export function getExerciseProgress(
   sessions: WorkoutSession[],
-  exerciseName: string,
+  target: ExerciseProgressTarget,
   limit = 10,
 ): ExerciseProgressPoint[] {
   const points: ExerciseProgressPoint[] = [];
@@ -84,9 +106,7 @@ export function getExerciseProgress(
   );
 
   for (const session of sorted) {
-    const exercise = session.exercises.find(
-      (e) => e.name.toLowerCase() === exerciseName.toLowerCase(),
-    );
+    const exercise = session.exercises.find((entry) => matchesExerciseTarget(entry, target));
     if (!exercise) continue;
 
     const completedSets = exercise.sets.filter((s) => s.completed);

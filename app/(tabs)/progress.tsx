@@ -7,6 +7,7 @@ import { HapticPressable } from '../../components/HapticPressable';
 import { SelectablePulse } from '../../components/SelectablePulse';
 import { LogoutButton } from '../../components/LogoutButton';
 import { SimpleLineChart } from '../../components/LineChart';
+import { Exercise } from '../../types';
 import { useData } from '../../context/DataContext';
 import { useTheme } from '../../context/ThemeContext';
 import {
@@ -19,17 +20,29 @@ import {
   getWeeklyWorkoutsCount,
 } from '../../utils/analytics';
 
+interface ExerciseOption {
+  key: string;
+  catalogExerciseId?: string;
+  name: string;
+  label: string;
+}
+
 export default function ProgressScreen() {
   const { theme } = useTheme();
-  const { sessions } = useData();
-  const exerciseNames = useMemo(() => getUniqueExerciseNames(sessions), [sessions]);
+  const { exercises, sessions } = useData();
+  const exerciseOptions = useMemo(
+    () => buildExerciseOptions(exercises, sessions),
+    [exercises, sessions],
+  );
   const [selectedExercise, setSelectedExercise] = useState('');
 
   useEffect(() => {
-    if (exerciseNames.length > 0 && !exerciseNames.includes(selectedExercise)) {
-      setSelectedExercise(exerciseNames[0]);
+    if (exerciseOptions.length > 0 && !exerciseOptions.some((option) => option.key === selectedExercise)) {
+      setSelectedExercise(exerciseOptions[0].key);
     }
-  }, [exerciseNames, selectedExercise]);
+  }, [exerciseOptions, selectedExercise]);
+
+  const selectedExerciseOption = exerciseOptions.find((option) => option.key === selectedExercise);
 
   const weeklyMinutes = getWeeklyMinutes(sessions);
   const weeklyTonnage = getWeeklyTonnage(sessions);
@@ -37,8 +50,11 @@ export default function ProgressScreen() {
   const weeklyWorkouts = getWeeklyWorkoutsCount(sessions);
   const totalWorkouts = getCompletedWorkoutsCount(sessions);
 
-  const progressData = selectedExercise
-    ? getExerciseProgress(sessions, selectedExercise)
+  const progressData = selectedExerciseOption
+    ? getExerciseProgress(sessions, {
+        catalogExerciseId: selectedExerciseOption.catalogExerciseId,
+        name: selectedExerciseOption.name,
+      })
     : [];
 
   return (
@@ -90,7 +106,7 @@ export default function ProgressScreen() {
             <Text style={[styles.chartTitle, { color: theme.text }]}>
               Total rutinas: {totalWorkouts}
             </Text>
-            {exerciseNames.length === 0 ? (
+             {exerciseOptions.length === 0 ? (
               <Text style={[styles.empty, { color: theme.textMuted }]}>
                 Completa rutinas para ver gráficos de progreso
               </Text>
@@ -100,21 +116,21 @@ export default function ProgressScreen() {
                   Ejercicio
                 </Text>
                 <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.chips}>
-                  {exerciseNames.map((name) => {
-                    const isSelected = selectedExercise === name;
-                    return (
-                      <SelectablePulse
-                        key={name}
-                        selected={isSelected}
-                        theme={theme}
-                        borderRadius={20}
+                   {exerciseOptions.map((option) => {
+                     const isSelected = selectedExercise === option.key;
+                     return (
+                        <SelectablePulse
+                         key={option.key}
+                         selected={isSelected}
+                         theme={theme}
+                         borderRadius={20}
                         style={styles.chipPulse}
                       >
                         <HapticPressable
-                          onPress={() => setSelectedExercise(name)}
-                          style={[
-                            styles.chip,
-                            {
+                           onPress={() => setSelectedExercise(option.key)}
+                           style={[
+                             styles.chip,
+                             {
                               backgroundColor: isSelected ? theme.primary : theme.glass,
                               borderColor: theme.glassBorder,
                             },
@@ -127,7 +143,7 @@ export default function ProgressScreen() {
                               fontSize: 13,
                             }}
                           >
-                            {name}
+                            {option.label}
                           </Text>
                         </HapticPressable>
                       </SelectablePulse>
@@ -168,6 +184,44 @@ export default function ProgressScreen() {
       </SafeAreaView>
     </ThemeBackground>
   );
+}
+
+function buildExerciseOptions(exercises: Exercise[], sessions: Parameters<typeof getUniqueExerciseNames>[0]): ExerciseOption[] {
+  const sessionExerciseIds = new Set<string>();
+  const sessionExerciseNames = new Set<string>();
+
+  for (const session of sessions) {
+    for (const exercise of session.exercises) {
+      if (exercise.catalogExerciseId) {
+        sessionExerciseIds.add(exercise.catalogExerciseId);
+      } else {
+        sessionExerciseNames.add(exercise.name.toLowerCase());
+      }
+    }
+  }
+
+  const catalogOptions = exercises
+    .filter(
+      (exercise) =>
+        sessionExerciseIds.has(exercise.id) || sessionExerciseNames.has(exercise.name.toLowerCase()),
+    )
+    .map((exercise) => ({
+      key: `catalog:${exercise.id}`,
+      catalogExerciseId: exercise.id,
+      name: exercise.name,
+      label: exercise.name,
+    }));
+
+  const catalogNames = new Set(exercises.map((exercise) => exercise.name.toLowerCase()));
+  const legacyOptions = getUniqueExerciseNames(sessions)
+    .filter((name) => !catalogNames.has(name.toLowerCase()))
+    .map((name) => ({
+      key: `legacy:${name}`,
+      name,
+      label: `${name} · legado`,
+    }));
+
+  return [...catalogOptions, ...legacyOptions];
 }
 
 const styles = StyleSheet.create({

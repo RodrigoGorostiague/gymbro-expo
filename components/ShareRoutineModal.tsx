@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Modal, Platform, StyleSheet, Text, View } from 'react-native';
+import { Alert, Modal, Platform, StyleSheet, Text, View } from 'react-native';
 import { BlurView } from 'expo-blur';
 import { GlassCard } from './GlassCard';
 import { GlassButton } from './UI';
@@ -15,6 +15,14 @@ interface ShareRoutineModalProps {
 
 function getPartner(me: UserProfile): UserProfile {
   return me === 'rodaja' ? 'brisas' : 'rodaja';
+}
+
+function getShareErrorMessage(error: unknown): string {
+  if (error instanceof Error && error.message.trim().length > 0) {
+    return error.message;
+  }
+
+  return 'Unexpected error while creating the shared routine';
 }
 
 export function ShareRoutineModal({ visible, routine, onClose }: ShareRoutineModalProps) {
@@ -36,8 +44,12 @@ export function ShareRoutineModal({ visible, routine, onClose }: ShareRoutineMod
         // toast-like feedback via haptic already handled by GlassButton
       }
       onClose();
-    } catch {
-      // Alert already shown by ShareContext
+    } catch (error) {
+      const message = getShareErrorMessage(error);
+
+      if (message !== 'Ya compartiste esta rutina') {
+        Alert.alert('No se pudo compartir', message);
+      }
     } finally {
       setLoading(false);
     }

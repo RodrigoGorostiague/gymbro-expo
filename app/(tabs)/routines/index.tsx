@@ -20,6 +20,7 @@ import { useData } from '../../../context/DataContext';
 import { useShare } from '../../../context/ShareContext';
 import { useTheme } from '../../../context/ThemeContext';
 import { PARTNER_PROFILE } from '../../../constants/kiss';
+import { MUSCLE_GROUP_LABELS } from '../../../constants/muscleGroups';
 import { Routine } from '../../../types';
 
 export default function RoutinesScreen() {
@@ -101,16 +102,39 @@ export default function RoutinesScreen() {
                           </View>
                         ) : null}
                       </View>
-                      <Text style={[styles.cardMeta, { color: theme.textMuted }]}>
+                      <Text style={[styles.cardMeta, { color: theme.textMuted }]}> 
                         {item.exercises.length} ejercicio
                         {item.exercises.length !== 1 ? 's' : ''}
                       </Text>
+                      {item.muscleGroups.length > 0 ? (
+                        <View style={styles.muscleGroupRow}>
+                          {item.muscleGroups.map((group) => (
+                            <View
+                              key={`${item.id}-${group}`}
+                              style={[
+                                styles.muscleGroupChip,
+                                {
+                                  backgroundColor: theme.glass,
+                                  borderColor: theme.glassBorder,
+                                },
+                              ]}
+                            >
+                              <Text style={[styles.muscleGroupChipText, { color: theme.text }]}> 
+                                {MUSCLE_GROUP_LABELS[group]}
+                              </Text>
+                            </View>
+                          ))}
+                        </View>
+                      ) : null}
                     </View>
                   </View>
                   {/* Share toggle button — CombineWithPartnerCard pattern */}
                   {partner && (
                     <HapticPressable
-                      onPress={() => setShareTarget(item)}
+                      onPress={(event) => {
+                        event.stopPropagation();
+                        setShareTarget(item);
+                      }}
                       disabled={item.isShared || hasPendingShare(item.name)}
                       style={styles.shareToggleWrap}
                     >
@@ -256,6 +280,22 @@ const styles = StyleSheet.create({
   cardMeta: {
     fontSize: 13,
     marginTop: 2,
+  },
+  muscleGroupRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 6,
+    marginTop: 8,
+  },
+  muscleGroupChip: {
+    borderWidth: 1,
+    borderRadius: 999,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+  },
+  muscleGroupChipText: {
+    fontSize: 11,
+    fontWeight: '700',
   },
   cardActions: {
     flexDirection: 'row',

@@ -18,13 +18,23 @@ import { GEM_REWARDS } from '../../../constants/shopThemes';
 import { useData } from '../../../context/DataContext';
 import { useShop } from '../../../context/ShopContext';
 import { useTheme } from '../../../context/ThemeContext';
-import { CompletedExercise, CompletedSet, Routine } from '../../../types';
+import { CompletedExercise, CompletedSet, Routine, SetType } from '../../../types';
 import { vibrateRestTimerComplete } from '../../../utils/haptics';
 
 function formatTime(seconds: number): string {
   const m = Math.floor(seconds / 60);
   const s = seconds % 60;
   return `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
+}
+
+function isFailureSet(tipo: SetType): boolean {
+  return tipo === 'F';
+}
+
+function getSetTypeLabel(tipo: SetType): string {
+  if (tipo === 'C') return 'Calentamiento';
+  if (tipo === 'F') return 'Fallo';
+  return `Serie ${tipo}`;
 }
 
 type SetKey = string;
@@ -41,7 +51,7 @@ function buildSetValues(routine: Routine): Record<SetKey, SetRuntimeValues> {
       const key = `${exercise.id}-${set.id}`;
       values[key] = {
         weight: set.weight ? String(set.weight) : '',
-        reps: set.reps ? String(set.reps) : '',
+        reps: isFailureSet(set.tipo) ? '0' : set.reps ? String(set.reps) : '',
       };
     }
   }
@@ -125,14 +135,14 @@ export default function ExecuteRoutineScreen() {
     }));
   };
 
-  const completeSet = (setKey: SetKey) => {
+  const completeSet = (setKey: SetKey, tipo: SetType) => {
     if (completedSets[setKey]) return;
 
     const values = setValues[setKey];
     const weight = parseFloat(values?.weight ?? '0');
-    const reps = parseInt(values?.reps ?? '0', 10);
+    const reps = isFailureSet(tipo) ? 0 : parseInt(values?.reps ?? '0', 10);
 
-    if (!weight || !reps) {
+    if (!weight || (!isFailureSet(tipo) && !reps)) {
       Alert.alert('Datos incompletos', 'Ingresa peso y repeticiones antes de finalizar la serie.');
       return;
     }
@@ -151,14 +161,18 @@ export default function ExecuteRoutineScreen() {
 
     const exercises: CompletedExercise[] = routine.exercises.map((exercise) => ({
       exerciseId: exercise.id,
+      catalogExerciseId: exercise.catalogExerciseId,
       name: exercise.name,
       sets: exercise.sets.map((set): CompletedSet => {
         const key = `${exercise.id}-${set.id}`;
         const runtime = setValues[key];
+        const reps = isFailureSet(set.tipo)
+          ? 0
+          : parseInt(runtime?.reps ?? String(set.reps), 10) || 0;
         return {
           setId: set.id,
           weight: parseFloat(runtime?.weight ?? String(set.weight)) || 0,
-          reps: parseInt(runtime?.reps ?? String(set.reps), 10) || 0,
+          reps,
           completed: !!completedSets[key],
         };
       }),
@@ -292,11 +306,14 @@ export default function ExecuteRoutineScreen() {
                     ]}
                   >
                     <View style={styles.setCardHeader}>
-                      <Text style={[styles.setTitle, { color: theme.text }]}>
-                        Serie {setIndex + 1}
+                      <Text style={[styles.setTitle, { color: theme.text }]}> 
+                        {getSetTypeLabel(set.tipo)}
+                      </Text>
+                      <Text style={[styles.setTypeHint, { color: theme.textMuted }]}>
+                        {isFailureSet(set.tipo) ? 'Sin reps' : `Bloque ${setIndex + 1}`}
                       </Text>
                       {completed && (
-                        <View style={[styles.completedBadge, { backgroundColor: theme.success }]}>
+                        <View style={[styles.completedBadge, { backgroundColor: theme.success }]}> 
                           <Text style={styles.completedBadgeText}>✓ Hecha</Text>
                         </View>
                       )}
@@ -314,22 +331,41 @@ export default function ExecuteRoutineScreen() {
                           onChangeText={(text) => updateSetValue(setKey, 'weight', text)}
                         />
                       </View>
-                      <View style={styles.inputGroup}>
-                        <Text style={[styles.fieldLabel, { color: theme.textMuted }]}>Reps</Text>
-                        <GlassInput
-                          style={styles.setInput}
-                          keyboardType="number-pad"
-                          value={values.reps}
-                          editable={!completed}
-                          placeholder="0"
-                          onChangeText={(text) => updateSetValue(setKey, 'reps', text)}
-                        />
-                      </View>
+                      {isFailureSet(set.tipo) ? (
+                        <View style={styles.inputGroup}>
+                          <Text style={[styles.fieldLabel, { color: theme.textMuted }]}>Reps</Text>
+                          <View
+                            style={[
+                              styles.failurePlaceholder,
+                              {
+                                borderColor: theme.glassBorder,
+                                backgroundColor: theme.glass,
+                              },
+                            ]}
+                          >
+                            <Text style={{ color: theme.textMuted, fontWeight: '600' }}>
+                              Hasta el fallo
+                            </Text>
+                          </View>
+                        </View>
+                      ) : (
+                        <View style={styles.inputGroup}>
+                          <Text style={[styles.fieldLabel, { color: theme.textMuted }]}>Reps</Text>
+                          <GlassInput
+                            style={styles.setInput}
+                            keyboardType="number-pad"
+                            value={values.reps}
+                            editable={!completed}
+                            placeholder="0"
+                            onChangeText={(text) => updateSetValue(setKey, 'reps', text)}
+                          />
+                        </View>
+                      )}
                     </View>
 
                     {!completed && (
                       <HapticPressable
-                        onPress={() => completeSet(setKey)}
+                        onPress={() => completeSet(setKey, set.tipo)}
                         style={[styles.completeBtn, { backgroundColor: theme.primary }]}
                       >
                         <Text style={styles.completeBtnText}>Finalizar serie</Text>
@@ -401,6 +437,12 @@ const styles = StyleSheet.create({
     paddingHorizontal: 10,
     paddingVertical: 4,
   },
+  setTypeHint: {
+    fontSize: 12,
+    fontWeight: '600',
+    marginLeft: 'auto',
+    marginRight: 8,
+  },
   completedBadgeText: {
     color: '#FFF',
     fontSize: 12,
@@ -421,6 +463,14 @@ const styles = StyleSheet.create({
   setInput: {
     paddingVertical: 10,
     textAlign: 'center',
+  },
+  failurePlaceholder: {
+    borderWidth: 1,
+    borderRadius: 14,
+    minHeight: 48,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 12,
   },
   completeBtn: {
     marginTop: 12,

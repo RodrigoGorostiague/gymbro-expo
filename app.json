@@ -11,6 +11,7 @@
       "supportsTablet": true
     },
     "android": {
+      "package": "com.wagiri.gymbro",
       "adaptiveIcon": {
         "backgroundColor": "#1A0A00",
         "foregroundImage": "./assets/android-icon-foreground.png",
@@ -33,7 +34,8 @@
           "defaultChannel": "partner_messages",
           "sounds": []
         }
-      ]
+      ],
+      "expo-font"
     ],
     "extra": {
       "firebaseApiKey": "AIzaSyDx1ndii4iuEpNJi171VqNJmet-61el06M",
@@ -41,7 +43,12 @@
       "firebaseProjectId": "gym-bro-5453d",
       "firebaseStorageBucket": "gym-bro-5453d.firebasestorage.app",
       "firebaseMessagingSenderId": "1074930468676",
-      "firebaseAppId": "1:1074930468676:web:becff7dd9435dc02fb3911"
-    }
+      "firebaseAppId": "1:1074930468676:web:becff7dd9435dc02fb3911",
+      "router": {},
+      "eas": {
+        "projectId": "833e8a46-ee82-4d15-b7fb-a21a4fabfdda"
+      }
+    },
+    "owner": "wagiri"
   }
 }

@@ -35,6 +35,10 @@ export default function RootLayout() {
               options={{ animation: 'slide_from_bottom', presentation: 'modal' }}
             />
             <Stack.Screen
+              name="exercise/create"
+              options={{ animation: 'slide_from_bottom', presentation: 'modal' }}
+            />
+            <Stack.Screen
               name="routine/execute/[id]"
               options={{ animation: 'slide_from_right', presentation: 'fullScreenModal' }}
             />

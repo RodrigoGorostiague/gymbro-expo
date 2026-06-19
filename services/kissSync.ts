@@ -132,6 +132,15 @@ export async function sendShareNotification(
     shareId,
     routineName,
   });
+
+  const partnerToken = await getPartnerPushToken(from);
+  if (!partnerToken) return;
+
+  try {
+    await sendExpoPushNotification(partnerToken, title, message);
+  } catch {
+    // Firestore listener still delivers when the app is open.
+  }
 }
 
 export async function sendExpoPushNotification(

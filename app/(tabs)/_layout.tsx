@@ -99,6 +99,15 @@ export default function TabsLayout() {
           }}
         />
         <Tabs.Screen
+          name="exercises/index"
+          options={{
+            title: 'Ejercicios',
+            tabBarIcon: ({ focused }) => (
+              <TabIcon name={focused ? 'barbell' : 'barbell-outline'} focused={focused} />
+            ),
+          }}
+        />
+        <Tabs.Screen
           name="progress"
           options={{
             title: 'Progreso',

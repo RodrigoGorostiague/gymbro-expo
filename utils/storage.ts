@@ -1,13 +1,19 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { Routine, ShopState, UserProfile, WorkoutSession } from '../types';
+import { Exercise, Routine, ShopState, UserProfile, WorkoutSession } from '../types';
 
 const KEYS = {
   user: '@gymbro/user',
+  exercises: '@gymbro/exercises',
   routines: '@gymbro/routines',
   sessions: '@gymbro/sessions',
+  storageVersion: '@gymbro/storageVersion',
+  hiddenSharedRoutineIds: '@gymbro/hiddenSharedRoutineIds',
   shop: (profile: UserProfile) => `@gymbro/shop/${profile}`,
   legacyShop: '@gymbro/shop',
 };
+
+const STORAGE_VERSION = 'exercise-catalog-v1';
+let storageMigrationPromise: Promise<void> | null = null;
 
 const STARTER_THEME_IDS = ['white', 'black', 'profile-rodaja', 'profile-brisas'] as const;
 
@@ -35,6 +41,25 @@ function withStarterThemes(state: ShopState): { state: ShopState; changed: boole
   return { state: { ...state, purchasedThemeIds: [...purchased] }, changed: true };
 }
 
+async function runStorageMigration(): Promise<void> {
+  const currentVersion = await AsyncStorage.getItem(KEYS.storageVersion);
+  if (currentVersion === STORAGE_VERSION) return;
+
+  await AsyncStorage.multiRemove([KEYS.routines, KEYS.sessions]);
+  await AsyncStorage.setItem(KEYS.storageVersion, STORAGE_VERSION);
+}
+
+async function ensureStorageSchema(): Promise<void> {
+  if (!storageMigrationPromise) {
+    storageMigrationPromise = runStorageMigration().catch((error) => {
+      storageMigrationPromise = null;
+      throw error;
+    });
+  }
+
+  await storageMigrationPromise;
+}
+
 export async function saveUser(profile: UserProfile): Promise<void> {
   await AsyncStorage.setItem(KEYS.user, profile);
 }
@@ -48,21 +73,45 @@ export async function clearUser(): Promise<void> {
   await AsyncStorage.removeItem(KEYS.user);
 }
 
+export async function saveExercises(exercises: Exercise[]): Promise<void> {
+  await ensureStorageSchema();
+  await AsyncStorage.setItem(KEYS.exercises, JSON.stringify(exercises));
+}
+
+export async function loadExercises(): Promise<Exercise[]> {
+  await ensureStorageSchema();
+  const value = await AsyncStorage.getItem(KEYS.exercises);
+  return value ? JSON.parse(value) : [];
+}
+
 export async function saveRoutines(routines: Routine[]): Promise<void> {
+  await ensureStorageSchema();
   await AsyncStorage.setItem(KEYS.routines, JSON.stringify(routines));
 }
 
 export async function loadRoutines(): Promise<Routine[]> {
+  await ensureStorageSchema();
   const value = await AsyncStorage.getItem(KEYS.routines);
   return value ? JSON.parse(value) : [];
 }
 
 export async function saveSessions(sessions: WorkoutSession[]): Promise<void> {
+  await ensureStorageSchema();
   await AsyncStorage.setItem(KEYS.sessions, JSON.stringify(sessions));
 }
 
 export async function loadSessions(): Promise<WorkoutSession[]> {
+  await ensureStorageSchema();
   const value = await AsyncStorage.getItem(KEYS.sessions);
+  return value ? JSON.parse(value) : [];
+}
+
+export async function saveHiddenSharedRoutineIds(shareIds: string[]): Promise<void> {
+  await AsyncStorage.setItem(KEYS.hiddenSharedRoutineIds, JSON.stringify(shareIds));
+}
+
+export async function loadHiddenSharedRoutineIds(): Promise<string[]> {
+  const value = await AsyncStorage.getItem(KEYS.hiddenSharedRoutineIds);
   return value ? JSON.parse(value) : [];
 }
 

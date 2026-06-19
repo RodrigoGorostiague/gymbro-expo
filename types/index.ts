@@ -1,7 +1,25 @@
 export type UserProfile = 'rodaja' | 'brisas';
 
-export interface ExerciseSet {
+export type MuscleGroup =
+  | 'pecho'
+  | 'espalda'
+  | 'cuadriceps'
+  | 'femorales'
+  | 'gemelos'
+  | 'hombros'
+  | 'bíceps'
+  | 'tríceps'
+  | 'core'
+  | 'glúteos'
+  | 'fullBody';
+
+export type ExerciseVariant = 'mancuernas' | 'barra' | 'libre';
+
+export type SetType = 'C' | 'F' | number;
+
+export interface CatalogSet {
   id: string;
+  tipo: SetType;
   weight: number;
   reps: number;
 }
@@ -9,13 +27,31 @@ export interface ExerciseSet {
 export interface Exercise {
   id: string;
   name: string;
-  sets: ExerciseSet[];
+  muscleGroups: MuscleGroup[];
+  variant: ExerciseVariant;
+  defaultSets: CatalogSet[];
+}
+
+export interface RoutineSet extends CatalogSet {
+  completed?: boolean;
+}
+
+export type ExerciseSet = RoutineSet;
+
+export interface RoutineExercise {
+  id: string;
+  catalogExerciseId?: string;
+  name: string;
+  muscleGroups: MuscleGroup[];
+  variant: ExerciseVariant;
+  sets: RoutineSet[];
 }
 
 export interface Routine {
   id: string;
   name: string;
-  exercises: Exercise[];
+  muscleGroups: MuscleGroup[];
+  exercises: RoutineExercise[];
   createdAt: string;
   isShared?: boolean;
   shareId?: string;
@@ -28,7 +64,11 @@ export interface SharedRoutineDoc {
   sharedBy: UserProfile;
   sharedWith: UserProfile;
   status: ShareStatus;
-  routine: { name: string; exercises: Exercise[] };
+  routine: {
+    name: string;
+    muscleGroups: MuscleGroup[];
+    exercises: RoutineExercise[];
+  };
   createdAt: number;
   updatedAt: number;
 }
@@ -59,6 +99,7 @@ export interface CompletedSet {
 
 export interface CompletedExercise {
   exerciseId: string;
+  catalogExerciseId?: string;
   name: string;
   sets: CompletedSet[];
 }

@@ -11,6 +11,28 @@ import { Routine, SharedRoutineDoc, UserProfile } from '../types';
 import { FIREBASE_COLLECTIONS } from '../constants/kiss';
 import { getDb } from './kissSync';
 
+function normalizeSharedRoutine(
+  routine: Partial<Pick<Routine, 'name' | 'muscleGroups' | 'exercises'>>,
+): SharedRoutineDoc['routine'] {
+  return {
+    name: routine.name ?? '',
+    muscleGroups: routine.muscleGroups ?? [],
+    exercises: (routine.exercises ?? []).map((exercise) => ({
+      id: exercise.id,
+      catalogExerciseId: exercise.catalogExerciseId,
+      name: exercise.name,
+      muscleGroups: exercise.muscleGroups ?? [],
+      variant: exercise.variant,
+      sets: exercise.sets.map((set) => ({
+        id: set.id,
+        tipo: set.tipo,
+        weight: set.weight,
+        reps: set.tipo === 'F' ? 0 : set.reps,
+      })),
+    })),
+  };
+}
+
 export interface ShareCategories {
   pending: SharedRoutineDoc[];
   accepted: SharedRoutineDoc[];
@@ -18,6 +40,7 @@ export interface ShareCategories {
 }
 
 export type ShareEventsCallback = (categories: ShareCategories) => void;
+export type ShareEventsErrorCallback = (error: Error) => void;
 
 function categorize(docs: Map<string, SharedRoutineDoc>): ShareCategories {
   const pending: SharedRoutineDoc[] = [];
@@ -41,14 +64,14 @@ export async function createShare(
   const now = Date.now();
   const docRef = await addDoc(
     collection(firestore, FIREBASE_COLLECTIONS.sharedRoutines),
-    {
-      sharedBy,
-      sharedWith: sharedBy === 'rodaja' ? 'brisas' : 'rodaja',
-      status: 'pending' as const,
-      routine: { name: routine.name, exercises: routine.exercises },
-      createdAt: now,
-      updatedAt: now,
-    },
+      {
+        sharedBy,
+        sharedWith: sharedBy === 'rodaja' ? 'brisas' : 'rodaja',
+        status: 'pending' as const,
+        routine: normalizeSharedRoutine(routine),
+        createdAt: now,
+        updatedAt: now,
+      },
   );
   return docRef.id;
 }
@@ -83,7 +106,7 @@ export async function updateSharedRoutine(
   await updateDoc(
     doc(firestore, FIREBASE_COLLECTIONS.sharedRoutines, shareId),
     {
-      routine: { name: routine.name, exercises: routine.exercises },
+      routine: normalizeSharedRoutine(routine),
       updatedAt: Date.now(),
     },
   );
@@ -92,6 +115,7 @@ export async function updateSharedRoutine(
 export function subscribeToShareEvents(
   profile: UserProfile,
   callback: ShareEventsCallback,
+  onError?: ShareEventsErrorCallback,
 ): () => void {
   const firestore = getDb();
   if (!firestore) return () => undefined;
@@ -106,6 +130,9 @@ export function subscribeToShareEvents(
     snapshot: { docs: { id: string; data: () => Record<string, unknown> }[] },
     source: 'by' | 'with',
   ) => {
+    console.log(
+      `[shareSync] Snapshot for ${source === 'by' ? 'sharedBy' : 'sharedWith'}=${profile} returned ${snapshot.docs.length} docs`,
+    );
     // Remove stale docs from this source
     for (const [id, d] of allDocs) {
       if ((source === 'by' && d.sharedBy === profile) ||
@@ -121,7 +148,7 @@ export function subscribeToShareEvents(
         sharedBy: data.sharedBy as UserProfile,
         sharedWith: data.sharedWith as UserProfile,
         status: data.status as SharedRoutineDoc['status'],
-        routine: data.routine as SharedRoutineDoc['routine'],
+        routine: normalizeSharedRoutine(data.routine as SharedRoutineDoc['routine']),
         createdAt: data.createdAt as number,
         updatedAt: data.updatedAt as number,
       });
@@ -132,12 +159,18 @@ export function subscribeToShareEvents(
   const unsub1 = onSnapshot(
     q1,
     (snap) => processSnapshot(snap, 'by'),
-    () => {},
+    (error) => {
+      console.error(`[shareSync] sharedBy snapshot failed for ${profile}`, error);
+      onError?.(error);
+    },
   );
   const unsub2 = onSnapshot(
     q2,
     (snap) => processSnapshot(snap, 'with'),
-    () => {},
+    (error) => {
+      console.error(`[shareSync] sharedWith snapshot failed for ${profile}`, error);
+      onError?.(error);
+    },
   );
 
   return () => {
