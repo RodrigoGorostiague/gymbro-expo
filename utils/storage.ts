@@ -3,6 +3,11 @@ import {
   Exercise,
   ExerciseCatalog,
   ExerciseVariant,
+  Mesocycle,
+  MesocycleStatus,
+  MesocycleWeek,
+  PlannedSession,
+  PlannedSessionRef,
   Routine,
   ShopState,
   UserProfile,
@@ -16,6 +21,8 @@ const KEYS = {
   exercises: '@gymbro/exercises',
   exerciseCatalog: '@gymbro/exercise-catalog/v1',
   routines: '@gymbro/routines',
+  legacyMesocycles: '@gymbro/mesocycles',
+  mesocycles: (profile: UserProfile) => `@gymbro/mesocycles/v1/${profile}`,
   sessions: '@gymbro/sessions',
   sessionMigration: '@gymbro/migrations/profile-attempts-v1',
   sessionQuarantine: '@gymbro/quarantine/ownerless-sessions-v1',
@@ -35,6 +42,8 @@ let exerciseCatalogMutationQueue: Promise<void> = Promise.resolve();
 
 const EXERCISE_CATALOG_VERSION = 1 as const;
 const DEFAULT_EXERCISE_VARIANTS: ExerciseVariant[] = ['barra', 'mancuernas', 'polea', 'libre'];
+const DEFAULT_MESOCYCLE_CREATED_AT = new Date(0).toISOString();
+const MESOCYCLE_STATUSES: readonly MesocycleStatus[] = ['draft', 'active', 'completed', 'archived'];
 
 const STARTER_THEME_IDS = ['white', 'black', 'profile-rodaja', 'profile-brisas'] as const;
 
@@ -378,6 +387,116 @@ export async function loadRoutines(): Promise<Routine[]> {
       ? routine
       : { ...routine, muscleGroups, exercises };
   });
+}
+
+function normalizeMesocycleStatus(value: unknown): MesocycleStatus {
+  return typeof value === 'string' && MESOCYCLE_STATUSES.includes(value as MesocycleStatus)
+    ? value as MesocycleStatus
+    : 'draft';
+}
+
+function normalizePlannedSessionRef(
+  value: unknown,
+  fallbackRoutineId: string,
+  fallbackRoutineName: string,
+): PlannedSessionRef {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return {
+      routineId: fallbackRoutineId,
+      routineName: fallbackRoutineName,
+      source: fallbackRoutineId.startsWith('shared-') ? 'shared' : 'local',
+    };
+  }
+
+  const ref = value as Partial<PlannedSessionRef>;
+  const routineId = typeof ref.routineId === 'string' ? ref.routineId : fallbackRoutineId;
+  const source = ref.source === 'shared' || ref.source === 'local'
+    ? ref.source
+    : routineId.startsWith('shared-') ? 'shared' : 'local';
+
+  return {
+    routineId,
+    routineName: typeof ref.routineName === 'string' && ref.routineName.trim().length > 0
+      ? ref.routineName
+      : fallbackRoutineName,
+    source,
+    shareId: typeof ref.shareId === 'string' ? ref.shareId : undefined,
+  };
+}
+
+function normalizePlannedSession(value: unknown, index: number): PlannedSession {
+  const session = value && typeof value === 'object' && !Array.isArray(value)
+    ? value as Partial<PlannedSession> & { routineId?: unknown; routineName?: unknown }
+    : {};
+
+  return {
+    id: typeof session.id === 'string' ? session.id : `planned-session-${index + 1}`,
+    ref: normalizePlannedSessionRef(
+      session.ref,
+      typeof session.routineId === 'string' ? session.routineId : '',
+      typeof session.routineName === 'string' && session.routineName.trim().length > 0
+        ? session.routineName
+        : 'Unknown routine',
+    ),
+    dayLabel: typeof session.dayLabel === 'string' ? session.dayLabel : undefined,
+    order: typeof session.order === 'number' && Number.isInteger(session.order) ? session.order : index + 1,
+    progressionNote: typeof session.progressionNote === 'string' ? session.progressionNote : undefined,
+    note: typeof session.note === 'string' ? session.note : undefined,
+  };
+}
+
+function normalizeMesocycleWeek(value: unknown, index: number): MesocycleWeek {
+  const week = value && typeof value === 'object' && !Array.isArray(value)
+    ? value as Partial<MesocycleWeek>
+    : {};
+  const storedSessions = Array.isArray(week.sessions) ? week.sessions : [];
+
+  return {
+    id: typeof week.id === 'string' ? week.id : `mesocycle-week-${index + 1}`,
+    weekNumber: typeof week.weekNumber === 'number' && Number.isInteger(week.weekNumber) && week.weekNumber > 0
+      ? week.weekNumber
+      : index + 1,
+    sessions: storedSessions.map((session, sessionIndex) => normalizePlannedSession(session, sessionIndex)),
+  };
+}
+
+function normalizeMesocycle(value: unknown, index: number): Mesocycle {
+  const mesocycle = value && typeof value === 'object' && !Array.isArray(value)
+    ? value as Partial<Mesocycle>
+    : {};
+  const storedWeeks = Array.isArray(mesocycle.weeks) ? mesocycle.weeks : [];
+  const weeks = storedWeeks.map((week, weekIndex) => normalizeMesocycleWeek(week, weekIndex));
+
+  return {
+    id: typeof mesocycle.id === 'string' ? mesocycle.id : `mesocycle-${index + 1}`,
+    name: typeof mesocycle.name === 'string' ? mesocycle.name : 'Untitled mesocycle',
+    goal: typeof mesocycle.goal === 'string' ? mesocycle.goal : '',
+    status: normalizeMesocycleStatus(mesocycle.status),
+    weeks,
+    durationWeeks: typeof mesocycle.durationWeeks === 'number'
+      && Number.isInteger(mesocycle.durationWeeks)
+      && mesocycle.durationWeeks > 0
+      ? mesocycle.durationWeeks
+      : Math.max(weeks.length, 1),
+    startDate: typeof mesocycle.startDate === 'string' ? mesocycle.startDate : undefined,
+    createdAt: typeof mesocycle.createdAt === 'string' ? mesocycle.createdAt : DEFAULT_MESOCYCLE_CREATED_AT,
+  };
+}
+
+export async function saveMesocycles(profile: UserProfile, mesocycles: Mesocycle[]): Promise<void> {
+  await AsyncStorage.setItem(KEYS.mesocycles(profile), JSON.stringify(mesocycles));
+}
+
+export async function loadMesocycles(profile: UserProfile): Promise<Mesocycle[]> {
+  const profileKey = KEYS.mesocycles(profile);
+  const value = await AsyncStorage.getItem(profileKey);
+  if (!value) {
+    const legacyValue = await AsyncStorage.getItem(KEYS.legacyMesocycles);
+    if (!legacyValue) return [];
+    await AsyncStorage.setItem(profileKey, legacyValue);
+    return (JSON.parse(legacyValue) as unknown[]).map((mesocycle, index) => normalizeMesocycle(mesocycle, index));
+  }
+  return (JSON.parse(value) as unknown[]).map((mesocycle, index) => normalizeMesocycle(mesocycle, index));
 }
 
 export async function loadCatalogWithRoutines() {

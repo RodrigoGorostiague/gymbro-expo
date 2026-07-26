@@ -50,8 +50,8 @@ export default function RoutinesScreen() {
     <ThemeBackground>
       <SafeAreaView style={styles.safe}>
         <AppScreenHeader
-          title="Mis rutinas"
-          subtitle="Mesociclos — carpetas de ejercicios"
+          title="Biblioteca de rutinas"
+          subtitle="Plantillas reutilizables para mesociclos y entrenamientos"
           trailing={
             <>
               {pendingShares.length > 0 && (
@@ -75,8 +75,8 @@ export default function RoutinesScreen() {
             <Text style={[styles.emptyTitle, { color: theme.text }]}>
               Aún no tienes rutinas
             </Text>
-            <Text style={[styles.emptyText, { color: theme.textMuted }]}>
-              Crea tu primera rutina como un mesociclo con ejercicios y series.
+            <Text style={[styles.emptyText, { color: theme.textMuted }]}> 
+              Crea tu primera rutina como una plantilla reutilizable de ejercicios y series.
             </Text>
           </GlassCard>
         ) : (

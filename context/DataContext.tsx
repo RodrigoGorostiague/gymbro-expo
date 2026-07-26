@@ -1,5 +1,5 @@
 import React, { createContext, useContext, useEffect, useMemo, useRef, useState } from 'react';
-import { Exercise, ExerciseCatalog, ExerciseVariant, MuscleGroup, Routine, UserProfile, WorkoutAttempt, WorkoutSession } from '../types';
+import { Exercise, ExerciseCatalog, ExerciseVariant, Mesocycle, MuscleGroup, PlannedSessionRef, Routine, UserProfile, WorkoutAttempt, WorkoutSession } from '../types';
 import {
   addCatalogExercise,
   assertRoutineMutationReady,
@@ -11,8 +11,10 @@ import {
   loadAttempts,
   loadCatalogWithRoutines,
   loadHiddenSharedRoutineIds,
+  loadMesocycles,
   loadSessions,
   loadSessionQuarantine,
+  saveMesocycles,
   saveRoutines,
   saveHiddenSharedRoutineIds,
   saveSessions,
@@ -33,6 +35,7 @@ interface DataContextValue {
   exercises: Exercise[];
   variants: ExerciseVariant[];
   routines: Routine[];
+  mesocycles: Mesocycle[];
   sessions: WorkoutSession[];
   attempts: WorkoutAttempt[];
   quarantinedSessionCount: number;
@@ -52,6 +55,11 @@ interface DataContextValue {
   updateRoutine: (routine: Routine) => void;
   deleteRoutine: (id: string) => void;
   getRoutine: (id: string) => Routine | undefined;
+  addMesocycle: (mesocycle: Omit<Mesocycle, 'id' | 'createdAt'>) => Promise<Mesocycle>;
+  updateMesocycle: (mesocycle: Mesocycle) => Promise<void>;
+  deleteMesocycle: (id: string) => Promise<void>;
+  getMesocycle: (id: string) => Mesocycle | undefined;
+  resolvePlannedRoutine: (ref: PlannedSessionRef) => Routine | undefined;
   addSession: (session: Omit<WorkoutSession, 'id'>) => Promise<WorkoutSession>;
   updateSession: (id: string, session: WorkoutSession) => Promise<void>;
   deleteSession: (id: string) => Promise<void>;
@@ -67,14 +75,18 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
   const [exercises, setExercises] = useState<Exercise[]>([]);
   const [variants, setVariants] = useState<ExerciseVariant[]>([]);
   const [localRoutines, setLocalRoutines] = useState<Routine[]>([]);
+  const [mesocycles, setMesocycles] = useState<Mesocycle[]>([]);
   const [hiddenSharedRoutineIds, setHiddenSharedRoutineIds] = useState<string[]>([]);
   const [sessions, setSessions] = useState<PersistedWorkoutSession[]>([]);
   const [attempts, setAttempts] = useState<WorkoutAttempt[]>([]);
   const [quarantinedSessionCount, setQuarantinedSessionCount] = useState(0);
+  const mesocyclesRef = useRef<Mesocycle[]>([]);
   const sessionsRef = useRef<PersistedWorkoutSession[]>([]);
   const routinesLoadedRef = useRef(false);
+  const mesocyclesLoadedRef = useRef(false);
   const activeUserRef = useRef(user);
   activeUserRef.current = user;
+  const mesocycleMutationQueueRef = useRef<Promise<void>>(Promise.resolve());
   const sessionMutationQueueRef = useRef<Promise<void>>(Promise.resolve());
   const [isLoading, setIsLoading] = useState(true);
   const [dataState, setDataState] = useState<'loading' | 'ready' | 'error'>('loading');
@@ -84,6 +96,9 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     if (!user) {
       routinesLoadedRef.current = false;
+      mesocyclesLoadedRef.current = false;
+      mesocyclesRef.current = [];
+      setMesocycles([]);
       sessionsRef.current = [];
       setSessions([]);
       setAttempts([]);
@@ -99,10 +114,12 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
     setDataState('loading');
     setDataError(null);
     routinesLoadedRef.current = false;
+    mesocyclesLoadedRef.current = false;
     const operation = sessionMutationQueueRef.current.then(async () => {
-      const [loadedRoutineData, loadedSessions, loadedHiddenShareIds, loadedAttempts, quarantine] =
+      const [loadedRoutineData, loadedMesocycles, loadedSessions, loadedHiddenShareIds, loadedAttempts, quarantine] =
         await Promise.all([
           loadCatalogWithRoutines(),
+          loadMesocycles(user),
           loadSessions(),
           loadHiddenSharedRoutineIds(),
           loadAttempts(user),
@@ -120,6 +137,9 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
       }
       setLocalRoutines(loadedRoutines);
       routinesLoadedRef.current = true;
+      mesocyclesRef.current = loadedMesocycles;
+      setMesocycles(loadedMesocycles);
+      mesocyclesLoadedRef.current = true;
       const sortedSessions = migratedSessions.sort(
         (a, b) => Date.parse(b.completedAt) - Date.parse(a.completedAt),
       );
@@ -198,6 +218,32 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
     saveHiddenSharedRoutineIds(next);
   };
 
+  const enqueueMesocycleMutation = <T,>(
+    mutation: (current: Mesocycle[]) => {
+      next: Mesocycle[];
+      result: T;
+    },
+  ): Promise<T> => {
+    const owner = activeUserRef.current;
+    if (!owner) return Promise.reject(new Error('Se requiere autenticación.'));
+    const operation = mesocycleMutationQueueRef.current.then(async () => {
+      if (!mesocyclesLoadedRef.current) {
+        throw new Error('Mesocycles have not finished loading yet.');
+      }
+
+      const { next, result } = mutation(mesocyclesRef.current);
+      await saveMesocycles(owner, next);
+      if (activeUserRef.current === owner) {
+        mesocyclesRef.current = next;
+        setMesocycles(next);
+      }
+      return result;
+    });
+
+    mesocycleMutationQueueRef.current = operation.then(() => undefined, () => undefined);
+    return operation;
+  };
+
   const addExercise = async (exercise: Omit<Exercise, 'id'>): Promise<Exercise> => {
     const { catalog, result } = await addCatalogExercise(exercise);
     publishExerciseCatalog(catalog);
@@ -269,6 +315,56 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
   };
 
   const getRoutine = (id: string) => routines.find((r) => r.id === id);
+
+  const addMesocycle = async (
+    mesocycle: Omit<Mesocycle, 'id' | 'createdAt'>,
+  ): Promise<Mesocycle> => {
+    const created: Mesocycle = {
+      ...mesocycle,
+      id: generateId(),
+      createdAt: new Date().toISOString(),
+    };
+
+    return enqueueMesocycleMutation((current) => ({
+      next: [created, ...current],
+      result: created,
+    }));
+  };
+
+  const updateMesocycle = async (mesocycle: Mesocycle): Promise<void> => {
+    return enqueueMesocycleMutation((current) => {
+      if (!current.some(({ id }) => id === mesocycle.id)) {
+        throw new Error('Mesocycle not found.');
+      }
+
+      return {
+        next: current.map((item) => item.id === mesocycle.id ? mesocycle : item),
+        result: undefined,
+      };
+    });
+  };
+
+  const deleteMesocycle = async (id: string): Promise<void> => {
+    return enqueueMesocycleMutation((current) => {
+      if (!current.some((mesocycle) => mesocycle.id === id)) {
+        throw new Error('Mesocycle not found.');
+      }
+
+      return {
+        next: current.filter((mesocycle) => mesocycle.id !== id),
+        result: undefined,
+      };
+    });
+  };
+
+  const getMesocycle = (id: string) => mesocycles.find((mesocycle) => mesocycle.id === id);
+
+  const resolvePlannedRoutine = (ref: PlannedSessionRef): Routine | undefined => (
+    routines.find((routine) => routine.id === ref.routineId)
+    ?? (ref.source === 'shared' && ref.shareId
+      ? routines.find((routine) => routine.shareId === ref.shareId)
+      : undefined)
+  );
 
   const enqueueSessionMutation = <T,>(
     mutation: (current: PersistedWorkoutSession[]) => {
@@ -433,6 +529,7 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
         exercises,
         variants,
         routines,
+        mesocycles,
         sessions: activeSessions,
         attempts: activeAttempts,
         quarantinedSessionCount,
@@ -452,6 +549,11 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
         updateRoutine,
         deleteRoutine,
         getRoutine,
+        addMesocycle,
+        updateMesocycle,
+        deleteMesocycle,
+        getMesocycle,
+        resolvePlannedRoutine,
         addSession,
         updateSession,
         deleteSession,

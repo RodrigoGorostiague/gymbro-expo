@@ -90,6 +90,15 @@ export default function TabsLayout() {
         }}
       >
         <Tabs.Screen
+          name="mesocycles/index"
+          options={{
+            title: 'Mesociclos',
+            tabBarIcon: ({ focused }) => (
+              <TabIcon name={focused ? 'calendar' : 'calendar-outline'} focused={focused} />
+            ),
+          }}
+        />
+        <Tabs.Screen
           name="routines/index"
           options={{
             title: 'Rutinas',

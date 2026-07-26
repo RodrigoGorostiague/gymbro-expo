@@ -74,6 +74,43 @@ export interface Routine {
   shareId?: string;
 }
 
+export type MesocycleStatus = 'draft' | 'active' | 'completed' | 'archived';
+
+export type PlannedSessionRoutineSource = 'local' | 'shared';
+
+export interface PlannedSessionRef {
+  routineId: string;
+  routineName: string;
+  source: PlannedSessionRoutineSource;
+  shareId?: string;
+}
+
+export interface PlannedSession {
+  id: string;
+  ref: PlannedSessionRef;
+  dayLabel?: string;
+  order: number;
+  progressionNote?: string;
+  note?: string;
+}
+
+export interface MesocycleWeek {
+  id: string;
+  weekNumber: number;
+  sessions: PlannedSession[];
+}
+
+export interface Mesocycle {
+  id: string;
+  name: string;
+  goal: string;
+  status: MesocycleStatus;
+  weeks: MesocycleWeek[];
+  durationWeeks: number;
+  startDate?: string;
+  createdAt: string;
+}
+
 export type ShareStatus = 'pending' | 'accepted' | 'rejected';
 
 export interface SharedRoutineDoc {

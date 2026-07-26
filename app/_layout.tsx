@@ -35,6 +35,14 @@ export default function RootLayout() {
               options={{ animation: 'slide_from_bottom', presentation: 'modal' }}
             />
             <Stack.Screen
+              name="mesocycle/create"
+              options={{ animation: 'slide_from_bottom', presentation: 'modal' }}
+            />
+            <Stack.Screen
+              name="mesocycle/[id]"
+              options={{ animation: 'slide_from_right', presentation: 'card' }}
+            />
+            <Stack.Screen
               name="exercise/create"
               options={{ animation: 'slide_from_bottom', presentation: 'modal' }}
             />

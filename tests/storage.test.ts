@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { beforeEach, describe, expect, test, vi } from 'vitest';
-import { WORKOUT_ATTEMPT_VERSION, WorkoutAttempt } from '../types';
+import { Mesocycle, WORKOUT_ATTEMPT_VERSION, WorkoutAttempt } from '../types';
 
 const dataContextSource = readFileSync(resolve(import.meta.dirname, '../context/DataContext.tsx'), 'utf8');
 
@@ -30,6 +30,7 @@ import {
   loadSessionQuarantine,
   getStorageMigrationError,
   loadAttempts,
+  loadMesocycles,
   loadRoutines,
   loadSessions,
   mutateAttempts,
@@ -37,6 +38,7 @@ import {
   rollbackSessionMigration,
   saveCapturedAttempt,
   saveAttempts,
+  saveMesocycles,
   updateAttempt,
 } from '../utils/storage';
 
@@ -61,6 +63,62 @@ const attempt = (id: string, owner: 'rodaja' | 'brisas' = 'rodaja'): WorkoutAtte
   completion: { validSets: 1, plannedSets: 1, adherence: 1, displayPercent: 100, status: 'fully-completed' },
   reward: { setGems: 1, completionGems: 5, fullCompletionBonus: 2, totalGems: 8, qualifiesForCompletion: true },
   rewardApplication: { id: `${owner}:${id}:v1`, state: 'pending' },
+});
+
+const mesocycle = (overrides: Partial<Mesocycle> = {}): Mesocycle => ({
+  id: 'mesocycle-1',
+  name: 'Hypertrophy Block',
+  goal: 'Build work capacity',
+  status: 'draft',
+  durationWeeks: 2,
+  createdAt: '2026-07-25T12:00:00.000Z',
+  weeks: [
+    {
+      id: 'week-1',
+      weekNumber: 1,
+      sessions: [
+        {
+          id: 'session-1',
+          ref: {
+            routineId: 'routine-1',
+            routineName: 'Upper A',
+            source: 'local',
+          },
+          order: 1,
+          dayLabel: 'Monday',
+          progressionNote: 'Add one rep to compounds',
+        },
+      ],
+    },
+    {
+      id: 'week-2',
+      weekNumber: 2,
+      sessions: [
+        {
+          id: 'session-2',
+          ref: {
+            routineId: 'routine-1',
+            routineName: 'Upper A',
+            source: 'local',
+          },
+          order: 1,
+          dayLabel: 'Monday',
+          note: 'Repeat with the same template',
+        },
+        {
+          id: 'session-3',
+          ref: {
+            routineId: 'shared-share-1',
+            routineName: 'Partner Lower',
+            source: 'shared',
+            shareId: 'share-1',
+          },
+          order: 2,
+        },
+      ],
+    },
+  ],
+  ...overrides,
 });
 
 beforeEach(async () => {
@@ -134,6 +192,64 @@ describe('routine hydration', () => {
       { ...legacyWithoutExercises, exercises: [] },
       current,
     ]);
+  });
+});
+
+describe('mesocycle repository', () => {
+  test('restores mesocycles with week/session references, repeated routine reuse, and status updates', async () => {
+    const active = mesocycle({ status: 'active' });
+
+    await saveMesocycles('rodaja', [active]);
+
+    await expect(loadMesocycles('rodaja')).resolves.toEqual([active]);
+    expect(storage.data.get('@gymbro/mesocycles/v1/rodaja')).toBe(JSON.stringify([active]));
+  });
+
+  test('deletes mesocycles without rewriting routine storage', async () => {
+    storage.data.set('@gymbro/routines', JSON.stringify([{ id: 'routine-1', name: 'Upper A', exercises: [] }]));
+    await saveMesocycles('rodaja', [mesocycle()]);
+
+    await saveMesocycles('rodaja', []);
+
+    await expect(loadMesocycles('rodaja')).resolves.toEqual([]);
+    expect(JSON.parse(storage.data.get('@gymbro/routines')!)).toEqual([{ id: 'routine-1', name: 'Upper A', exercises: [] }]);
+  });
+
+  test('isolates mesocycles per profile and does not expose another profile storage', async () => {
+    const rodajaMesocycle = mesocycle({ id: 'rodaja-cycle', name: 'Rodaja block' });
+    const brisasMesocycle = mesocycle({ id: 'brisas-cycle', name: 'Brisas block' });
+
+    await saveMesocycles('rodaja', [rodajaMesocycle]);
+    await saveMesocycles('brisas', [brisasMesocycle]);
+
+    await expect(loadMesocycles('rodaja')).resolves.toEqual([rodajaMesocycle]);
+    await expect(loadMesocycles('brisas')).resolves.toEqual([brisasMesocycle]);
+    expect(storage.data.get('@gymbro/mesocycles/v1/rodaja')).toBe(JSON.stringify([rodajaMesocycle]));
+    expect(storage.data.get('@gymbro/mesocycles/v1/brisas')).toBe(JSON.stringify([brisasMesocycle]));
+  });
+
+  test('copies legacy global mesocycles into each profile partition without deleting the legacy source', async () => {
+    const legacy = mesocycle();
+    storage.data.set('@gymbro/mesocycles', JSON.stringify([legacy]));
+
+    await expect(loadMesocycles('rodaja')).resolves.toEqual([legacy]);
+    await expect(loadMesocycles('brisas')).resolves.toEqual([legacy]);
+
+    expect(storage.data.get('@gymbro/mesocycles/v1/rodaja')).toBe(JSON.stringify([legacy]));
+    expect(storage.data.get('@gymbro/mesocycles/v1/brisas')).toBe(JSON.stringify([legacy]));
+    expect(storage.data.get('@gymbro/mesocycles')).toBe(JSON.stringify([legacy]));
+  });
+
+  test('wires mesocycle hydration and CRUD helpers through DataContext', () => {
+    expect(dataContextSource).toContain('const [mesocycles, setMesocycles] = useState<Mesocycle[]>([])');
+    expect(dataContextSource).toContain('const mesocycleMutationQueueRef = useRef<Promise<void>>(Promise.resolve())');
+    expect(dataContextSource).toContain('loadMesocycles(user)');
+    expect(dataContextSource).toContain('addMesocycle');
+    expect(dataContextSource).toContain('updateMesocycle');
+    expect(dataContextSource).toContain('deleteMesocycle');
+    expect(dataContextSource).toContain('getMesocycle');
+    expect(dataContextSource).toContain('resolvePlannedRoutine');
+    expect(dataContextSource).toContain('saveMesocycles(owner, next)');
   });
 });
 
