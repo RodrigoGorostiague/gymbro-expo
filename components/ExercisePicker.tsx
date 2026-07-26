@@ -57,7 +57,7 @@ export function ExercisePicker({
           <Text style={[styles.subtitle, { color: theme.textMuted }]}>Catálogo filtrado por los grupos musculares de esta rutina.</Text>
 
           {routineMuscleGroups.length > 0 ? (
-            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.filters}>
+            <ScrollView style={styles.filtersWrap} showsVerticalScrollIndicator={false} contentContainerStyle={styles.filters}>
               <HapticPressable
                 onPress={() => setFilter(null)}
                 style={[
@@ -151,10 +151,17 @@ const styles = StyleSheet.create({
     marginBottom: 14,
   },
   filters: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
     gap: 8,
-    paddingBottom: 12,
+    paddingBottom: 4,
+  },
+  filtersWrap: {
+    maxHeight: 96,
+    marginBottom: 12,
   },
   filterChip: {
+    alignSelf: 'flex-start',
     borderWidth: 1,
     borderRadius: 999,
     paddingHorizontal: 12,

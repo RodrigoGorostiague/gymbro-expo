@@ -17,6 +17,7 @@ const sources = [
   'components/login/DualLoginHeader.tsx',
   'components/login/LoginFormPanel.tsx',
   'constants/muscleGroups.ts',
+  'utils/decimalInput.ts',
 ].map((path) => readFileSync(resolve(root, path), 'utf8')).join('\n');
 
 describe('PR2 Spanish navigation, training, and catalog copy', () => {
@@ -35,7 +36,7 @@ describe('PR2 Spanish navigation, training, and catalog copy', () => {
     for (const value of [
       "name=\"routine/execute/[id]\"", "'/routine/create'", "'/exercise/create'",
       "value: 'fullBody'", "normalized === 'C' || normalized === 'F'",
-      "parseFloat(text) || 0", "parseInt(text, 10) || 0",
+      "normalizeDecimalInput(draftWeights[set.id] ?? '')", "parseInt(text, 10) || 0",
     ]) expect(sources).toContain(value);
   });
 });

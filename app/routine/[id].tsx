@@ -20,6 +20,7 @@ import { MUSCLE_GROUP_LABELS } from '../../constants/muscleGroups';
 import { useData } from '../../context/DataContext';
 import { useTheme } from '../../context/ThemeContext';
 import { Exercise, ExerciseSet, MuscleGroup, RoutineExercise } from '../../types';
+import { buildDecimalDraftMap, type DecimalDraftMap, normalizeDecimalInput } from '../../utils/decimalInput';
 import { generateId } from '../../utils/storage';
 
 export default function EditRoutineScreen() {
@@ -33,6 +34,7 @@ export default function EditRoutineScreen() {
   const { theme } = useTheme();
   const [name, setName] = useState('');
   const [exercises, setExercises] = useState<RoutineExercise[]>([]);
+  const [draftWeights, setDraftWeights] = useState<DecimalDraftMap>({});
   const [routineMuscleGroups, setRoutineMuscleGroups] = useState<MuscleGroup[]>([]);
   const [pickerVisible, setPickerVisible] = useState(false);
   const handledAutoAddId = useRef<string | null>(null);
@@ -64,6 +66,7 @@ export default function EditRoutineScreen() {
     setName(routine.name);
     setExercises(routine.exercises);
     setRoutineMuscleGroups(routine.muscleGroups ?? []);
+    setDraftWeights(buildDecimalDraftMap(routine.exercises.flatMap((exercise) => exercise.sets)));
   }, [getRoutine, id]);
 
   useEffect(() => {
@@ -73,7 +76,9 @@ export default function EditRoutineScreen() {
     if (!exercise) return;
 
     handledAutoAddId.current = addExerciseId;
-    setExercises((current) => [...current, createRoutineExercise(exercise)]);
+    const nextExercise = createRoutineExercise(exercise);
+    setExercises((current) => [...current, nextExercise]);
+    setDraftWeights((current) => ({ ...current, ...buildDecimalDraftMap(nextExercise.sets) }));
     router.setParams({ addExerciseId: undefined });
   }, [addExerciseId, getExercise]);
 
@@ -85,11 +90,29 @@ export default function EditRoutineScreen() {
       return;
     }
 
+    const normalizedExercises: RoutineExercise[] = [];
+    for (const exercise of exercises) {
+      const normalizedSets: ExerciseSet[] = [];
+      for (const set of exercise.sets) {
+        const weight = normalizeDecimalInput(draftWeights[set.id] ?? '');
+        if (weight === null) {
+          Alert.alert('Validación', 'Cada serie debe tener un peso válido mayor o igual a 0.');
+          return;
+        }
+        normalizedSets.push({ ...set, weight });
+      }
+
+      normalizedExercises.push({
+        ...exercise,
+        sets: normalizedSets,
+      });
+    }
+
     updateRoutine({
       ...routine,
       name: name.trim() || routine.name,
       muscleGroups: routineMuscleGroups,
-      exercises,
+      exercises: normalizedExercises,
     });
     Alert.alert('Guardado', 'Rutina actualizada');
   };
@@ -104,6 +127,7 @@ export default function EditRoutineScreen() {
   };
 
   const addSet = (exerciseId: string) => {
+    const nextId = generateId();
     setExercises((current) =>
       current.map((exercise) =>
         exercise.id === exerciseId
@@ -112,7 +136,7 @@ export default function EditRoutineScreen() {
               sets: [
                 ...exercise.sets,
                 {
-                  id: generateId(),
+                  id: nextId,
                   tipo: exercise.sets.length + 1,
                   weight: 0,
                   reps: 0,
@@ -122,6 +146,7 @@ export default function EditRoutineScreen() {
           : exercise,
       ),
     );
+    setDraftWeights((current) => ({ ...current, [nextId]: '' }));
   };
 
   const updateSet = (exerciseId: string, setId: string, patch: Partial<ExerciseSet>) => {
@@ -150,6 +175,10 @@ export default function EditRoutineScreen() {
           : exercise,
       ),
     );
+  };
+
+  const updateDraftWeight = (setId: string, value: string) => {
+    setDraftWeights((current) => ({ ...current, [setId]: value }));
   };
 
   return (
@@ -188,6 +217,13 @@ export default function EditRoutineScreen() {
                 onChange={setRoutineMuscleGroups}
               />
             </GlassCard>
+
+            {exercises.length === 0 ? (
+              <GlassCard style={styles.emptyStateCard}>
+                <Text style={[styles.emptyStateTitle, { color: theme.text }]}>Todavía no agregaste ejercicios</Text>
+                <Text style={[styles.emptyStateText, { color: theme.textMuted }]}>Empieza con una plantilla del catálogo para que la rutina quede usable sin perder el acceso al botón principal.</Text>
+              </GlassCard>
+            ) : null}
 
             {exercises.map((exercise, exIndex) => (
               <GlassCard key={exercise.id} style={styles.exerciseCard}>
@@ -233,12 +269,10 @@ export default function EditRoutineScreen() {
                     <Text style={[styles.setNum, { color: theme.text }]}>{setIndex + 1}</Text>
                     <GlassInput
                       style={styles.setInput}
-                      keyboardType="numeric"
-                      value={set.weight ? String(set.weight) : ''}
+                      keyboardType="decimal-pad"
+                      value={draftWeights[set.id] ?? ''}
                       placeholder="kg"
-                      onChangeText={(text) =>
-                        updateSet(exercise.id, set.id, { weight: parseFloat(text) || 0 })
-                      }
+                      onChangeText={(text) => updateDraftWeight(set.id, text)}
                     />
                     <GlassInput
                       style={styles.setInput}
@@ -264,12 +298,14 @@ export default function EditRoutineScreen() {
               </GlassCard>
             ))}
 
-            <GlassButton
-              title="+ Agregar ejercicio"
-              onPress={() => setPickerVisible(true)}
-              variant="secondary"
-            />
-            <View style={styles.spacer} />
+            <View style={styles.footerActions}>
+              <GlassButton
+                title="+ Agregar ejercicio"
+                onPress={() => setPickerVisible(true)}
+                variant="secondary"
+              />
+              <View style={styles.spacer} />
+            </View>
             <GlassButton title="Guardar rutina" onPress={save} />
           </ScrollView>
         </KeyboardAvoidingView>
@@ -312,6 +348,9 @@ const styles = StyleSheet.create({
   },
   nameCard: { marginBottom: 16 },
   label: { fontSize: 13, marginBottom: 8 },
+  emptyStateCard: { marginBottom: 12 },
+  emptyStateTitle: { fontSize: 18, fontWeight: '800', marginBottom: 8 },
+  emptyStateText: { fontSize: 14, lineHeight: 20 },
   exerciseCard: { marginBottom: 12 },
   exerciseHeader: {
     flexDirection: 'row',
@@ -376,6 +415,10 @@ const styles = StyleSheet.create({
     paddingVertical: 10,
     alignItems: 'center',
     marginTop: 4,
+  },
+  footerActions: {
+    marginTop: 4,
+    marginBottom: 4,
   },
   spacer: { height: 12 },
 });

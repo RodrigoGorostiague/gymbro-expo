@@ -1,5 +1,5 @@
 import React, { useMemo, useState } from 'react';
-import { Alert, FlatList, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Alert, FlatList, StyleSheet, Text, View } from 'react-native';
 import { router } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { AppScreenHeader } from '../../../components/AppScreenHeader';
@@ -15,7 +15,10 @@ export default function ExercisesScreen() {
   const { theme } = useTheme();
   const { exercises, deleteExercise } = useData();
   const [filter, setFilter] = useState<MuscleGroup | null>(null);
+  const [filtersExpanded, setFiltersExpanded] = useState(false);
   const [deletingId, setDeletingId] = useState<string | null>(null);
+
+  const activeFilterLabel = filter ? MUSCLE_GROUP_LABELS[filter] : null;
 
   const filteredExercises = useMemo(
     () => (filter ? exercises.filter((exercise) => exercise.muscleGroups.includes(filter)) : exercises),
@@ -54,28 +57,50 @@ export default function ExercisesScreen() {
           trailing={<GlassButton title="+ Nuevo" onPress={() => router.push('/exercise/create')} />}
         />
 
-        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.filters}>
+        <View style={styles.filterSection}>
           <HapticPressable
-            onPress={() => setFilter(null)}
-            style={[styles.filterChip, { backgroundColor: !filter ? theme.primary : theme.glass, borderColor: theme.glassBorder }]}
+            testID="exercise-filter-trigger"
+            accessibilityRole="button"
+            accessibilityState={{ expanded: filtersExpanded }}
+            onPress={() => setFiltersExpanded((current) => !current)}
+            style={[styles.filterTrigger, { backgroundColor: theme.glass, borderColor: filter ? theme.primary : theme.glassBorder }]}
           >
-            <Text style={{ color: !filter ? theme.onPrimary : theme.text, fontWeight: '700' }}>Todos</Text>
+            <View style={styles.filterTriggerCopy}>
+              <Text style={[styles.filterTriggerTitle, { color: theme.text }]}>Filtros musculares</Text>
+              <Text style={[styles.filterTriggerSubtitle, { color: filter ? theme.primary : theme.textMuted }]}>
+                {activeFilterLabel ? `Activo: ${activeFilterLabel}` : 'Todos los grupos'}
+              </Text>
+            </View>
+            <Text style={[styles.filterTriggerAction, { color: filter ? theme.primary : theme.textMuted }]}>
+              {filtersExpanded ? 'Ocultar' : 'Mostrar'}
+            </Text>
           </HapticPressable>
-          {MUSCLE_GROUP_OPTIONS.map((option) => {
-            const selected = filter === option.value;
-            return (
+
+          {filtersExpanded ? (
+            <View testID="exercise-filter-strip" style={styles.filters}>
               <HapticPressable
-                key={option.value}
-                onPress={() => setFilter(selected ? null : option.value)}
-                style={[styles.filterChip, { backgroundColor: selected ? theme.primary : theme.glass, borderColor: theme.glassBorder }]}
+                onPress={() => setFilter(null)}
+                style={[styles.filterChip, { backgroundColor: !filter ? theme.primary : theme.glass, borderColor: theme.glassBorder }]}
               >
-                <Text style={{ color: selected ? theme.onPrimary : theme.text, fontWeight: '700' }}>
-                  {option.label}
-                </Text>
+                <Text style={{ color: !filter ? theme.onPrimary : theme.text, fontWeight: '700' }}>Todos</Text>
               </HapticPressable>
-            );
-          })}
-        </ScrollView>
+              {MUSCLE_GROUP_OPTIONS.map((option) => {
+                const selected = filter === option.value;
+                return (
+                  <HapticPressable
+                    key={option.value}
+                    onPress={() => setFilter(selected ? null : option.value)}
+                    style={[styles.filterChip, { backgroundColor: selected ? theme.primary : theme.glass, borderColor: theme.glassBorder }]}
+                  >
+                    <Text style={{ color: selected ? theme.onPrimary : theme.text, fontWeight: '700' }}>
+                      {option.label}
+                    </Text>
+                  </HapticPressable>
+                );
+              })}
+            </View>
+          ) : null}
+        </View>
 
         {filteredExercises.length === 0 ? (
           <GlassCard style={styles.emptyCard}>
@@ -124,8 +149,24 @@ export default function ExercisesScreen() {
 
 const styles = StyleSheet.create({
   safe: { flex: 1, paddingHorizontal: 20, paddingTop: 12 },
-  filters: { gap: 8, paddingBottom: 16 },
-  filterChip: { borderWidth: 1, borderRadius: 999, paddingHorizontal: 14, paddingVertical: 10 },
+  filterSection: { paddingBottom: 16, gap: 10 },
+  filterTrigger: {
+    minHeight: 56,
+    borderWidth: 1,
+    borderRadius: 18,
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 12,
+  },
+  filterTriggerCopy: { flex: 1, gap: 2 },
+  filterTriggerTitle: { fontSize: 15, fontWeight: '800' },
+  filterTriggerSubtitle: { fontSize: 13, fontWeight: '600' },
+  filterTriggerAction: { fontSize: 13, fontWeight: '800' },
+  filters: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'flex-start', gap: 8 },
+  filterChip: { alignSelf: 'flex-start', borderWidth: 1, borderRadius: 999, paddingHorizontal: 14, paddingVertical: 10 },
   list: { paddingBottom: 32, gap: 12 },
   emptyCard: { marginTop: 8 },
   emptyTitle: { fontSize: 18, fontWeight: '800', marginBottom: 6 },

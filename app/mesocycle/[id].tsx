@@ -11,12 +11,19 @@ import {
 import { router, useLocalSearchParams } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { AppNavBar } from '../../components/AppNavBar';
+import { DateTimeField } from '../../components/DateTimeField';
 import { GlassCard, ThemeBackground } from '../../components/GlassCard';
 import { HapticPressable } from '../../components/HapticPressable';
 import { GlassButton, GlassInput } from '../../components/UI';
 import { useData } from '../../context/DataContext';
 import { useTheme } from '../../context/ThemeContext';
 import { Mesocycle, MesocycleStatus, PlannedSession, PlannedSessionRef, Routine } from '../../types';
+import {
+  buildMesocycleDraft,
+  clonePlannedWeekSessions,
+  countPlannedSessions,
+  sortPlannedSessions,
+} from '../../utils/mesocycles';
 import { generateId } from '../../utils/storage';
 
 const STATUS_OPTIONS: { value: MesocycleStatus; label: string }[] = [
@@ -36,36 +43,6 @@ const normalizeStartDate = (value: string) => {
   }
   return trimmed;
 };
-
-const sortSessions = (sessions: PlannedSession[]) => (
-  [...sessions].sort((left, right) => left.order - right.order || left.ref.routineName.localeCompare(right.ref.routineName))
-);
-
-const deriveWeeks = (mesocycle: Mesocycle): Mesocycle['weeks'] => {
-  const storedWeeks = mesocycle.weeks.length > 0 ? mesocycle.weeks : [];
-  const highestStoredWeek = storedWeeks.reduce((max, week) => Math.max(max, week.weekNumber), 0);
-  const totalWeeks = Math.max(mesocycle.durationWeeks, highestStoredWeek, 1);
-  const byNumber = new Map(storedWeeks.map((week) => [week.weekNumber, week]));
-
-  return Array.from({ length: totalWeeks }, (_, index) => {
-    const weekNumber = index + 1;
-    const existing = byNumber.get(weekNumber);
-    return {
-      id: existing?.id ?? generateId(),
-      weekNumber,
-      sessions: sortSessions(existing?.sessions ?? []),
-    };
-  });
-};
-
-const buildDraft = (mesocycle: Mesocycle): Mesocycle => ({
-  ...mesocycle,
-  weeks: deriveWeeks(mesocycle),
-});
-
-const countPlannedSessions = (mesocycle: Mesocycle) => (
-  mesocycle.weeks.reduce((total, week) => total + week.sessions.length, 0)
-);
 
 const toPlannedSessionRef = (routine: Routine): PlannedSessionRef => ({
   routineId: routine.id,
@@ -90,7 +67,7 @@ const updateSessionCollection = (
       return false;
     });
 
-    return { ...week, sessions: sortSessions(remaining) };
+    return { ...week, sessions: sortPlannedSessions(remaining) };
   });
 
   if (!extracted || !sourceWeekNumber) return draft;
@@ -98,9 +75,9 @@ const updateSessionCollection = (
   const { session: nextSession, targetWeekNumber } = updater(extracted, sourceWeekNumber);
 
   return {
-    ...draft,
-    weeks: withoutSource.map((week) => week.weekNumber === targetWeekNumber
-      ? { ...week, sessions: sortSessions([...week.sessions, nextSession]) }
+      ...draft,
+      weeks: withoutSource.map((week) => week.weekNumber === targetWeekNumber
+      ? { ...week, sessions: sortPlannedSessions([...week.sessions, nextSession]) }
       : week),
   };
 };
@@ -140,7 +117,7 @@ export default function MesocycleDetailScreen() {
   } = useData();
   const { theme } = useTheme();
   const mesocycle = getMesocycle(id);
-  const [draft, setDraft] = useState<Mesocycle | null>(mesocycle ? buildDraft(mesocycle) : null);
+  const [draft, setDraft] = useState<Mesocycle | null>(mesocycle ? buildMesocycleDraft(mesocycle) : null);
   const [startDate, setStartDate] = useState(mesocycle?.startDate ?? '');
   const [isSaving, setIsSaving] = useState(false);
   const [expandedWeekPicker, setExpandedWeekPicker] = useState<number | null>(null);
@@ -153,7 +130,7 @@ export default function MesocycleDetailScreen() {
       return;
     }
 
-    setDraft(buildDraft(mesocycle));
+    setDraft(buildMesocycleDraft(mesocycle));
     setStartDate(mesocycle.startDate ?? '');
   }, [mesocycle]);
 
@@ -179,7 +156,7 @@ export default function MesocycleDetailScreen() {
         startDate: normalizeStartDate(startDate),
         weeks: draft.weeks.map((week) => ({
           ...week,
-          sessions: sortSessions(week.sessions).map((session, index) => ({
+          sessions: sortPlannedSessions(week.sessions).map((session, index) => ({
             ...session,
             order: index + 1,
             dayLabel: session.dayLabel?.trim() || undefined,
@@ -209,7 +186,7 @@ export default function MesocycleDetailScreen() {
       weeks: current.weeks.map((week) => week.weekNumber === weekNumber
         ? {
           ...week,
-          sessions: sortSessions([
+          sessions: sortPlannedSessions([
             ...week.sessions,
             {
               id: generateId(),
@@ -263,7 +240,7 @@ export default function MesocycleDetailScreen() {
       ...current,
       weeks: current.weeks.map((week) => ({
         ...week,
-        sessions: sortSessions(week.sessions.filter((session) => session.id !== sessionId)),
+        sessions: sortPlannedSessions(week.sessions.filter((session) => session.id !== sessionId)),
       })),
     }));
   };
@@ -271,6 +248,20 @@ export default function MesocycleDetailScreen() {
   const openExecuteRoutine = (resolvedRoutine?: Routine) => {
     if (!resolvedRoutine) return;
     router.push(`/routine/execute/${resolvedRoutine.id}`);
+  };
+
+  const copyPreviousWeek = (weekNumber: number) => {
+    updateDraft((current) => {
+      const sourceWeek = current.weeks.find((week) => week.weekNumber === weekNumber - 1);
+      if (!sourceWeek || sourceWeek.sessions.length === 0) return current;
+
+      return {
+        ...current,
+        weeks: current.weeks.map((week) => week.weekNumber === weekNumber
+          ? { ...week, sessions: clonePlannedWeekSessions(sourceWeek.sessions) }
+          : week),
+      };
+    });
   };
 
   if (!mesocycle || !draft) {
@@ -355,7 +346,7 @@ export default function MesocycleDetailScreen() {
               </View>
 
               <Text style={[styles.label, styles.spacedLabel, { color: theme.textMuted }]}>Fecha de inicio</Text>
-              <GlassInput value={startDate} onChangeText={setStartDate} placeholder={formatStartDate(draft.startDate)} autoCapitalize="none" />
+              <DateTimeField value={startDate} onChange={setStartDate} mode="date" placeholder={formatStartDate(draft.startDate)} testID="mesocycle-edit-start-date-picker" />
             </GlassCard>
 
             {draft.weeks.map((week) => (
@@ -365,12 +356,26 @@ export default function MesocycleDetailScreen() {
                     <Text style={[styles.sectionTitle, { color: theme.text }]}>Semana {week.weekNumber}</Text>
                     <Text style={[styles.weekMeta, { color: theme.textMuted }]}>{week.sessions.length} sesión{week.sessions.length === 1 ? '' : 'es'} planificada{week.sessions.length === 1 ? '' : 's'}</Text>
                   </View>
-                  <GlassButton
-                    title={expandedWeekPicker === week.weekNumber ? 'Cerrar' : 'Agregar sesión'}
-                    onPress={() => setExpandedWeekPicker((current) => current === week.weekNumber ? null : week.weekNumber)}
-                    variant="secondary"
-                  />
+                  <View style={styles.weekHeaderActions}>
+                    {week.weekNumber > 1 ? (
+                      <GlassButton
+                        title="Copiar semana anterior"
+                        onPress={() => copyPreviousWeek(week.weekNumber)}
+                        variant="secondary"
+                        disabled={!draft.weeks.some((sourceWeek) => sourceWeek.weekNumber === week.weekNumber - 1 && sourceWeek.sessions.length > 0)}
+                      />
+                    ) : null}
+                    <GlassButton
+                      title={expandedWeekPicker === week.weekNumber ? 'Cerrar' : 'Agregar sesión'}
+                      onPress={() => setExpandedWeekPicker((current) => current === week.weekNumber ? null : week.weekNumber)}
+                      variant="secondary"
+                    />
+                  </View>
                 </View>
+
+                {week.weekNumber > 1 && !draft.weeks.some((sourceWeek) => sourceWeek.weekNumber === week.weekNumber - 1 && sourceWeek.sessions.length > 0) ? (
+                  <Text style={[styles.helper, { color: theme.textMuted }]}>No hay sesiones en la semana anterior para copiar todavía.</Text>
+                ) : null}
 
                 {expandedWeekPicker === week.weekNumber ? (
                   availableRoutines.length > 0 ? (
@@ -513,6 +518,7 @@ const styles = StyleSheet.create({
   metaLabel: { fontSize: 12 },
   metaValue: { fontSize: 16, fontWeight: '700', marginTop: 4 },
   weekHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', gap: 12, marginBottom: 12 },
+  weekHeaderActions: { gap: 10, alignItems: 'stretch' },
   weekMeta: { fontSize: 13, marginTop: 4 },
   emptyText: { fontSize: 13, lineHeight: 18 },
   inlinePickerWrap: { marginBottom: 12 },

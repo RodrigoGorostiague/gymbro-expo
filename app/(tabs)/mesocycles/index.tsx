@@ -25,7 +25,7 @@ function MesocycleCard({ mesocycle, onDelete }: { mesocycle: Mesocycle; onDelete
   const sessionCount = mesocycle.weeks.reduce((total, week) => total + week.sessions.length, 0);
 
   return (
-    <HapticPressable onPress={() => router.push(`/mesocycle/${mesocycle.id}`)}>
+    <HapticPressable onPress={() => router.push(`/mesocycle/summary/${mesocycle.id}`)}>
       <GlassCard style={styles.card}>
         <View style={styles.cardHeader}>
           <View style={styles.cardTitleWrap}>
@@ -46,7 +46,7 @@ function MesocycleCard({ mesocycle, onDelete }: { mesocycle: Mesocycle; onDelete
         <Text style={[styles.metaText, { color: theme.textMuted }]}>Inicio: {formatStartDate(mesocycle.startDate)}</Text>
 
         <View style={styles.actions}>
-          <GlassButton title="Abrir" onPress={() => router.push(`/mesocycle/${mesocycle.id}`)} variant="secondary" />
+          <GlassButton title="Abrir" onPress={() => router.push(`/mesocycle/summary/${mesocycle.id}`)} variant="secondary" />
           <GlassButton title="Eliminar" onPress={onDelete} variant="danger" />
         </View>
       </GlassCard>

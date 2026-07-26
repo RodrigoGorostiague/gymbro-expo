@@ -2,6 +2,7 @@ import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { beforeEach, describe, expect, test, vi } from 'vitest';
 import { Mesocycle, WORKOUT_ATTEMPT_VERSION, WorkoutAttempt } from '../types';
+import { clonePlannedWeekSessions } from '../utils/mesocycles';
 
 const dataContextSource = readFileSync(resolve(import.meta.dirname, '../context/DataContext.tsx'), 'utf8');
 
@@ -250,6 +251,52 @@ describe('mesocycle repository', () => {
     expect(dataContextSource).toContain('getMesocycle');
     expect(dataContextSource).toContain('resolvePlannedRoutine');
     expect(dataContextSource).toContain('saveMesocycles(owner, next)');
+  });
+
+  test('copies previous week sessions with fresh ids and preserves storage partitions', async () => {
+    const source = mesocycle({
+      durationWeeks: 3,
+      weeks: [
+        { id: 'week-1', weekNumber: 1, sessions: [] },
+        {
+          id: 'week-2',
+          weekNumber: 2,
+          sessions: [
+            {
+              id: 'session-2',
+              ref: { routineId: 'routine-1', routineName: 'Upper A', source: 'local' },
+              order: 1,
+              dayLabel: 'Wednesday',
+              progressionNote: 'Add one rep',
+              note: 'Keep rest strict',
+            },
+          ],
+        },
+        { id: 'week-3', weekNumber: 3, sessions: [] },
+      ],
+    });
+    storage.data.set('@gymbro/routines', JSON.stringify([{ id: 'routine-1', name: 'Upper A', exercises: [] }]));
+
+    const clonedSessions = clonePlannedWeekSessions(source.weeks[1].sessions);
+    expect(clonedSessions).toHaveLength(1);
+    expect(clonedSessions[0].id).not.toBe(source.weeks[1].sessions[0].id);
+    expect(clonedSessions[0]).toMatchObject({
+      ref: source.weeks[1].sessions[0].ref,
+      order: 1,
+      dayLabel: 'Wednesday',
+      progressionNote: 'Add one rep',
+      note: 'Keep rest strict',
+    });
+
+    const copied = {
+      ...source,
+      weeks: source.weeks.map((week) => week.weekNumber === 3 ? { ...week, sessions: clonedSessions } : week),
+    };
+
+    await saveMesocycles('rodaja', [copied]);
+
+    await expect(loadMesocycles('rodaja')).resolves.toEqual([copied]);
+    expect(JSON.parse(storage.data.get('@gymbro/routines')!)).toEqual([{ id: 'routine-1', name: 'Upper A', exercises: [] }]);
   });
 });
 

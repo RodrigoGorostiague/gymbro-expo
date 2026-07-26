@@ -3,6 +3,7 @@ import { Alert, KeyboardAvoidingView, Platform, ScrollView, StyleSheet, Text, Vi
 import { router } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { AppNavBar } from '../../components/AppNavBar';
+import { DateTimeField } from '../../components/DateTimeField';
 import { GlassCard, ThemeBackground } from '../../components/GlassCard';
 import { HapticPressable } from '../../components/HapticPressable';
 import { GlassButton, GlassInput } from '../../components/UI';
@@ -66,7 +67,7 @@ export default function CreateMesocycleScreen() {
         startDate: normalizeStartDate(startDate),
         weeks: buildWeeks(parsedWeeks),
       });
-      router.replace(`/mesocycle/${created.id}`);
+      router.replace(`/mesocycle/summary/${created.id}`);
     } catch (error) {
       Alert.alert(
         'No se pudo guardar',
@@ -135,8 +136,8 @@ export default function CreateMesocycleScreen() {
 
             <GlassCard style={styles.section}>
               <Text style={[styles.label, { color: theme.textMuted }]}>Fecha de inicio (opcional)</Text>
-              <GlassInput value={startDate} onChangeText={setStartDate} placeholder="YYYY-MM-DD" autoCapitalize="none" />
-              <Text style={[styles.hint, { color: theme.textMuted }]}>Usa el formato YYYY-MM-DD para dejar la fecha lista para la próxima etapa del plan.</Text>
+              <DateTimeField value={startDate} onChange={setStartDate} mode="date" placeholder="Sin fecha definida" testID="mesocycle-create-start-date-picker" />
+              <Text style={[styles.hint, { color: theme.textMuted }]}>Elegí la fecha desde el selector para dejar el bloque listo para la próxima etapa del plan.</Text>
             </GlassCard>
 
             <GlassCard style={styles.section}>

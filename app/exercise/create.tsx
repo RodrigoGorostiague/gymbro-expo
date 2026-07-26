@@ -11,6 +11,7 @@ import { MUSCLE_GROUP_LABELS } from '../../constants/muscleGroups';
 import { useData } from '../../context/DataContext';
 import { useTheme } from '../../context/ThemeContext';
 import { CatalogSet, Exercise, ExerciseLoadMode, ExerciseVariant, LoadUnit, MuscleGroup, SetType } from '../../types';
+import { buildDecimalDraftMap, type DecimalDraftMap, normalizeDecimalInput } from '../../utils/decimalInput';
 import { generateId } from '../../utils/storage';
 
 const parseSetType = (value: string): SetType | null => {
@@ -56,6 +57,7 @@ export default function ExerciseFormScreen() {
   const [loadUnit, setLoadUnit] = useState<LoadUnit>('kg');
   const [variant, setVariant] = useState<ExerciseVariant>('libre');
   const [defaultSets, setDefaultSets] = useState<CatalogSet[]>([]);
+  const [draftWeights, setDraftWeights] = useState<DecimalDraftMap>({});
   const [newVariantName, setNewVariantName] = useState('');
   const [editingVariant, setEditingVariant] = useState<ExerciseVariant | null>(null);
   const [editingVariantName, setEditingVariantName] = useState('');
@@ -70,6 +72,7 @@ export default function ExerciseFormScreen() {
     setLoadUnit(existingExercise.loadUnit ?? 'kg');
     setVariant(existingExercise.variant);
     setDefaultSets(existingExercise.defaultSets);
+    setDraftWeights(buildDecimalDraftMap(existingExercise.defaultSets));
   }, [existingExercise]);
 
   useEffect(() => {
@@ -81,7 +84,13 @@ export default function ExerciseFormScreen() {
   };
 
   const addSet = () => {
-    setDefaultSets((current) => [...current, { id: generateId(), tipo: current.length + 1, weight: 0, reps: 0 }]);
+    const nextId = generateId();
+    setDefaultSets((current) => [...current, { id: nextId, tipo: current.length + 1, weight: 0, reps: 0 }]);
+    setDraftWeights((current) => ({ ...current, [nextId]: '' }));
+  };
+
+  const updateDraftWeight = (setId: string, value: string) => {
+    setDraftWeights((current) => ({ ...current, [setId]: value }));
   };
 
   const showMutationError = (error: unknown) => {
@@ -122,7 +131,14 @@ export default function ExerciseFormScreen() {
         Alert.alert('Validación', 'Cada serie debe tener tipo C, F o un número positivo.');
         return;
       }
-      normalizedSets.push({ ...set, tipo, reps: tipo === 'F' ? 0 : set.reps });
+
+      const weight = normalizeDecimalInput(draftWeights[set.id] ?? '');
+      if (weight === null) {
+        Alert.alert('Validación', 'Cada serie debe tener un peso válido mayor o igual a 0.');
+        return;
+      }
+
+      normalizedSets.push({ ...set, tipo, weight, reps: tipo === 'F' ? 0 : set.reps });
     }
 
     const storedWeights = existingExercise?.attribution?.weights;
@@ -264,7 +280,7 @@ export default function ExerciseFormScreen() {
                 return (
                   <View key={set.id} style={styles.setRow}>
                     <GlassInput style={styles.typeInput} value={String(set.tipo)} placeholder="Tipo" autoCapitalize="characters" onChangeText={(text) => updateSet(set.id, { tipo: text as unknown as SetType, reps: text.trim().toUpperCase() === 'F' ? 0 : set.reps })} />
-                    <GlassInput style={styles.setInput} keyboardType="numeric" value={set.weight ? String(set.weight) : ''} placeholder={loadUnit} onChangeText={(text) => updateSet(set.id, { weight: parseFloat(text) || 0 })} />
+                    <GlassInput style={styles.setInput} keyboardType="decimal-pad" value={draftWeights[set.id] ?? ''} placeholder={loadUnit} onChangeText={(text) => updateDraftWeight(set.id, text)} />
                      <GlassInput style={styles.setInput} keyboardType="numeric" editable={!isFailure} value={isFailure ? '' : set.reps ? String(set.reps) : ''} placeholder={isFailure ? '—' : 'repeticiones'} onChangeText={(text) => updateSet(set.id, { reps: parseInt(text, 10) || 0 })} />
                     <HapticPressable onPress={() => setDefaultSets((current) => current.filter((item) => item.id !== set.id))}><Text style={{ color: theme.textMuted }}>✕</Text></HapticPressable>
                   </View>
