@@ -50,7 +50,7 @@ export default function RoutinesScreen() {
     <ThemeBackground>
       <SafeAreaView style={styles.safe}>
         <AppScreenHeader
-          title="Mis Rutinas"
+          title="Mis rutinas"
           subtitle="Mesociclos — carpetas de ejercicios"
           trailing={
             <>
@@ -217,7 +217,7 @@ export default function RoutinesScreen() {
                         end={{ x: 1, y: 0.5 }}
                         style={styles.actionBtn}
                       >
-                        <Text style={styles.actionText}>▶ Ejecutar</Text>
+                        <Text style={styles.actionText}>▶ Entrenar</Text>
                       </LinearGradient>
                     </HapticPressable>
                     <HapticPressable

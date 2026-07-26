@@ -220,7 +220,7 @@ export default function ShopScreen() {
         >
           <AppScreenHeader
             title="Tienda"
-            subtitle="Toca un tema para previsualizarlo"
+            subtitle="Selecciona un tema para previsualizarlo"
             trailing={<LogoutButton />}
           />
 

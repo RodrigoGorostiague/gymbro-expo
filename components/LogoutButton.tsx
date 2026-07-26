@@ -11,7 +11,7 @@ export function LogoutButton() {
   const { theme } = useTheme();
 
   const handleLogout = () => {
-    Alert.alert('Cerrar sesión', '¿Quieres volver al login?', [
+    Alert.alert('Cerrar sesión', '¿Quieres volver a la pantalla de acceso?', [
       { text: 'Cancelar', style: 'cancel' },
       {
         text: 'Salir',

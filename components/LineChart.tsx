@@ -1,10 +1,9 @@
-import React from 'react';
-import { Dimensions, StyleSheet, Text, View } from 'react-native';
+import React, { useState } from 'react';
+import { StyleSheet, Text, View } from 'react-native';
 import Svg, { Circle, Line, Polyline, Text as SvgText } from 'react-native-svg';
 import { useTheme } from '../context/ThemeContext';
 import { ExerciseProgressPoint } from '../utils/analytics';
 
-const CHART_WIDTH = Dimensions.get('window').width - 64;
 const CHART_HEIGHT = 180;
 const PADDING = 24;
 
@@ -12,10 +11,13 @@ interface LineChartProps {
   data: ExerciseProgressPoint[];
   dataKey: 'maxWeight' | 'totalReps' | 'tonnage';
   label: string;
+  summary?: string;
+  unit?: string;
 }
 
-export function SimpleLineChart({ data, dataKey, label }: LineChartProps) {
+export function SimpleLineChart({ data, dataKey, label, summary, unit = '' }: LineChartProps) {
   const { theme } = useTheme();
+  const [width, setWidth] = useState(0);
 
   if (data.length === 0) {
     return (
@@ -30,7 +32,7 @@ export function SimpleLineChart({ data, dataKey, label }: LineChartProps) {
   const maxVal = Math.max(...values);
   const range = maxVal - minVal || 1;
 
-  const chartW = CHART_WIDTH - PADDING * 2;
+  const chartW = Math.max(1, width - PADDING * 2);
   const chartH = CHART_HEIGHT - PADDING * 2;
 
   const points = data.map((d, i) => {
@@ -40,9 +42,14 @@ export function SimpleLineChart({ data, dataKey, label }: LineChartProps) {
   });
 
   return (
-    <View>
+    <View
+      accessible
+      accessibilityRole="image"
+      accessibilityLabel={`${label}. ${summary ?? `${data.length} valores registrados`}`}
+      onLayout={({ nativeEvent }) => setWidth(Math.floor(nativeEvent.layout.width))}
+    >
       <Text style={[styles.label, { color: theme.textMuted }]}>{label}</Text>
-      <Svg width={CHART_WIDTH} height={CHART_HEIGHT}>
+      {width > 0 ? <Svg width={width} height={CHART_HEIGHT} viewBox={`0 0 ${width} ${CHART_HEIGHT}`}>
         <Line
           x1={PADDING}
           y1={PADDING + chartH}
@@ -51,18 +58,21 @@ export function SimpleLineChart({ data, dataKey, label }: LineChartProps) {
           stroke={theme.glassBorder}
           strokeWidth={1}
         />
-        <Polyline
+        {data.length > 1 ? <Polyline
           points={points.join(' ')}
           fill="none"
           stroke={theme.primary}
           strokeWidth={2.5}
-        />
+        /> : null}
         {data.map((d, i) => {
           const x = PADDING + (i / Math.max(data.length - 1, 1)) * chartW;
           const y = PADDING + chartH - ((d[dataKey] - minVal) / range) * chartH;
           return (
             <React.Fragment key={d.date}>
               <Circle cx={x} cy={y} r={4} fill={theme.accent} />
+              <SvgText x={x} y={Math.max(12, y - 8)} fill={theme.text} fontSize={10} textAnchor="middle">
+                {d[dataKey]}{unit}
+              </SvgText>
               <SvgText
                 x={x}
                 y={CHART_HEIGHT - 4}
@@ -70,12 +80,13 @@ export function SimpleLineChart({ data, dataKey, label }: LineChartProps) {
                 fontSize={10}
                 textAnchor="middle"
               >
-                {d.label}
+                {data.length <= 6 || i % 2 === 0 ? d.label : ''}
               </SvgText>
             </React.Fragment>
           );
         })}
-      </Svg>
+      </Svg> : <View style={styles.placeholder} accessibilityLabel="Preparando gráfico" />}
+      {summary ? <Text style={[styles.summary, { color: theme.textMuted }]}>{summary}</Text> : null}
     </View>
   );
 }
@@ -91,4 +102,6 @@ const styles = StyleSheet.create({
     marginBottom: 8,
     fontWeight: '600',
   },
+  placeholder: { height: CHART_HEIGHT },
+  summary: { fontSize: 12, lineHeight: 17, marginTop: 6 },
 });

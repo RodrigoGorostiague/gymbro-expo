@@ -11,7 +11,12 @@ export const MUSCLE_GROUP_OPTIONS: { value: MuscleGroup; label: string }[] = [
   { value: 'tríceps', label: 'Tríceps' },
   { value: 'core', label: 'Core' },
   { value: 'glúteos', label: 'Glúteos' },
-  { value: 'fullBody', label: 'Full Body' },
+  { value: 'trapecio', label: 'Trapecio' },
+  { value: 'antebrazos', label: 'Antebrazos' },
+  { value: 'aductores', label: 'Aductores' },
+  { value: 'abductores', label: 'Abductores' },
+  { value: 'dorsales', label: 'Dorsales' },
+  { value: 'fullBody', label: 'Cuerpo completo' },
 ];
 
 export const MUSCLE_GROUP_LABELS = Object.fromEntries(

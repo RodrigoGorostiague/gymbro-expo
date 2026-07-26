@@ -142,7 +142,7 @@ export function DualLoginHeader({ rodaja, brisas, activeProfile }: DualLoginHead
         <Text style={[styles.logoHalf, { color: rodaja.primary }]}>B</Text>
         <Text style={[styles.logoHalf, { color: brisas.primary }]}>ro</Text>
       </Text>
-      <Text style={styles.tagline}>Dos mundos · Una app · Mismo gym</Text>
+      <Text style={styles.tagline}>Dos mundos · Una app · Mismo gimnasio</Text>
     </Animated.View>
   );
 }

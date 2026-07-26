@@ -97,7 +97,7 @@ export function CombineWithPartnerCard() {
               ]}
             >
               <Text style={[styles.toggleState, { color: combineWithPartner ? '#FFF' : theme.textMuted }]}>
-                {combineWithPartner ? 'ON' : 'OFF'}
+                {combineWithPartner ? 'Activado' : 'Desactivado'}
               </Text>
             </View>
           </View>
@@ -106,7 +106,7 @@ export function CombineWithPartnerCard() {
 
       {combineWithPartner && dualThemes ? (
         <Text style={[styles.activeHint, { color: theme.primary }]}>
-          Modo dual activo en toda la app
+          Modo dual activo en toda la aplicación
         </Text>
       ) : null}
     </GlassCard>

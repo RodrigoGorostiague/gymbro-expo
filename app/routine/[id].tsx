@@ -14,6 +14,7 @@ import { AppNavBar } from '../../components/AppNavBar';
 import { ExercisePicker } from '../../components/ExercisePicker';
 import { GlassCard, ThemeBackground } from '../../components/GlassCard';
 import { HapticPressable } from '../../components/HapticPressable';
+import { MuscleGroupSelector } from '../../components/MuscleGroupSelector';
 import { GlassButton, GlassInput } from '../../components/UI';
 import { MUSCLE_GROUP_LABELS } from '../../constants/muscleGroups';
 import { useData } from '../../context/DataContext';
@@ -41,6 +42,9 @@ export default function EditRoutineScreen() {
     catalogExerciseId: exercise.id,
     name: exercise.name,
     muscleGroups: [...exercise.muscleGroups],
+    loadMode: exercise.loadMode,
+    loadUnit: exercise.loadUnit,
+    attribution: exercise.attribution,
     variant: exercise.variant,
     sets: exercise.defaultSets.map((set) => ({
       id: generateId(),
@@ -76,10 +80,15 @@ export default function EditRoutineScreen() {
   const save = () => {
     const routine = getRoutine(id);
     if (!routine) return;
+    if (routineMuscleGroups.length === 0) {
+      Alert.alert('Validación', 'Selecciona al menos un grupo muscular.');
+      return;
+    }
 
     updateRoutine({
       ...routine,
       name: name.trim() || routine.name,
+      muscleGroups: routineMuscleGroups,
       exercises,
     });
     Alert.alert('Guardado', 'Rutina actualizada');
@@ -164,7 +173,7 @@ export default function EditRoutineScreen() {
             keyboardShouldPersistTaps="handled"
             showsVerticalScrollIndicator={false}
           >
-            <Text style={[styles.screenTitle, { color: theme.text }]}>Editar Rutina</Text>
+            <Text style={[styles.screenTitle, { color: theme.text }]}>Editar rutina</Text>
             <Text style={[styles.screenSubtitle, { color: theme.textMuted }]}>Ejercicios y series</Text>
 
             <GlassCard style={styles.nameCard}>
@@ -174,21 +183,10 @@ export default function EditRoutineScreen() {
 
             <GlassCard style={styles.nameCard}>
               <Text style={[styles.label, { color: theme.textMuted }]}>Grupos musculares</Text>
-              <View style={styles.tags}>
-                {routineMuscleGroups.map((group) => (
-                  <View
-                    key={group}
-                    style={[
-                      styles.tag,
-                      { backgroundColor: theme.glass, borderColor: theme.glassBorder },
-                    ]}
-                  >
-                    <Text style={[styles.tagText, { color: theme.text }]}>
-                      {MUSCLE_GROUP_LABELS[group]}
-                    </Text>
-                  </View>
-                ))}
-              </View>
+              <MuscleGroupSelector
+                value={routineMuscleGroups}
+                onChange={setRoutineMuscleGroups}
+              />
             </GlassCard>
 
             {exercises.map((exercise, exIndex) => (
@@ -221,12 +219,12 @@ export default function EditRoutineScreen() {
                   </HapticPressable>
                 </View>
 
-                <Text style={[styles.lockedNote, { color: theme.textMuted }]}>Nombre, grupos musculares y variante quedan bloqueados en la rutina. Solo podés editar las series.</Text>
+                <Text style={[styles.lockedNote, { color: theme.textMuted }]}>Nombre, grupos musculares y variante quedan bloqueados en la rutina. Solo puedes editar las series.</Text>
 
                 <View style={styles.setHeader}>
                   <Text style={[styles.setCol, { color: theme.textMuted }]}>Serie</Text>
                   <Text style={[styles.setCol, { color: theme.textMuted }]}>Peso</Text>
-                  <Text style={[styles.setCol, { color: theme.textMuted }]}>Reps</Text>
+                  <Text style={[styles.setCol, { color: theme.textMuted }]}>Repeticiones</Text>
                   <View style={{ width: 28 }} />
                 </View>
 
@@ -246,7 +244,7 @@ export default function EditRoutineScreen() {
                       style={styles.setInput}
                       keyboardType="numeric"
                       value={set.reps ? String(set.reps) : ''}
-                      placeholder="reps"
+                      placeholder="repeticiones"
                       onChangeText={(text) =>
                         updateSet(exercise.id, set.id, { reps: parseInt(text, 10) || 0 })
                       }

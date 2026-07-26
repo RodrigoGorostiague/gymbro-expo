@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { Modal, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { MUSCLE_GROUP_LABELS } from '../constants/muscleGroups';
 import { useTheme } from '../context/ThemeContext';
@@ -26,10 +26,18 @@ export function ExercisePicker({
 }: ExercisePickerProps) {
   const { theme } = useTheme();
   const [filter, setFilter] = useState<MuscleGroup | null>(routineMuscleGroups[0] ?? null);
+  const activeFilter =
+    filter && !routineMuscleGroups.includes(filter) ? routineMuscleGroups[0] ?? null : filter;
+
+  useEffect(() => {
+    if (filter && !routineMuscleGroups.includes(filter)) {
+      setFilter(routineMuscleGroups[0] ?? null);
+    }
+  }, [filter, routineMuscleGroups]);
 
   const filteredExercises = useMemo(() => {
-    if (filter) {
-      return exercises.filter((exercise) => exercise.muscleGroups.includes(filter));
+    if (activeFilter) {
+      return exercises.filter((exercise) => exercise.muscleGroups.includes(activeFilter));
     }
 
     if (routineMuscleGroups.length === 0) {
@@ -39,7 +47,7 @@ export function ExercisePicker({
     return exercises.filter((exercise) =>
       exercise.muscleGroups.some((group) => routineMuscleGroups.includes(group)),
     );
-  }, [exercises, filter, routineMuscleGroups]);
+  }, [activeFilter, exercises, routineMuscleGroups]);
 
   return (
     <Modal visible={visible} animationType="slide" transparent onRequestClose={onClose}>
@@ -55,17 +63,17 @@ export function ExercisePicker({
                 style={[
                   styles.filterChip,
                   {
-                    backgroundColor: !filter ? theme.primary : theme.glass,
+                    backgroundColor: !activeFilter ? theme.primary : theme.glass,
                     borderColor: theme.glassBorder,
                   },
                 ]}
               >
-                <Text style={{ color: !filter ? theme.onPrimary : theme.text, fontWeight: '700' }}>
+                <Text style={{ color: !activeFilter ? theme.onPrimary : theme.text, fontWeight: '700' }}>
                   Todos
                 </Text>
               </HapticPressable>
               {routineMuscleGroups.map((group) => {
-                const selected = filter === group;
+                const selected = activeFilter === group;
                 return (
                   <HapticPressable
                     key={group}

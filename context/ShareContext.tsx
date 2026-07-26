@@ -92,7 +92,7 @@ export function ShareProvider({ children }: { children: React.ReactNode }) {
     async (shareId: string) => {
       const share = pendingShares.find((s) => s.id === shareId);
       if (!share) {
-        throw new Error('Share not available for this receiver');
+        throw new Error('La rutina compartida no está disponible para este destinatario');
       }
 
       await acceptShareSync(shareId);
@@ -112,7 +112,7 @@ export function ShareProvider({ children }: { children: React.ReactNode }) {
     async (shareId: string) => {
       const share = pendingShares.find((s) => s.id === shareId);
       if (!share) {
-        throw new Error('Share not available for this receiver');
+        throw new Error('La rutina compartida no está disponible para este destinatario');
       }
 
       await rejectShareSync(shareId);

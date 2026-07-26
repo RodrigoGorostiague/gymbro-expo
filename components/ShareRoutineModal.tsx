@@ -22,7 +22,7 @@ function getShareErrorMessage(error: unknown): string {
     return error.message;
   }
 
-  return 'Unexpected error while creating the shared routine';
+  return 'Ocurrió un error inesperado al crear la rutina compartida';
 }
 
 export function ShareRoutineModal({ visible, routine, onClose }: ShareRoutineModalProps) {

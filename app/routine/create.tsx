@@ -21,9 +21,9 @@ export default function CreateRoutineScreen() {
   const handleCreate = () => {
     const trimmedName = name.trim();
 
-    setNameError(trimmedName ? '' : 'Ingresá un nombre para la rutina.');
+    setNameError(trimmedName ? '' : 'Ingresa un nombre para la rutina.');
     setMuscleGroupsError(
-      muscleGroups.length > 0 ? '' : 'Seleccioná al menos un grupo muscular.',
+      muscleGroups.length > 0 ? '' : 'Selecciona al menos un grupo muscular.',
     );
 
     if (!trimmedName || muscleGroups.length === 0) return;
@@ -44,11 +44,11 @@ export default function CreateRoutineScreen() {
             keyboardShouldPersistTaps="handled"
             showsVerticalScrollIndicator={false}
           >
-            <AppScreenHeader title="Nueva Rutina" subtitle="Nombre y grupos musculares" />
+            <AppScreenHeader title="Nueva rutina" subtitle="Nombre y grupos musculares" />
 
             <GlassCard>
               <GlassInput
-                placeholder="Ej: Push Day, Piernas, Full Body..."
+                placeholder="Ej.: Día de empuje, Piernas, Cuerpo completo..."
                 value={name}
                 onChangeText={(text) => {
                   setName(text);

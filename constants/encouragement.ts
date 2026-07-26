@@ -1,7 +1,7 @@
 export const SET_ENCOURAGEMENT_MESSAGES = [
-  'Vamos amor, tu puedes',
-  'Una mas podias',
-  'Mira todo lo q me estoy comiendo',
+  'Vamos, amor. Tú puedes',
+  'Una repetición más. Puedes hacerlo',
+  'Mira todo lo que estoy comiendo',
 ];
 
 export function getRandomSetEncouragementMessage(): string {

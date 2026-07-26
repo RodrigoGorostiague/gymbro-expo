@@ -14,12 +14,14 @@ import { GlassCard, ThemeBackground } from '../../../components/GlassCard';
 import { HapticPressable } from '../../../components/HapticPressable';
 import { GlassButton, GlassInput } from '../../../components/UI';
 import { getRandomSetEncouragementMessage } from '../../../constants/encouragement';
-import { GEM_REWARDS } from '../../../constants/shopThemes';
+import { useAuth } from '../../../context/AuthContext';
 import { useData } from '../../../context/DataContext';
 import { useShop } from '../../../context/ShopContext';
 import { useTheme } from '../../../context/ThemeContext';
-import { CompletedExercise, CompletedSet, Routine, SetType } from '../../../types';
+import { CompletedExercise, CompletedSet, Routine, SetType, WorkoutAttempt } from '../../../types';
 import { vibrateRestTimerComplete } from '../../../utils/haptics';
+import { generateId } from '../../../utils/storage';
+import { createWorkoutAttempt } from '../../../utils/workoutAttempts';
 
 function formatTime(seconds: number): string {
   const m = Math.floor(seconds / 60);
@@ -33,7 +35,7 @@ function isFailureSet(tipo: SetType): boolean {
 
 function getSetTypeLabel(tipo: SetType): string {
   if (tipo === 'C') return 'Calentamiento';
-  if (tipo === 'F') return 'Fallo';
+  if (tipo === 'F') return 'Serie al fallo';
   return `Serie ${tipo}`;
 }
 
@@ -60,8 +62,9 @@ function buildSetValues(routine: Routine): Record<SetKey, SetRuntimeValues> {
 
 export default function ExecuteRoutineScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
-  const { getRoutine, addSession } = useData();
-  const { awardGems } = useShop();
+  const { user } = useAuth();
+  const { getRoutine, addAttempt } = useData();
+  const { retryPendingRewards } = useShop();
   const { theme } = useTheme();
   const routine = getRoutine(id);
 
@@ -72,10 +75,16 @@ export default function ExecuteRoutineScreen() {
   const [isResting, setIsResting] = useState(false);
   const [completedSets, setCompletedSets] = useState<Record<SetKey, boolean>>({});
   const [setValues, setSetValues] = useState<Record<SetKey, SetRuntimeValues>>({});
+  const [isFinishing, setIsFinishing] = useState(false);
+  const [earnedGems, setEarnedGems] = useState(0);
 
   const elapsedRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const restRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const startTimeRef = useRef<number>(0);
+  const completingSetsRef = useRef(new Set<SetKey>());
+  const finishInFlightRef = useRef(false);
+  const attemptRef = useRef<WorkoutAttempt | null>(null);
+  const attemptIdRef = useRef<string | null>(null);
   const restTimerConfig = parseInt(restSeconds, 10) || 90;
 
   useEffect(() => {
@@ -120,6 +129,8 @@ export default function ExecuteRoutineScreen() {
     if (!routine) return;
     setSetValues(buildSetValues(routine));
     setCompletedSets({});
+    attemptIdRef.current = generateId();
+    attemptRef.current = null;
     setPhase('active');
     startTimeRef.current = Date.now();
     elapsedRef.current = setInterval(() => {
@@ -135,26 +146,32 @@ export default function ExecuteRoutineScreen() {
     }));
   };
 
-  const completeSet = (setKey: SetKey, tipo: SetType) => {
-    if (completedSets[setKey]) return;
+  const completeSet = async (setKey: SetKey, tipo: SetType) => {
+    if (completedSets[setKey] || completingSetsRef.current.has(setKey)) return;
 
     const values = setValues[setKey];
     const weight = parseFloat(values?.weight ?? '0');
-    const reps = isFailureSet(tipo) ? 0 : parseInt(values?.reps ?? '0', 10);
+    const reps = parseInt(values?.reps ?? '0', 10);
 
-    if (!weight || (!isFailureSet(tipo) && !reps)) {
+    if (!Number.isFinite(weight) || weight < 0 || !Number.isInteger(reps) || reps <= 0) {
       Alert.alert('Datos incompletos', 'Ingresa peso y repeticiones antes de finalizar la serie.');
       return;
     }
 
-    setCompletedSets((prev) => ({ ...prev, [setKey]: true }));
-    awardGems(GEM_REWARDS.setComplete);
-    Alert.alert('¡Serie!', getRandomSetEncouragementMessage(), [{ text: '¡Vamos!' }]);
-    startRestTimer();
+    completingSetsRef.current.add(setKey);
+    try {
+      setCompletedSets((prev) => ({ ...prev, [setKey]: true }));
+      Alert.alert('¡Serie!', getRandomSetEncouragementMessage(), [{ text: '¡Vamos!' }]);
+      startRestTimer();
+    } finally {
+      completingSetsRef.current.delete(setKey);
+    }
   };
 
-  const finishWorkout = () => {
-    if (!routine) return;
+  const finishWorkout = async () => {
+    if (!routine || finishInFlightRef.current) return;
+    finishInFlightRef.current = true;
+    setIsFinishing(true);
 
     if (elapsedRef.current) clearInterval(elapsedRef.current);
     if (restRef.current) clearInterval(restRef.current);
@@ -166,33 +183,45 @@ export default function ExecuteRoutineScreen() {
       sets: exercise.sets.map((set): CompletedSet => {
         const key = `${exercise.id}-${set.id}`;
         const runtime = setValues[key];
-        const reps = isFailureSet(set.tipo)
-          ? 0
-          : parseInt(runtime?.reps ?? String(set.reps), 10) || 0;
         return {
           setId: set.id,
           weight: parseFloat(runtime?.weight ?? String(set.weight)) || 0,
-          reps,
+          reps: parseInt(runtime?.reps ?? String(set.reps), 10) || 0,
           completed: !!completedSets[key],
         };
       }),
     }));
 
-    addSession({
-      routineId: routine.id,
-      routineName: routine.name,
-      completedAt: new Date().toISOString(),
-      durationSeconds: elapsed,
-      restTimerSeconds: restTimerConfig,
-      exercises,
-    });
-
-    awardGems(GEM_REWARDS.routineComplete);
-    setPhase('done');
+    try {
+      if (!user) throw new Error('Authentication required.');
+      const attempt = attemptRef.current ?? createWorkoutAttempt({
+        id: attemptIdRef.current ?? (attemptIdRef.current = generateId()),
+        owner: user,
+        routine,
+        completedAt: new Date().toISOString(),
+        durationSeconds: elapsed,
+        restTimerSeconds: restTimerConfig,
+        results: Object.fromEntries(exercises.flatMap((exercise) => exercise.sets.map((set) =>
+          [`${exercise.exerciseId}:${set.setId}`, { performed: set.completed, reps: set.reps, load: set.weight }]))),
+      });
+      attemptRef.current = attempt;
+      await addAttempt(attempt);
+      await retryPendingRewards();
+      setEarnedGems(attempt.reward.totalGems);
+      setPhase('done');
+    } catch {
+      Alert.alert(
+        'No se pudo guardar el entrenamiento',
+        'El entrenamiento no se completó. Revisa el almacenamiento e inténtalo de nuevo.',
+      );
+    } finally {
+      finishInFlightRef.current = false;
+      setIsFinishing(false);
+    }
   };
 
   const handleFinishConfirm = () => {
-    Alert.alert('Finalizar rutina', '¿Terminaste la rutina?', [
+    Alert.alert('Finalizar entrenamiento', '¿Terminaste el entrenamiento?', [
       { text: 'Seguir', style: 'cancel' },
       { text: 'Finalizar', onPress: finishWorkout },
     ]);
@@ -205,7 +234,7 @@ export default function ExecuteRoutineScreen() {
       <ThemeBackground>
         <SafeAreaView style={styles.safe}>
           <AppNavBar onBack={() => router.back()} backLabel="← Cancelar" />
-          <AppScreenHeader title={routine.name} subtitle="Configura antes de iniciar" />
+          <AppScreenHeader title={routine.name} subtitle="Configura el entrenamiento antes de iniciar" />
           <GlassCard>
             <Text style={[styles.label, { color: theme.textMuted }]}>
               Temporizador de descanso (segundos)
@@ -222,7 +251,7 @@ export default function ExecuteRoutineScreen() {
             </Text>
           </GlassCard>
           <View style={styles.spacer} />
-          <GlassButton title="Iniciar cronómetro" onPress={startWorkout} />
+          <GlassButton title="Iniciar entrenamiento" onPress={startWorkout} />
         </SafeAreaView>
       </ThemeBackground>
     );
@@ -234,12 +263,12 @@ export default function ExecuteRoutineScreen() {
         <SafeAreaView style={[styles.safe, styles.center]}>
           <GlassCard style={styles.doneCard}>
             <Text style={styles.doneEmoji}>🎉</Text>
-            <Text style={[styles.doneTitle, { color: theme.text }]}>¡Rutina completada!</Text>
+            <Text style={[styles.doneTitle, { color: theme.text }]}>¡Entrenamiento completado!</Text>
             <Text style={[styles.doneMeta, { color: theme.textMuted }]}>
               Tiempo: {formatTime(elapsed)}
             </Text>
             <Text style={[styles.doneGems, { color: theme.primary }]}>
-              +{GEM_REWARDS.routineComplete} gemas
+              +{earnedGems} gemas
             </Text>
             <View style={styles.spacer} />
             <GlassButton
@@ -310,7 +339,7 @@ export default function ExecuteRoutineScreen() {
                         {getSetTypeLabel(set.tipo)}
                       </Text>
                       <Text style={[styles.setTypeHint, { color: theme.textMuted }]}>
-                        {isFailureSet(set.tipo) ? 'Sin reps' : `Bloque ${setIndex + 1}`}
+                        {isFailureSet(set.tipo) ? 'Sin repeticiones' : `Bloque ${setIndex + 1}`}
                       </Text>
                       {completed && (
                         <View style={[styles.completedBadge, { backgroundColor: theme.success }]}> 
@@ -321,7 +350,9 @@ export default function ExecuteRoutineScreen() {
 
                     <View style={styles.inputRow}>
                       <View style={styles.inputGroup}>
-                        <Text style={[styles.fieldLabel, { color: theme.textMuted }]}>Peso (kg)</Text>
+                        <Text style={[styles.fieldLabel, { color: theme.textMuted }]}>
+                          {exercise.loadMode === 'bodyweight' ? 'Peso corporal' : exercise.loadMode === 'assisted' ? 'Asistencia' : 'Carga externa'} ({exercise.loadUnit ?? 'kg'})
+                        </Text>
                         <GlassInput
                           style={styles.setInput}
                           keyboardType="decimal-pad"
@@ -333,24 +364,14 @@ export default function ExecuteRoutineScreen() {
                       </View>
                       {isFailureSet(set.tipo) ? (
                         <View style={styles.inputGroup}>
-                          <Text style={[styles.fieldLabel, { color: theme.textMuted }]}>Reps</Text>
-                          <View
-                            style={[
-                              styles.failurePlaceholder,
-                              {
-                                borderColor: theme.glassBorder,
-                                backgroundColor: theme.glass,
-                              },
-                            ]}
-                          >
-                            <Text style={{ color: theme.textMuted, fontWeight: '600' }}>
-                              Hasta el fallo
-                            </Text>
-                          </View>
+                          <Text style={[styles.fieldLabel, { color: theme.textMuted }]}>Repeticiones al fallo</Text>
+                          <GlassInput style={styles.setInput} keyboardType="number-pad" value={values.reps}
+                            editable={!completed} placeholder="0"
+                            onChangeText={(text) => updateSetValue(setKey, 'reps', text)} />
                         </View>
                       ) : (
                         <View style={styles.inputGroup}>
-                          <Text style={[styles.fieldLabel, { color: theme.textMuted }]}>Reps</Text>
+                          <Text style={[styles.fieldLabel, { color: theme.textMuted }]}>Repeticiones</Text>
                           <GlassInput
                             style={styles.setInput}
                             keyboardType="number-pad"
@@ -379,7 +400,12 @@ export default function ExecuteRoutineScreen() {
         </ScrollView>
 
         <View style={styles.footer}>
-          <GlassButton title="Finalizar rutina" onPress={handleFinishConfirm} />
+          <GlassButton
+            title="Finalizar entrenamiento"
+            onPress={handleFinishConfirm}
+            loading={isFinishing}
+            disabled={isFinishing}
+          />
         </View>
       </SafeAreaView>
     </ThemeBackground>

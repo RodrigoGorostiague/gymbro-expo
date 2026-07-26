@@ -8,25 +8,25 @@ export const PARTNER_MESSAGES: Record<
 > = {
   kiss: {
     emoji: '💋',
-    message: 'Tu novi@ te manda un beso 💋',
+    message: 'Tu pareja te envía un beso 💋',
     title: '💋 GymBro',
     sentLabel: 'Beso enviado',
   },
   muscle: {
     emoji: '💪',
-    message: 'Vamoooos que vos pode mas 💪',
+    message: '¡Vamos! Puedes hacerlo 💪',
     title: '💪 GymBro',
     sentLabel: 'Ánimo enviado',
   },
   angry: {
     emoji: '😠',
-    message: 'te estan mirando, los cago a paloooos 😠',
+    message: 'Te están mirando; aquí estoy 😠',
     title: '😠 GymBro',
     sentLabel: 'Advertencia enviada',
   },
   cry: {
     emoji: '😢',
-    message: 'me quiero ir 😢',
+    message: 'Quiero irme 😢',
     title: '😢 GymBro',
     sentLabel: 'Mensaje enviado',
   },
@@ -51,8 +51,8 @@ export const FIREBASE_COLLECTIONS = {
 
 export const SHARE_NOTIFICATION_TYPES = {
   routine_share: {
-    title: (from: string, routineName: string) => `${from} compartió '${routineName}' con vos`,
-    message: (from: string, routineName: string) => `${from} compartió '${routineName}' con vos`,
+    title: (from: string, routineName: string) => `${from} compartió '${routineName}' contigo`,
+    message: (from: string, routineName: string) => `${from} compartió '${routineName}' contigo`,
   },
   routine_accepted: {
     title: (from: string, routineName: string) => `${from} aceptó tu rutina '${routineName}'`,
@@ -60,8 +60,8 @@ export const SHARE_NOTIFICATION_TYPES = {
   },
   routine_rejected: {
     title: (from: string, routineName: string) =>
-      `${from} rechazó tu rutina '${routineName}' crudelmente`,
+      `${from} rechazó tu rutina '${routineName}'`,
     message: (from: string, routineName: string) =>
-      `${from} rechazó tu rutina '${routineName}' crudelmente`,
+      `${from} rechazó tu rutina '${routineName}'`,
   },
 } as const;

@@ -15,6 +15,7 @@ export default function ExercisesScreen() {
   const { theme } = useTheme();
   const { exercises, deleteExercise } = useData();
   const [filter, setFilter] = useState<MuscleGroup | null>(null);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
 
   const filteredExercises = useMemo(
     () => (filter ? exercises.filter((exercise) => exercise.muscleGroups.includes(filter)) : exercises),
@@ -24,7 +25,23 @@ export default function ExercisesScreen() {
   const confirmDelete = (id: string, name: string) => {
     Alert.alert('Eliminar ejercicio', `¿Eliminar "${name}" del catálogo?`, [
       { text: 'Cancelar', style: 'cancel' },
-      { text: 'Eliminar', style: 'destructive', onPress: () => deleteExercise(id) },
+      {
+        text: 'Eliminar',
+        style: 'destructive',
+        onPress: async () => {
+          setDeletingId(id);
+          try {
+            await deleteExercise(id);
+          } catch (error) {
+            Alert.alert(
+              'No se pudo eliminar',
+               error instanceof Error ? error.message : 'Inténtalo nuevamente.',
+            );
+          } finally {
+            setDeletingId(null);
+          }
+        },
+      },
     ]);
   };
 
@@ -93,8 +110,8 @@ export default function ExercisesScreen() {
                 </View>
 
                 <View style={styles.actions}>
-                  <GlassButton title="Editar" onPress={() => router.push({ pathname: '/exercise/create', params: { exerciseId: item.id } })} variant="secondary" />
-                  <GlassButton title="Eliminar" onPress={() => confirmDelete(item.id, item.name)} variant="danger" />
+                  <GlassButton title="Editar" onPress={() => router.push({ pathname: '/exercise/create', params: { exerciseId: item.id } })} variant="secondary" disabled={deletingId !== null} />
+                  <GlassButton title="Eliminar" onPress={() => confirmDelete(item.id, item.name)} variant="danger" disabled={deletingId !== null} loading={deletingId === item.id} />
                 </View>
               </GlassCard>
             )}

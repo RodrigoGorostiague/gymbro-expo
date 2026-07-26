@@ -42,6 +42,10 @@ export default function RootLayout() {
               name="routine/execute/[id]"
               options={{ animation: 'slide_from_right', presentation: 'fullScreenModal' }}
             />
+            <Stack.Screen
+              name="session/[id]"
+              options={{ animation: 'slide_from_right', presentation: 'card' }}
+            />
             </Stack>
             </ThemeProvider>
           </ShopProvider>

@@ -7,7 +7,7 @@ Routines MUST be tagged with the muscle groups they target. This enables exercis
 ## Data Model
 
 ```typescript
-type MuscleGroup = 'pecho' | 'espalda' | 'cuadriceps' | 'femorales' | 'gemelos' | 'hombros' | 'bíceps' | 'tríceps' | 'core' | 'glúteos' | 'fullBody';
+type MuscleGroup = 'pecho' | 'espalda' | 'cuadriceps' | 'femorales' | 'gemelos' | 'hombros' | 'bíceps' | 'tríceps' | 'core' | 'glúteos' | 'trapecio' | 'antebrazos' | 'aductores' | 'abductores' | 'dorsales' | 'fullBody';
 
 interface Routine {
   id: string;
@@ -54,9 +54,32 @@ The system SHOULD display the routine's muscle groups as tags/chips on the routi
 - WHEN the user views the routines list
 - THEN the card displays "pecho" and "hombros" as visible labels
 
+### Requirement: Muscle Group Selection on Editing
+
+The system MUST allow editing a routine's muscle groups and MUST require at least one selection. Updated routine groups MUST drive exercise picker filtering and inline exercise-creation defaults without changing existing RoutineExercise muscle-group snapshots.
+
+#### Scenario: Edit routine muscle groups
+
+- GIVEN a routine with muscleGroups ["pecho"] and an existing exercise snapshot
+- WHEN the user changes the routine selection to ["espalda", "dorsales"] and saves
+- THEN the routine persists ["espalda", "dorsales"]
+- AND the existing exercise snapshot remains unchanged
+
+#### Scenario: Reject removing all muscle groups
+
+- GIVEN the user is editing a routine
+- WHEN the user clears every muscle group and saves
+- THEN the system MUST reject and display a validation error
+
+#### Scenario: Updated groups drive routine composition
+
+- GIVEN the user changes a routine's muscle groups
+- WHEN the user opens the exercise picker or creates an exercise inline
+- THEN the picker and inline creation defaults use the updated selection
+
 ### Requirement: Muscle Group Multi-Select Component
 
-The system MUST provide a reusable `MuscleGroupSelector` component that renders all 11 muscle group options with toggle selection.
+The system MUST provide a reusable `MuscleGroupSelector` component that renders all 16 muscle group options with toggle selection.
 
 #### Scenario: Toggle muscle groups on/off
 
