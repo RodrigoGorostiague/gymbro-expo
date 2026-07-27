@@ -12,6 +12,7 @@ import {
   loadCatalogWithRoutines,
   loadHiddenSharedRoutineIds,
   loadMesocycles,
+  resetLegacyMesocycleStorage,
   loadSessions,
   loadSessionQuarantine,
   saveMesocycles,
@@ -119,7 +120,7 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
       const [loadedRoutineData, loadedMesocycles, loadedSessions, loadedHiddenShareIds, loadedAttempts, quarantine] =
         await Promise.all([
           loadCatalogWithRoutines(),
-          loadMesocycles(user),
+          resetLegacyMesocycleStorage(user).then(() => loadMesocycles(user)),
           loadSessions(),
           loadHiddenSharedRoutineIds(),
           loadAttempts(user),

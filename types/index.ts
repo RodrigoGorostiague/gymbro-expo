@@ -94,10 +94,12 @@ export interface PlannedSession {
   note?: string;
 }
 
+export type MesocycleEntry = PlannedSession | { id: string; kind: 'rest' };
+
 export interface MesocycleWeek {
   id: string;
   weekNumber: number;
-  sessions: PlannedSession[];
+  entries: MesocycleEntry[];
 }
 
 export interface Mesocycle {
@@ -165,6 +167,7 @@ export interface WorkoutSession {
   completedAt: string;
   durationSeconds: number;
   restTimerSeconds: number;
+  lineage?: WorkoutLineage;
   exercises: CompletedExercise[];
 }
 
@@ -237,6 +240,12 @@ export interface RewardApplication {
   readonly appliedAt?: string;
 }
 
+export interface WorkoutLineage {
+  readonly mesocycleId: string;
+  readonly weekNumber: number;
+  readonly plannedSessionId: string;
+}
+
 export interface WorkoutAttempt {
   readonly version: typeof WORKOUT_ATTEMPT_VERSION;
   readonly id: string;
@@ -246,6 +255,7 @@ export interface WorkoutAttempt {
   readonly completedAt: string;
   readonly durationSeconds: number;
   readonly restTimerSeconds: number;
+  readonly lineage?: WorkoutLineage;
   readonly exercises: readonly AttemptExerciseSnapshot[];
   readonly completion: AttemptCompletion;
   readonly reward: AttemptReward;

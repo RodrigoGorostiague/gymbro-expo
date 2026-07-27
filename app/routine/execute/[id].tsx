@@ -23,6 +23,31 @@ import { vibrateRestTimerComplete } from '../../../utils/haptics';
 import { generateId } from '../../../utils/storage';
 import { createWorkoutAttempt } from '../../../utils/workoutAttempts';
 
+function readSingleParam(value: string | string[] | undefined): string | undefined {
+  if (typeof value === 'string') {
+    const trimmed = value.trim();
+    return trimmed.length > 0 ? trimmed : undefined;
+  }
+  if (Array.isArray(value)) return readSingleParam(value[0]);
+  return undefined;
+}
+
+function parseLineage(params: {
+  mesocycleId?: string | string[];
+  weekNumber?: string | string[];
+  plannedSessionId?: string | string[];
+}) {
+  const mesocycleId = readSingleParam(params.mesocycleId);
+  const plannedSessionId = readSingleParam(params.plannedSessionId);
+  const rawWeekNumber = readSingleParam(params.weekNumber);
+  const weekNumber = rawWeekNumber ? Number.parseInt(rawWeekNumber, 10) : Number.NaN;
+
+  if (!mesocycleId && !plannedSessionId && !rawWeekNumber) return undefined;
+  if (!mesocycleId || !plannedSessionId || !Number.isInteger(weekNumber) || weekNumber <= 0) return undefined;
+
+  return { mesocycleId, weekNumber, plannedSessionId };
+}
+
 function formatTime(seconds: number): string {
   const m = Math.floor(seconds / 60);
   const s = seconds % 60;
@@ -61,12 +86,19 @@ function buildSetValues(routine: Routine): Record<SetKey, SetRuntimeValues> {
 }
 
 export default function ExecuteRoutineScreen() {
-  const { id } = useLocalSearchParams<{ id: string }>();
+  const params = useLocalSearchParams<{
+    id: string | string[];
+    mesocycleId?: string | string[];
+    weekNumber?: string | string[];
+    plannedSessionId?: string | string[];
+  }>();
+  const id = readSingleParam(params.id) ?? '';
   const { user } = useAuth();
   const { getRoutine, addAttempt } = useData();
   const { retryPendingRewards } = useShop();
   const { theme } = useTheme();
   const routine = getRoutine(id);
+  const lineage = parseLineage(params);
 
   const [phase, setPhase] = useState<'setup' | 'active' | 'done'>('setup');
   const [restSeconds, setRestSeconds] = useState('90');
@@ -201,6 +233,7 @@ export default function ExecuteRoutineScreen() {
         completedAt: new Date().toISOString(),
         durationSeconds: elapsed,
         restTimerSeconds: restTimerConfig,
+        lineage,
         results: Object.fromEntries(exercises.flatMap((exercise) => exercise.sets.map((set) =>
           [`${exercise.exerciseId}:${set.setId}`, { performed: set.completed, reps: set.reps, load: set.weight }]))),
       });

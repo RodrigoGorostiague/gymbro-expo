@@ -5,7 +5,6 @@ import {
   ExerciseVariant,
   Mesocycle,
   MesocycleStatus,
-  MesocycleWeek,
   PlannedSession,
   PlannedSessionRef,
   Routine,
@@ -22,7 +21,9 @@ const KEYS = {
   exerciseCatalog: '@gymbro/exercise-catalog/v1',
   routines: '@gymbro/routines',
   legacyMesocycles: '@gymbro/mesocycles',
-  mesocycles: (profile: UserProfile) => `@gymbro/mesocycles/v1/${profile}`,
+  legacyMesocyclePrefix: '@gymbro/mesocycles/v1/',
+  mesocycleReset: '@gymbro/migrations/mesocycle-schedule-reset-v1',
+  mesocycles: (profile: UserProfile) => `@gymbro/mesocycles/v2/${profile}`,
   sessions: '@gymbro/sessions',
   sessionMigration: '@gymbro/migrations/profile-attempts-v1',
   sessionQuarantine: '@gymbro/quarantine/ownerless-sessions-v1',
@@ -445,19 +446,23 @@ function normalizePlannedSession(value: unknown, index: number): PlannedSession 
   };
 }
 
-function normalizeMesocycleWeek(value: unknown, index: number): MesocycleWeek {
-  const week = value && typeof value === 'object' && !Array.isArray(value)
-    ? value as Partial<MesocycleWeek>
-    : {};
-  const storedSessions = Array.isArray(week.sessions) ? week.sessions : [];
-
-  return {
-    id: typeof week.id === 'string' ? week.id : `mesocycle-week-${index + 1}`,
-    weekNumber: typeof week.weekNumber === 'number' && Number.isInteger(week.weekNumber) && week.weekNumber > 0
-      ? week.weekNumber
-      : index + 1,
-    sessions: storedSessions.map((session, sessionIndex) => normalizePlannedSession(session, sessionIndex)),
-  };
+function normalizeMesocycleEntry(value: unknown, index: number): PlannedSession | { id: string; kind: 'rest' } | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  const candidate = value as Partial<PlannedSession> & { kind?: unknown };
+  if (typeof candidate.id !== 'string' || !candidate.id.trim()) return null;
+  if (candidate.kind === 'rest') return { id: candidate.id, kind: 'rest' };
+  if ('ref' in candidate && candidate.ref && typeof candidate.ref === 'object') {
+    const ref = normalizePlannedSessionRef(candidate.ref, '', 'Unknown routine');
+    return ref.routineId.trim() ? {
+      id: candidate.id,
+      ref,
+      dayLabel: typeof candidate.dayLabel === 'string' ? candidate.dayLabel : undefined,
+      order: typeof candidate.order === 'number' && Number.isInteger(candidate.order) ? candidate.order : index + 1,
+      progressionNote: typeof candidate.progressionNote === 'string' ? candidate.progressionNote : undefined,
+      note: typeof candidate.note === 'string' ? candidate.note : undefined,
+    } : null;
+  }
+  return null;
 }
 
 function normalizeMesocycle(value: unknown, index: number): Mesocycle {
@@ -465,7 +470,19 @@ function normalizeMesocycle(value: unknown, index: number): Mesocycle {
     ? value as Partial<Mesocycle>
     : {};
   const storedWeeks = Array.isArray(mesocycle.weeks) ? mesocycle.weeks : [];
-  const weeks = storedWeeks.map((week, weekIndex) => normalizeMesocycleWeek(week, weekIndex));
+  const weeks = storedWeeks.flatMap((week, weekIndex) => {
+    if (!week || typeof week !== 'object' || Array.isArray(week)) return [];
+    const candidate = week as { id?: unknown; weekNumber?: unknown; entries?: unknown };
+    if (!Array.isArray(candidate.entries) || candidate.entries.length > 7) return [];
+    const entries = candidate.entries.map(normalizeMesocycleEntry).filter((entry): entry is NonNullable<typeof entry> => entry !== null);
+    if (entries.length !== candidate.entries.length) return [];
+    return [{ id: typeof candidate.id === 'string' ? candidate.id : `mesocycle-week-${weekIndex + 1}`, weekNumber: typeof candidate.weekNumber === 'number' && Number.isInteger(candidate.weekNumber) && candidate.weekNumber > 0 ? candidate.weekNumber : weekIndex + 1, entries }];
+  });
+  const requestedDuration = typeof mesocycle.durationWeeks === 'number'
+    && Number.isInteger(mesocycle.durationWeeks)
+    && mesocycle.durationWeeks > 0
+    ? mesocycle.durationWeeks
+    : Math.max(weeks.length, 1);
 
   return {
     id: typeof mesocycle.id === 'string' ? mesocycle.id : `mesocycle-${index + 1}`,
@@ -473,29 +490,46 @@ function normalizeMesocycle(value: unknown, index: number): Mesocycle {
     goal: typeof mesocycle.goal === 'string' ? mesocycle.goal : '',
     status: normalizeMesocycleStatus(mesocycle.status),
     weeks,
-    durationWeeks: typeof mesocycle.durationWeeks === 'number'
-      && Number.isInteger(mesocycle.durationWeeks)
-      && mesocycle.durationWeeks > 0
-      ? mesocycle.durationWeeks
-      : Math.max(weeks.length, 1),
+    durationWeeks: Math.max(requestedDuration, weeks.length),
     startDate: typeof mesocycle.startDate === 'string' ? mesocycle.startDate : undefined,
     createdAt: typeof mesocycle.createdAt === 'string' ? mesocycle.createdAt : DEFAULT_MESOCYCLE_CREATED_AT,
   };
 }
 
 export async function saveMesocycles(profile: UserProfile, mesocycles: Mesocycle[]): Promise<void> {
-  await AsyncStorage.setItem(KEYS.mesocycles(profile), JSON.stringify(mesocycles));
+  await AsyncStorage.setItem(KEYS.mesocycles(profile), JSON.stringify(mesocycles.map(normalizeMesocycle)));
+}
+
+export async function resetLegacyMesocycleStorage(profile: UserProfile): Promise<void> {
+  if (await AsyncStorage.getItem(KEYS.mesocycleReset)) return;
+  const keys = await AsyncStorage.getAllKeys();
+  const legacyKeys = keys.filter((key) => key === KEYS.legacyMesocycles || key.startsWith(KEYS.legacyMesocyclePrefix));
+  for (const key of legacyKeys) {
+    const owner = key === KEYS.legacyMesocycles
+      ? profile
+      : key.slice(KEYS.legacyMesocyclePrefix.length) as UserProfile;
+    const legacyValue = await AsyncStorage.getItem(key);
+    if (legacyValue === null) continue;
+
+    const legacyMesocycles = (JSON.parse(legacyValue) as unknown[])
+      .map((mesocycle, index) => normalizeMesocycle(mesocycle, index));
+    const currentValue = await AsyncStorage.getItem(KEYS.mesocycles(owner));
+    const currentMesocycles = currentValue
+      ? (JSON.parse(currentValue) as unknown[]).map((mesocycle, index) => normalizeMesocycle(mesocycle, index))
+      : [];
+    const currentIds = new Set(currentMesocycles.map(({ id }) => id));
+    await AsyncStorage.setItem(
+      KEYS.mesocycles(owner),
+      JSON.stringify([...currentMesocycles, ...legacyMesocycles.filter(({ id }) => !currentIds.has(id))]),
+    );
+  }
+  if (legacyKeys.length) await AsyncStorage.multiRemove(legacyKeys);
+  await AsyncStorage.setItem(KEYS.mesocycleReset, 'complete');
 }
 
 export async function loadMesocycles(profile: UserProfile): Promise<Mesocycle[]> {
-  const profileKey = KEYS.mesocycles(profile);
-  const value = await AsyncStorage.getItem(profileKey);
-  if (!value) {
-    const legacyValue = await AsyncStorage.getItem(KEYS.legacyMesocycles);
-    if (!legacyValue) return [];
-    await AsyncStorage.setItem(profileKey, legacyValue);
-    return (JSON.parse(legacyValue) as unknown[]).map((mesocycle, index) => normalizeMesocycle(mesocycle, index));
-  }
+  const value = await AsyncStorage.getItem(KEYS.mesocycles(profile));
+  if (!value) return [];
   return (JSON.parse(value) as unknown[]).map((mesocycle, index) => normalizeMesocycle(mesocycle, index));
 }
 

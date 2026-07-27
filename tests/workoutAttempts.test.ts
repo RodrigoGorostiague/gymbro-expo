@@ -3,10 +3,12 @@ import {
   AttemptSetPlan,
   AttemptSetResult,
   MuscleAttribution,
+  Mesocycle,
   Routine,
   SetPerformance,
   WORKOUT_ATTEMPT_VERSION,
   WorkoutAttempt,
+  WorkoutLineage,
 } from '../types';
 import {
   areCompatibleObservations,
@@ -23,12 +25,19 @@ import {
   isValidPerformance,
   validateAttribution,
 } from '../utils/workoutAttempts';
+import { deriveMesocycleAdherence, deriveMesocycleScheduleProjection, deriveScheduleDateLabel } from '../utils/mesocycles';
 
 const captureRoutine: Routine = {
   id: 'routine-1', name: 'Original routine', muscleGroups: ['pecho'], createdAt: '2026-01-01T00:00:00Z',
   exercises: [{ id: 'routine-exercise', catalogExerciseId: 'catalog-exercise', name: 'Press', muscleGroups: ['pecho', 'tríceps'], variant: 'barra',
     attribution: { primary: 'pecho', secondary: ['tríceps'] },
     sets: [{ id: 'warmup', tipo: 'C', weight: 10, reps: 10 }, { id: 'failure', tipo: 'F', weight: 20, reps: 0 }] }],
+};
+
+const lineage: WorkoutLineage = {
+  mesocycleId: 'mesocycle-1',
+  weekNumber: 1,
+  plannedSessionId: 'session-1',
 };
 
 const plans = (count: number): AttemptSetPlan[] =>
@@ -38,6 +47,52 @@ const results = (count: number): AttemptSetResult[] =>
     setId: `set-${index}`, performed: true,
     performance: { mode: 'external-load', reps: 8, load: 20, unit: 'kg' },
   }));
+
+const adherenceMesocycle: Mesocycle = {
+  id: 'mesocycle-1', name: 'Adherence block', goal: '', status: 'active', durationWeeks: 1,
+  createdAt: '2026-07-25T00:00:00.000Z', weeks: [{
+    id: 'week-1', weekNumber: 1, entries: [
+      { id: 'session-1', ref: { routineId: 'routine-1', routineName: 'Upper', source: 'local' }, order: 1 },
+      { id: 'session-2', ref: { routineId: 'routine-2', routineName: 'Lower', source: 'local' }, order: 2 },
+    ],
+  }],
+};
+
+const adherenceAttempt = (
+  id: string,
+  completedAt: string,
+  status: WorkoutAttempt['completion']['status'],
+  displayPercent: number,
+  attemptLineage?: WorkoutLineage,
+): WorkoutAttempt => ({
+  version: WORKOUT_ATTEMPT_VERSION, id, owner: 'rodaja', routineId: 'routine-1', recordedRoutineName: 'Routine',
+  completedAt, durationSeconds: 60, restTimerSeconds: 30, lineage: attemptLineage, exercises: [],
+  completion: { validSets: 1, plannedSets: 1, adherence: displayPercent / 100, displayPercent, status },
+  reward: { setGems: 0, completionGems: 0, fullCompletionBonus: 0, totalGems: 0, qualifiesForCompletion: status !== 'partial' },
+  rewardApplication: { id: `rodaja:${id}:v1`, state: 'pending' },
+});
+const projectedAttempt = (
+  id: string,
+  completedAt: string,
+  status: WorkoutAttempt['completion']['status'],
+  validSets: number,
+  plannedSets: number,
+  exercises: WorkoutAttempt['exercises'],
+  attemptLineage: WorkoutLineage = lineage,
+): WorkoutAttempt => ({
+  ...adherenceAttempt(id, completedAt, status, Math.round(validSets / plannedSets * 100), attemptLineage),
+  exercises,
+  completion: { validSets, plannedSets, adherence: validSets / plannedSets, displayPercent: Math.round(validSets / plannedSets * 100), status },
+  reward: { setGems: validSets, completionGems: validSets / plannedSets >= 0.7 ? 5 : 0, fullCompletionBonus: 0, totalGems: validSets, qualifiesForCompletion: validSets / plannedSets >= 0.7 },
+});
+const validSet = (id: string) => ({
+  plan: { id, type: 1 as const },
+  result: { setId: id, performed: true, performance: { mode: 'external-load' as const, reps: 8, load: 20, unit: 'kg' as const } },
+});
+const invalidSet = (id: string) => ({
+  plan: { id, type: 1 as const },
+  result: { setId: id, performed: false, performance: null },
+});
 describe('workout attempt contracts', () => {
   test('records profile, version, stable snapshots, and explicit unknown identity', () => {
     const source = { name: 'Historical routine' };
@@ -144,15 +199,120 @@ describe('workout attempt contracts', () => {
       durationSeconds: 90, restTimerSeconds: 30, results: {
         'routine-exercise:warmup': { performed: true, reps: 10, load: 10 },
         'routine-exercise:failure': { performed: true, reps: 8, load: 20 },
-      },
+      }, lineage,
     });
     expect(attempt).toMatchObject({ version: 1, owner: 'rodaja', recordedRoutineName: 'Original routine', completion: { status: 'fully-completed', validSets: 2 },
       reward: { setGems: 2, completionGems: 5, fullCompletionBonus: 2, totalGems: 9 },
-      rewardApplication: { id: 'rodaja:capture:v1', state: 'pending' } });
+      rewardApplication: { id: 'rodaja:capture:v1', state: 'pending' }, lineage });
     expect(attempt.exercises[0]).toMatchObject({ exerciseId: 'catalog-exercise', recordedName: 'Press',
       attribution: { primary: 'pecho', secondary: ['tríceps'] } });
     expect(attempt.exercises[0].sets[1]).toMatchObject({ plan: { type: 'F' }, result: { performance: { mode: 'external-load', unit: 'kg', reps: 8, load: 20 } } });
     expect(getExerciseExposure(attempt.exercises[0].attribution!, attempt.exercises[0].sets)).toEqual({ pecho: 1, tríceps: 0.4 });
+  });
+
+  test('downgrades partial lineage to routine-only history', () => {
+    const attempt = createWorkoutAttempt({
+      id: 'partial-lineage', owner: 'rodaja', routine: captureRoutine, completedAt: '2026-07-25T10:00:00Z',
+      durationSeconds: 90, restTimerSeconds: 30, lineage: { ...lineage, plannedSessionId: '' },
+      results: {
+        'routine-exercise:warmup': { performed: true, reps: 10, load: 10 },
+        'routine-exercise:failure': { performed: true, reps: 8, load: 20 },
+      },
+    });
+
+    expect(attempt.lineage).toBeUndefined();
+    expect(attemptToSession(attempt).lineage).toBeUndefined();
+  });
+
+  test('derives lineage-aware adherence once per session with partial progress and neutral legacy attempts', () => {
+    const adherence = deriveMesocycleAdherence(adherenceMesocycle, [
+      adherenceAttempt('older-completed', '2026-07-25T09:00:00.000Z', 'fully-completed', 100, lineage),
+      adherenceAttempt('latest-partial', '2026-07-25T10:00:00.000Z', 'partial', 40, lineage),
+      adherenceAttempt('completed-session-2', '2026-07-25T11:00:00.000Z', 'completed', 70, { ...lineage, plannedSessionId: 'session-2' }),
+      adherenceAttempt('routine-only', '2026-07-25T12:00:00.000Z', 'fully-completed', 100),
+      adherenceAttempt('other-mesocycle', '2026-07-25T12:00:00.000Z', 'fully-completed', 100, { ...lineage, mesocycleId: 'other' }),
+    ]);
+
+    expect(adherence).toMatchObject({ plannedSessions: 2, completedSessions: 1 });
+    expect(adherence.weeks[0]).toMatchObject({ plannedSessions: 2, completedSessions: 1 });
+    expect(adherence.weeks[0].sessionStates).toMatchObject([
+      { plannedSessionId: 'session-1', status: 'partial', displayPercent: 40, authoritativeAttemptId: 'latest-partial' },
+      { plannedSessionId: 'session-2', status: 'completed', displayPercent: 70, authoritativeAttemptId: 'completed-session-2' },
+    ]);
+  });
+
+  test('derives local schedule labels from flattened offsets and rejects invalid start dates', () => {
+    expect(deriveScheduleDateLabel('2026-06-01', 0, 'en-US')).toEqual({ weekday: 'Monday', date: 'June 1' });
+    expect(deriveScheduleDateLabel('2026-06-01', 2, 'en-US')).toEqual({ weekday: 'Wednesday', date: 'June 3' });
+    expect(deriveScheduleDateLabel('2026-02-30', 0, 'en-US')).toBeNull();
+    expect(deriveScheduleDateLabel(undefined, 0, 'en-US')).toBeNull();
+  });
+
+  test('projects the latest lineage attempt with valid-set and fully-valid exercise progress', () => {
+    const partialExercises = [
+      { exerciseId: 'press', recordedName: 'Press', attribution: null, sets: [validSet('press-1'), validSet('press-2')] },
+      { exerciseId: 'row', recordedName: 'Row', attribution: null, sets: [validSet('row-1'), invalidSet('row-2')] },
+    ] as const;
+    const staleExercises = [{ exerciseId: 'press', recordedName: 'Press', attribution: null, sets: [validSet('press-1')] }] as const;
+    const adherence = deriveMesocycleAdherence(adherenceMesocycle, [
+      projectedAttempt('a-older', '2026-07-25T10:00:00.000Z', 'fully-completed', 1, 1, staleExercises),
+      projectedAttempt('z-newer', '2026-07-25T10:00:00.000Z', 'completed', 3, 4, partialExercises),
+    ]);
+
+    expect(adherence.weeks[0].sessionStates[0]).toMatchObject({
+      authoritativeAttemptId: 'z-newer', status: 'completed', fullyCompleted: false,
+      validSets: 3, plannedSets: 4, completedExercises: 1, plannedExercises: 2, displayPercent: 75,
+    });
+    expect(adherence.weeks[0].sessionStates[1]).toMatchObject({
+      status: 'not-started', fullyCompleted: false,
+      validSets: 0, plannedSets: 0, completedExercises: 0, plannedExercises: 0, displayPercent: null,
+    });
+  });
+
+  test('keeps play eligible when 70 percent earns a reward without full completion', () => {
+    const attempt = projectedAttempt('reward-partial', '2026-07-25T10:00:00.000Z', 'completed', 7, 10, [
+      { exerciseId: 'press', recordedName: 'Press', attribution: null, sets: [validSet('press-1')] },
+    ]);
+    const progress = deriveMesocycleAdherence(adherenceMesocycle, [attempt]).weeks[0].sessionStates[0];
+
+    expect(attempt.reward.qualifiesForCompletion).toBe(true);
+    expect(progress).toMatchObject({ status: 'completed', fullyCompleted: false, displayPercent: 70 });
+  });
+
+  test('projects routine metadata and explicit rest state without fabricating routine progress', () => {
+    const mesocycle: Mesocycle = {
+      ...adherenceMesocycle,
+      startDate: '2026-06-01',
+      weeks: [{ ...adherenceMesocycle.weeks[0], entries: [
+        adherenceMesocycle.weeks[0].entries[0],
+        { id: 'rest-1', kind: 'rest' },
+        { ...adherenceMesocycle.weeks[0].entries[1], ref: { routineId: 'missing', routineName: 'Missing', source: 'local' } },
+      ] }],
+    };
+    const routines: Routine[] = [{ ...captureRoutine, id: 'routine-1', muscleGroups: ['pecho', 'tríceps'] }];
+
+    expect(deriveMesocycleScheduleProjection(mesocycle, routines, [], 'en-US')).toMatchObject([
+      {
+        kind: 'routine', entryId: 'session-1', dateLabel: { weekday: 'Monday', date: 'June 1' },
+        routine: { available: true, muscleGroups: ['pecho', 'tríceps'], exerciseCount: 1 },
+        progress: { status: 'not-started', fullyCompleted: false, validSets: 0, plannedSets: 0 },
+      },
+      { kind: 'rest', entryId: 'rest-1', dateLabel: { weekday: 'Tuesday', date: 'June 2' }, progress: { status: 'rest', displayPercent: null } },
+      {
+        kind: 'routine', entryId: 'session-2', dateLabel: { weekday: 'Wednesday', date: 'June 3' },
+        routine: { available: false, muscleGroups: [], exerciseCount: 0 },
+      },
+    ]);
+  });
+
+  test('projects deterministic local schedule states and remains neutral for missing or invalid starts', () => {
+    const today = new Date(2026, 5, 2, 8);
+    const scheduled = { ...adherenceMesocycle, startDate: '2026-06-01' };
+
+    expect(deriveMesocycleScheduleProjection(scheduled, [], [], 'en-US', today).map(({ scheduleState }) => scheduleState)).toEqual(['past', 'today']);
+    expect(deriveMesocycleScheduleProjection({ ...scheduled, startDate: '2026-06-03' }, [], [], 'en-US', today).map(({ scheduleState }) => scheduleState)).toEqual(['upcoming', 'upcoming']);
+    expect(deriveMesocycleScheduleProjection({ ...scheduled, startDate: undefined }, [], [], 'en-US', today).map(({ scheduleState }) => scheduleState)).toEqual([null, null]);
+    expect(deriveMesocycleScheduleProjection({ ...scheduled, startDate: '2026-02-30' }, [], [], 'en-US', today).map(({ scheduleState }) => scheduleState)).toEqual([null, null]);
   });
 
   test('captures role-less flat muscle groups with order-independent exposure', () => {
@@ -192,8 +352,9 @@ describe('workout attempt contracts', () => {
   test('projects history and edits only mutable results without changing eligibility', () => {
     const attempt = createWorkoutAttempt({ id: 'editable', owner: 'rodaja', routine: captureRoutine,
       completedAt: '2026-07-25T10:00:00Z', durationSeconds: 60, restTimerSeconds: 30,
-      results: { 'routine-exercise:failure': { performed: true, reps: 8, load: 20 } } });
+      results: { 'routine-exercise:failure': { performed: true, reps: 8, load: 20 } }, lineage });
     const session = attemptToSession(attempt);
+    expect(session.lineage).toEqual(lineage);
     const edited = applySessionEdits(attempt, { ...session, completedAt: '2026-07-26T10:00:00Z',
       exercises: session.exercises.map((exercise) => ({ ...exercise, sets: exercise.sets.map((set) =>
         set.completed ? { ...set, reps: 9, weight: 22 } : set) })) });

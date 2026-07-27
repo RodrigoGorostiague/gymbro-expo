@@ -13,11 +13,21 @@ import {
   UserProfile,
   WORKOUT_ATTEMPT_VERSION,
   WorkoutAttempt,
+  WorkoutLineage,
   WorkoutSession,
 } from '../types';
 
 export interface AttemptCaptureInput { id: string; owner: UserProfile; routine: Routine; completedAt: string; durationSeconds: number;
-  restTimerSeconds: number; results: Readonly<Record<string, { performed: boolean; reps: number; load: number }>> }
+  restTimerSeconds: number; results: Readonly<Record<string, { performed: boolean; reps: number; load: number }>>;
+  lineage?: WorkoutLineage }
+
+function isValidLineage(lineage?: WorkoutLineage): lineage is WorkoutLineage {
+  return !!lineage
+    && lineage.mesocycleId.trim().length > 0
+    && Number.isInteger(lineage.weekNumber)
+    && lineage.weekNumber > 0
+    && lineage.plannedSessionId.trim().length > 0;
+}
 
 export function createWorkoutAttempt(input: AttemptCaptureInput): WorkoutAttempt {
   const exercises = input.routine.exercises.map((exercise) => {
@@ -45,15 +55,17 @@ export function createWorkoutAttempt(input: AttemptCaptureInput): WorkoutAttempt
   });
   const sets = exercises.flatMap((exercise) => exercise.sets);
   const { completion, reward } = finalizeAttempt(sets.map(({ plan }) => plan), sets.map(({ result }) => result));
+  const lineage = isValidLineage(input.lineage) ? input.lineage : undefined;
   return { version: WORKOUT_ATTEMPT_VERSION, id: input.id, owner: input.owner, routineId: input.routine.id, recordedRoutineName: input.routine.name,
     completedAt: input.completedAt, durationSeconds: input.durationSeconds,
-    restTimerSeconds: input.restTimerSeconds, exercises, completion, reward,
+    restTimerSeconds: input.restTimerSeconds, lineage, exercises, completion, reward,
     rewardApplication: { id: `${input.owner}:${input.id}:v${WORKOUT_ATTEMPT_VERSION}`, state: 'pending' } };
 }
 
 export function attemptToSession(attempt: WorkoutAttempt): WorkoutSession {
   return { id: attempt.id, routineId: attempt.routineId ?? '', routineName: attempt.recordedRoutineName,
     completedAt: attempt.completedAt, durationSeconds: attempt.durationSeconds, restTimerSeconds: attempt.restTimerSeconds,
+    lineage: attempt.lineage,
     exercises: attempt.exercises.map((exercise, exerciseIndex) => ({
       exerciseId: exercise.exerciseId ?? `unknown-${exerciseIndex}`,
       catalogExerciseId: exercise.exerciseId ?? undefined, name: exercise.recordedName,

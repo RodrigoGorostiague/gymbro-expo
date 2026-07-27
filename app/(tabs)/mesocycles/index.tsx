@@ -22,7 +22,7 @@ const formatStartDate = (value?: string) => (value ? value : 'Sin fecha definida
 function MesocycleCard({ mesocycle, onDelete }: { mesocycle: Mesocycle; onDelete: () => void }) {
   const { theme } = useTheme();
   const status = STATUS_META[mesocycle.status];
-  const sessionCount = mesocycle.weeks.reduce((total, week) => total + week.sessions.length, 0);
+  const sessionCount = mesocycle.weeks.reduce((total, week) => total + week.entries.filter((entry) => !('kind' in entry && entry.kind === 'rest')).length, 0);
 
   return (
     <HapticPressable onPress={() => router.push(`/mesocycle/summary/${mesocycle.id}`)}>

@@ -22,7 +22,7 @@ const STATUS_OPTIONS: { value: MesocycleStatus; label: string }[] = [
 const buildWeeks = (durationWeeks: number) => Array.from({ length: durationWeeks }, (_, index) => ({
   id: generateId(),
   weekNumber: index + 1,
-  sessions: [],
+  entries: [],
 }));
 
 const normalizeStartDate = (value: string) => {

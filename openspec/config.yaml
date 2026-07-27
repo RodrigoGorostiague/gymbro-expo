@@ -7,18 +7,19 @@ context: |
   Navigation lives under app/ with Stack + Tabs; app state is coordinated through React Context providers.
   Local persistence uses AsyncStorage for routines, sessions, user state, and shop state.
   Remote sync uses Firebase Firestore plus Expo notifications.
-  No automated test runner, linter, or formatter is configured; npx tsc --noEmit is the only detected quality gate.
+  Vitest is configured and runnable via npm test; coverage is not currently runnable because a Vitest coverage provider is missing.
+  No dedicated linter or formatter command is configured; npx tsc --noEmit is the detected static quality gate.
 
 testing:
-  detected: 2026-06-18
+  detected: 2026-07-26
   strict_tdd: false
   runner:
-    available: false
-    framework: none detected
-    command: ""
+    available: true
+    framework: Vitest
+    command: npm test
   layers:
-    unit: false
-    integration: false
+    unit: true
+    integration: true
     e2e: false
   coverage:
     available: false
@@ -51,10 +52,10 @@ rules:
     - Follow existing Expo Router, Context, and AsyncStorage patterns.
     - Read Expo SDK 56 docs before changing Expo-dependent behavior.
     tdd: false
-    test_command: ""
+    test_command: npm test
     typecheck_command: npx tsc --noEmit
   verify:
-    test_command: ""
+    test_command: npm test
     build_command: npx tsc --noEmit
     coverage_threshold: 0
   archive:

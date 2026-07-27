@@ -1,119 +1,59 @@
 import React from 'react';
 import { ScrollView, StyleSheet, Text, View } from 'react-native';
-import { router, useLocalSearchParams } from 'expo-router';
+import Ionicons from '@expo/vector-icons/Ionicons';
+import { Href, router, useLocalSearchParams } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { AppNavBar } from '../../../components/AppNavBar';
 import { GlassCard, ThemeBackground } from '../../../components/GlassCard';
+import { HapticPressable } from '../../../components/HapticPressable';
 import { GlassButton } from '../../../components/UI';
 import { useData } from '../../../context/DataContext';
 import { useTheme } from '../../../context/ThemeContext';
-import { buildMesocycleDraft, countPlannedSessions } from '../../../utils/mesocycles';
+import { MesocycleEntry, PlannedSession, PlannedSessionRef } from '../../../types';
+import { buildMesocycleDraft, deriveMesocycleAdherence, deriveMesocycleDayGuidance, deriveMesocycleScheduleProjection, MesocycleScheduleProjectionEntry } from '../../../utils/mesocycles';
 
-const formatStartDate = (value?: string) => (value ? value : 'Sin fecha definida');
+const recoveryCopy: Record<NonNullable<MesocycleScheduleProjectionEntry['scheduleState']>, string> = {
+  upcoming: 'Recuperación programada próximamente.',
+  today: 'Hoy es un día de recuperación.',
+  past: 'Este día de recuperación ya pasó.',
+};
+const isRest = (entry: MesocycleEntry): entry is Extract<MesocycleEntry, { kind: 'rest' }> => 'kind' in entry && entry.kind === 'rest';
+const findRoutineEntry = (entries: readonly MesocycleEntry[], entryId: string): PlannedSession | undefined => entries.find((candidate): candidate is PlannedSession => candidate.id === entryId && !isRest(candidate));
 
 export default function MesocycleSummaryScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
-  const { getMesocycle, resolvePlannedRoutine } = useData();
+  const { attempts, getMesocycle, routines, resolvePlannedRoutine } = useData();
   const { theme } = useTheme();
   const mesocycle = getMesocycle(id);
-
-  if (!mesocycle) {
-    return (
-      <ThemeBackground>
-        <SafeAreaView style={styles.safe}>
-          <AppNavBar onBack={() => router.back()} />
-          <GlassCard>
-            <Text style={[styles.title, { color: theme.text }]}>No encontramos este mesociclo</Text>
-            <Text style={[styles.subtitle, { color: theme.textMuted }]}>Si llegaste desde un enlace viejo o ya borraste este bloque, vuelve a la lista para elegir otro plan.</Text>
-            <View style={styles.actions}>
-              <GlassButton title="Volver a mesociclos" onPress={() => router.replace('/(tabs)/mesocycles')} />
-            </View>
-          </GlassCard>
-        </SafeAreaView>
-      </ThemeBackground>
-    );
-  }
+  if (!mesocycle) return <ThemeBackground><SafeAreaView style={styles.safe}><AppNavBar onBack={() => router.back()} /><GlassCard><Text style={[styles.title, { color: theme.text }]}>No encontramos este mesociclo</Text><GlassButton title="Volver a mesociclos" onPress={() => router.replace('/(tabs)/mesocycles')} /></GlassCard></SafeAreaView></ThemeBackground>;
 
   const draft = buildMesocycleDraft(mesocycle);
-  const plannedSessions = countPlannedSessions(draft);
+  const adherence = deriveMesocycleAdherence(draft, attempts);
+  const schedule = deriveMesocycleScheduleProjection(draft, routines ?? [], attempts);
+  const today = deriveMesocycleDayGuidance(draft);
+  const execute = (weekNumber: number, entryId: string, routineId: string) => router.push({ pathname: '/routine/execute/[id]', params: { id: routineId, mesocycleId: draft.id, weekNumber: String(weekNumber), plannedSessionId: entryId } } satisfies Href);
 
-  return (
-    <ThemeBackground>
-      <SafeAreaView style={styles.safe}>
-        <AppNavBar
-          onBack={() => router.back()}
-          trailing={<Text style={[styles.headerTitle, { color: theme.primary }]}>{draft.status}</Text>}
-        />
-
-        <ScrollView contentContainerStyle={styles.scroll} showsVerticalScrollIndicator={false}>
-          <Text style={[styles.title, { color: theme.text }]}>{draft.name}</Text>
-          <Text style={[styles.subtitle, { color: theme.textMuted }]}>Resumen del mesociclo</Text>
-
-          <GlassCard style={styles.section}>
-            <Text style={[styles.sectionTitle, { color: theme.text }]}>Vista general</Text>
-            <Text style={[styles.metaText, { color: theme.textMuted }]}>Objetivo: {draft.goal || 'Sin objetivo definido todavía'}</Text>
-            <Text style={[styles.metaText, { color: theme.textMuted }]}>Fecha de inicio: {formatStartDate(draft.startDate)}</Text>
-            <Text style={[styles.metaText, { color: theme.textMuted }]}>Duración: {draft.durationWeeks} semana{draft.durationWeeks === 1 ? '' : 's'}</Text>
-            <Text style={[styles.metaText, { color: theme.textMuted }]}>Sesiones planificadas: {plannedSessions}</Text>
-
-            <View style={styles.actions}>
-              <GlassButton title="Editar mesociclo" onPress={() => router.push(`/mesocycle/${id}`)} />
-            </View>
-          </GlassCard>
-
-          {draft.weeks.map((week) => (
-            <GlassCard key={week.id} style={styles.section}>
-              <Text style={[styles.sectionTitle, { color: theme.text }]}>Semana {week.weekNumber}</Text>
-              <Text style={[styles.weekMeta, { color: theme.textMuted }]}>{week.sessions.length} sesión{week.sessions.length === 1 ? '' : 'es'} planificada{week.sessions.length === 1 ? '' : 's'}</Text>
-
-              {week.sessions.length === 0 ? (
-                <Text style={[styles.emptyText, { color: theme.textMuted }]}>Todavía no hay sesiones planificadas en esta semana.</Text>
-              ) : week.sessions.map((session) => {
-                const resolvedRoutine = resolvePlannedRoutine(session.ref);
-                return (
-                  <View key={session.id} style={[styles.sessionCard, { borderColor: theme.glassBorder }]}> 
-                    <Text style={[styles.sessionTitle, { color: theme.text }]}>{session.ref.routineName}</Text>
-                    <Text style={[styles.sessionMeta, { color: theme.textMuted }]}>Día: {session.dayLabel || 'Sin asignar'} · Orden #{session.order}</Text>
-                    <Text style={[styles.sessionMeta, { color: resolvedRoutine ? theme.textMuted : '#F5B041' }]}>
-                      {resolvedRoutine ? 'Rutina disponible' : 'Rutina no disponible'}
-                    </Text>
-                    {session.progressionNote ? (
-                      <Text style={[styles.sessionNote, { color: theme.textMuted }]}>Progresión: {session.progressionNote}</Text>
-                    ) : null}
-                    {session.note ? (
-                      <Text style={[styles.sessionNote, { color: theme.textMuted }]}>Nota: {session.note}</Text>
-                    ) : null}
-                    {!resolvedRoutine ? (
-                      <Text style={[styles.sessionNote, { color: '#F5B041' }]}>Esta rutina ya no está disponible para ejecutar desde este resumen.</Text>
-                    ) : null}
-                    <View style={styles.actions}>
-                      <GlassButton title="Ejecutar rutina" onPress={() => resolvedRoutine ? router.push(`/routine/execute/${resolvedRoutine.id}`) : undefined} variant="secondary" disabled={!resolvedRoutine} />
-                    </View>
-                  </View>
-                );
-              })}
-            </GlassCard>
-          ))}
-        </ScrollView>
-      </SafeAreaView>
-    </ThemeBackground>
-  );
+  return <ThemeBackground><SafeAreaView style={styles.safe}><AppNavBar onBack={() => router.back()} /><ScrollView contentContainerStyle={styles.scroll}>
+    <Text style={[styles.title, { color: theme.text }]}>{draft.name}</Text><Text style={[styles.subtitle, { color: theme.textMuted }]}>Resumen del mesociclo</Text>
+    <GlassCard style={styles.card}><Text style={[styles.heading, { color: theme.text }]}>Vista general</Text><Text style={{ color: theme.textMuted }}>Progreso: {adherence.completedSessions}/{adherence.plannedSessions} sesiones completadas</Text><GlassButton title="Editar mesociclo" onPress={() => router.push(`/mesocycle/${id}`)} /></GlassCard>
+    {today ? <GlassCard style={styles.card}><Text style={[styles.heading, { color: theme.text }]}>Guía de hoy</Text>{today.state === 'pre-start' ? <Text style={{ color: theme.textMuted }}>El plan todavía no comenzó.</Text> : null}{today.state === 'unplanned' ? <Text style={{ color: theme.textMuted }}>Hoy no hay una entrada planificada.</Text> : null}{today.state === 'completed' ? <Text style={{ color: theme.textMuted }}>El plan ya terminó.</Text> : null}{today.state === 'rest' ? <Text style={{ color: theme.textMuted }}>Hoy toca descanso.</Text> : null}{today.state === 'routine' ? <Text style={{ color: theme.textMuted }}>Hoy: {today.ref.routineName}</Text> : null}</GlassCard> : null}
+    {draft.weeks.map((week) => <GlassCard key={week.id} style={styles.card}><Text style={[styles.heading, { color: theme.text }]}>Semana {week.weekNumber}</Text>{schedule.filter((entry) => entry.weekNumber === week.weekNumber).length === 0 ? <Text style={{ color: theme.textMuted }}>Todavía no hay entradas planificadas en esta semana.</Text> : schedule.filter((entry) => entry.weekNumber === week.weekNumber).map((entry) => entry.kind === 'rest' ? <RestCard key={entry.entryId} entry={entry} theme={theme} /> : <RoutineCard key={entry.entryId} entry={entry} routineRef={findRoutineEntry(week.entries, entry.entryId)?.ref ?? { routineId: '', routineName: 'Rutina', source: 'local' }} resolvePlannedRoutine={resolvePlannedRoutine} onExecute={execute} theme={theme} />)}</GlassCard>)}
+  </ScrollView></SafeAreaView></ThemeBackground>;
 }
 
+function RestCard({ entry, theme }: { entry: Extract<MesocycleScheduleProjectionEntry, { kind: 'rest' }>; theme: { secondary: string; text: string; textMuted: string; glass: string; glassBorder: string } }) {
+  const date = entry.dateLabel;
+  return <View style={[styles.restCard, { backgroundColor: theme.glass, borderColor: theme.glassBorder }]}><Ionicons name="moon-outline" size={20} color={theme.secondary} /><View style={styles.cardContent}>{date ? <Text style={[styles.dateLabel, { color: theme.secondary }]}>{date.weekday} · {date.date}</Text> : null}<Text style={[styles.restTitle, { color: theme.text }]}>Día de descanso</Text><Text style={{ color: theme.textMuted }}>{entry.scheduleState ? recoveryCopy[entry.scheduleState] : 'Recuperación programada.'}</Text><Text style={{ color: theme.textMuted }}>Descanso planificado</Text></View></View>;
+}
+
+function RoutineCard({ entry, routineRef, resolvePlannedRoutine, onExecute, theme }: { entry: Extract<MesocycleScheduleProjectionEntry, { kind: 'routine' }>; routineRef: PlannedSessionRef; resolvePlannedRoutine: (ref: PlannedSessionRef) => { id: string } | undefined; onExecute: (weekNumber: number, entryId: string, routineId: string) => void; theme: { primary: string; secondary: string; text: string; textMuted: string; onPrimary: string; glass: string; glassBorder: string } }) {
+  const routine = entry.routine.available ? resolvePlannedRoutine(routineRef) : undefined;
+  const percent = entry.progress.plannedSets ? Math.round((entry.progress.validSets / entry.progress.plannedSets) * 100) : 0;
+  return <View style={[styles.routineCard, { borderColor: theme.glassBorder }]}><View style={styles.routineHeader}><View style={styles.cardContent}><Text style={[styles.routineTitle, { color: theme.text }]}>{routineRef.routineName}</Text>{entry.dateLabel ? <Text style={[styles.dateLabel, { color: theme.primary }]}>{entry.dateLabel.weekday} · {entry.dateLabel.date}</Text> : null}</View>{routine && !entry.progress.fullyCompleted ? <PlayAction routineName={routineRef.routineName} onPress={() => onExecute(entry.weekNumber, entry.entryId, routine.id)} theme={theme} /> : null}</View>{routine ? <><Text style={{ color: theme.textMuted }}>{entry.routine.muscleGroups.join(' · ')} · {entry.routine.exerciseCount} ejercicios</Text><Text style={{ color: theme.textMuted }}>Ejercicios: {entry.progress.completedExercises}/{entry.progress.plannedExercises}</Text><Text style={{ color: theme.textMuted }}>Series válidas: {entry.progress.validSets}/{entry.progress.plannedSets}</Text><View style={[styles.progressTrack, { backgroundColor: theme.glassBorder }]}><View style={[styles.progressFill, { width: `${percent}%`, backgroundColor: entry.progress.fullyCompleted ? theme.secondary : theme.primary }]} /></View>{entry.progress.fullyCompleted ? <Text style={{ color: theme.secondary }}>Sesión completada</Text> : null}</> : <Text style={{ color: '#F5B041' }}>Rutina no disponible</Text>}</View>;
+}
+
+function PlayAction({ routineName, onPress, theme }: { routineName: string; onPress: () => void; theme: { primary: string; onPrimary: string } }) { return <HapticPressable style={[styles.playAction, { backgroundColor: theme.primary }]} accessibilityRole="button" accessibilityLabel={`Ejecutar ${routineName}`} accessibilityHint="Abre la rutina programada para esta sesión." onPress={onPress}><Ionicons name="play" size={18} color={theme.onPrimary} /></HapticPressable>; }
+
 const styles = StyleSheet.create({
-  safe: { flex: 1, paddingHorizontal: 20, paddingTop: 8 },
-  scroll: { paddingBottom: 40 },
-  headerTitle: { fontSize: 14, fontWeight: '800', textTransform: 'capitalize' },
-  title: { fontSize: 26, fontWeight: '900', marginBottom: 4 },
-  subtitle: { fontSize: 14, lineHeight: 20, marginBottom: 16 },
-  section: { marginBottom: 14 },
-  sectionTitle: { fontSize: 18, fontWeight: '800', marginBottom: 8 },
-  metaText: { fontSize: 14, lineHeight: 20, marginTop: 4 },
-  weekMeta: { fontSize: 13, marginBottom: 12 },
-  emptyText: { fontSize: 13, lineHeight: 18 },
-  sessionCard: { borderWidth: 1, borderRadius: 18, padding: 14, marginTop: 10 },
-  sessionTitle: { fontSize: 16, fontWeight: '800' },
-  sessionMeta: { fontSize: 12, marginTop: 4 },
-  sessionNote: { fontSize: 13, lineHeight: 18, marginTop: 8 },
-  actions: { marginTop: 16, gap: 10 },
+  safe: { flex: 1, paddingHorizontal: 20, paddingTop: 8 }, scroll: { paddingBottom: 40 }, title: { fontSize: 26, fontWeight: '900' }, subtitle: { marginBottom: 16 }, card: { marginBottom: 14 }, heading: { fontSize: 18, fontWeight: '800', marginBottom: 8 }, routineCard: { gap: 6, padding: 12, borderWidth: 1, borderRadius: 12, marginTop: 10 }, routineHeader: { flexDirection: 'row', alignItems: 'flex-start', gap: 12 }, cardContent: { flex: 1, gap: 3 }, routineTitle: { fontSize: 16, fontWeight: '800' }, restCard: { flexDirection: 'row', gap: 10, padding: 12, borderWidth: 1, borderRadius: 12, alignItems: 'center', marginTop: 10 }, restTitle: { fontSize: 16, fontWeight: '800' }, dateLabel: { fontSize: 12, fontWeight: '800', textTransform: 'capitalize' }, progressTrack: { height: 7, borderRadius: 99, overflow: 'hidden' }, progressFill: { height: '100%', borderRadius: 99 }, playAction: { width: 38, height: 38, borderRadius: 19, alignItems: 'center', justifyContent: 'center' },
 });
