@@ -166,7 +166,7 @@ export function LoginFormPanel({
                   end={{ x: 1, y: 0.5 }}
                   style={styles.submitBtn}
                 >
-                  <Text style={styles.submitText}>Entrar al gym</Text>
+                  <Text style={styles.submitText}>Entrar al gimnasio</Text>
                 </LinearGradient>
               </HapticPressable>
             </View>

@@ -90,11 +90,29 @@ export default function TabsLayout() {
         }}
       >
         <Tabs.Screen
+          name="mesocycles/index"
+          options={{
+            title: 'Mesociclos',
+            tabBarIcon: ({ focused }) => (
+              <TabIcon name={focused ? 'calendar' : 'calendar-outline'} focused={focused} />
+            ),
+          }}
+        />
+        <Tabs.Screen
           name="routines/index"
           options={{
             title: 'Rutinas',
             tabBarIcon: ({ focused }) => (
               <TabIcon name={focused ? 'layers' : 'layers-outline'} focused={focused} />
+            ),
+          }}
+        />
+        <Tabs.Screen
+          name="exercises/index"
+          options={{
+            title: 'Ejercicios',
+            tabBarIcon: ({ focused }) => (
+              <TabIcon name={focused ? 'barbell' : 'barbell-outline'} focused={focused} />
             ),
           }}
         />

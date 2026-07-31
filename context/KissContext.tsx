@@ -81,7 +81,7 @@ export function KissProvider({ children }: { children: React.ReactNode }) {
       try {
         if (!isFirebaseConfigured()) {
           Alert.alert(
-            'Sync no configurado',
+            'Sincronización no configurada',
             'Configura Firebase en app.json (extra) para enviar mensajes al otro dispositivo.',
           );
           return;
@@ -101,7 +101,7 @@ export function KissProvider({ children }: { children: React.ReactNode }) {
         }
 
         const expoGoHint = isExpoGo
-          ? '\n\nEn Expo Go el push en segundo plano no funciona. Si el otro tiene la app abierta, lo verá al instante.'
+          ? '\n\nEn Expo Go las notificaciones en segundo plano no funcionan. Si la otra persona tiene la aplicación abierta, lo verá al instante.'
           : '';
 
         Alert.alert(`${sentLabel} ${emoji}`, `Enviado a ${partner}.${expoGoHint}`);

@@ -1,7 +1,7 @@
 export const BRISAS_WELCOME_MESSAGES = [
-  'Vamos mi amor mosho, tu puedes!!',
-  'Mor mor te amo cada dia un poco mas',
-  'Sea lo que sea que tengas puesto estas herrrrmosa!!! 🐺',
+  'Vamos, mi amor. ¡Tú puedes!',
+  'Amor, te amo cada día un poco más',
+  'Sea lo que sea que lleves puesto, te ves hermosa 🐺',
 ];
 
 export function getRandomWelcomeMessage(): string {

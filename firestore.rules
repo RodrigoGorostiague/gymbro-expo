@@ -10,5 +10,8 @@ service cloud.firestore {
     match /equippedThemes/{userId} {
       allow read, write: if true;
     }
+    match /sharedRoutines/{shareId} {
+      allow read, write: if true;
+    }
   }
 }

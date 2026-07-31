@@ -1,12 +1,13 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   Alert,
+  AppState,
   ScrollView,
   StyleSheet,
   Text,
   View,
 } from 'react-native';
-import { router, useLocalSearchParams } from 'expo-router';
+import { router, useFocusEffect, useLocalSearchParams } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { AppNavBar } from '../../../components/AppNavBar';
 import { AppScreenHeader } from '../../../components/AppScreenHeader';
@@ -14,17 +15,56 @@ import { GlassCard, ThemeBackground } from '../../../components/GlassCard';
 import { HapticPressable } from '../../../components/HapticPressable';
 import { GlassButton, GlassInput } from '../../../components/UI';
 import { getRandomSetEncouragementMessage } from '../../../constants/encouragement';
-import { GEM_REWARDS } from '../../../constants/shopThemes';
+import { useAuth } from '../../../context/AuthContext';
 import { useData } from '../../../context/DataContext';
 import { useShop } from '../../../context/ShopContext';
 import { useTheme } from '../../../context/ThemeContext';
-import { CompletedExercise, CompletedSet, Routine } from '../../../types';
+import { CompletedExercise, CompletedSet, Routine, SetType, WorkoutAttempt } from '../../../types';
 import { vibrateRestTimerComplete } from '../../../utils/haptics';
+import { generateId } from '../../../utils/storage';
+import { createWorkoutAttempt } from '../../../utils/workoutAttempts';
+import { matchesActiveWorkout } from '../../../utils/activeWorkoutReentry';
+import { reconcileActiveWorkoutTiming } from '../../../utils/activeWorkoutTiming';
+
+function readSingleParam(value: string | string[] | undefined): string | undefined {
+  if (typeof value === 'string') {
+    const trimmed = value.trim();
+    return trimmed.length > 0 ? trimmed : undefined;
+  }
+  if (Array.isArray(value)) return readSingleParam(value[0]);
+  return undefined;
+}
+
+function parseLineage(params: {
+  mesocycleId?: string | string[];
+  weekNumber?: string | string[];
+  plannedSessionId?: string | string[];
+}) {
+  const mesocycleId = readSingleParam(params.mesocycleId);
+  const plannedSessionId = readSingleParam(params.plannedSessionId);
+  const rawWeekNumber = readSingleParam(params.weekNumber);
+  const weekNumber = rawWeekNumber ? Number.parseInt(rawWeekNumber, 10) : Number.NaN;
+
+  if (!mesocycleId && !plannedSessionId && !rawWeekNumber) return undefined;
+  if (!mesocycleId || !plannedSessionId || !Number.isInteger(weekNumber) || weekNumber <= 0) return undefined;
+
+  return { mesocycleId, weekNumber, plannedSessionId };
+}
 
 function formatTime(seconds: number): string {
   const m = Math.floor(seconds / 60);
   const s = seconds % 60;
   return `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
+}
+
+function isFailureSet(tipo: SetType): boolean {
+  return tipo === 'F';
+}
+
+function getSetTypeLabel(tipo: SetType): string {
+  if (tipo === 'C') return 'Calentamiento';
+  if (tipo === 'F') return 'Serie al fallo';
+  return `Serie ${tipo}`;
 }
 
 type SetKey = string;
@@ -41,7 +81,7 @@ function buildSetValues(routine: Routine): Record<SetKey, SetRuntimeValues> {
       const key = `${exercise.id}-${set.id}`;
       values[key] = {
         weight: set.weight ? String(set.weight) : '',
-        reps: set.reps ? String(set.reps) : '',
+        reps: isFailureSet(set.tipo) ? '0' : set.reps ? String(set.reps) : '',
       };
     }
   }
@@ -49,11 +89,19 @@ function buildSetValues(routine: Routine): Record<SetKey, SetRuntimeValues> {
 }
 
 export default function ExecuteRoutineScreen() {
-  const { id } = useLocalSearchParams<{ id: string }>();
-  const { getRoutine, addSession } = useData();
-  const { awardGems } = useShop();
+  const params = useLocalSearchParams<{
+    id: string | string[];
+    mesocycleId?: string | string[];
+    weekNumber?: string | string[];
+    plannedSessionId?: string | string[];
+  }>();
+  const id = readSingleParam(params.id) ?? '';
+  const { user } = useAuth();
+  const { getRoutine, addAttempt, activeWorkoutDraft, startActiveWorkout, updateActiveWorkout, cancelActiveWorkout, refreshActiveWorkoutTiming = async () => undefined } = useData();
+  const { retryPendingRewards } = useShop();
   const { theme } = useTheme();
   const routine = getRoutine(id);
+  const lineage = parseLineage(params);
 
   const [phase, setPhase] = useState<'setup' | 'active' | 'done'>('setup');
   const [restSeconds, setRestSeconds] = useState('90');
@@ -62,10 +110,21 @@ export default function ExecuteRoutineScreen() {
   const [isResting, setIsResting] = useState(false);
   const [completedSets, setCompletedSets] = useState<Record<SetKey, boolean>>({});
   const [setValues, setSetValues] = useState<Record<SetKey, SetRuntimeValues>>({});
+  const [isFinishing, setIsFinishing] = useState(false);
+  const [earnedGems, setEarnedGems] = useState(0);
 
   const elapsedRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const restRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const startTimeRef = useRef<number>(0);
+  const completingSetsRef = useRef(new Set<SetKey>());
+  const finishInFlightRef = useRef(false);
+  const attemptRef = useRef<WorkoutAttempt | null>(null);
+  const attemptIdRef = useRef<string | null>(null);
+  const restEndsAtMsRef = useRef<number | null>(null);
+  const restCompletionAlertedRef = useRef(false);
+  const reconcileElapsedRef = useRef<() => void>(() => undefined);
+  const handleRestCompleteRef = useRef<() => void>(() => undefined);
+  const refreshActiveWorkoutTimingRef = useRef(refreshActiveWorkoutTiming);
   const restTimerConfig = parseInt(restSeconds, 10) || 90;
 
   useEffect(() => {
@@ -79,7 +138,69 @@ export default function ExecuteRoutineScreen() {
     };
   }, []);
 
+  const reconcileElapsed = useCallback(() => {
+    if (!activeWorkoutDraft || !routine || !matchesActiveWorkout(activeWorkoutDraft, { owner: user, routineId: routine.id, ...(lineage ? { lineage } : {}) })) return;
+    const nowMs = Date.now();
+    const localRestEndsAtMs = restEndsAtMsRef.current;
+    if (localRestEndsAtMs && activeWorkoutDraft.restEndsAtMs) restEndsAtMsRef.current = null;
+    const timing = reconcileActiveWorkoutTiming(activeWorkoutDraft, nowMs);
+    setElapsed(timing.elapsedSeconds);
+    if (localRestEndsAtMs && !activeWorkoutDraft.restEndsAtMs) {
+      const localRemaining = Math.max(0, Math.ceil((localRestEndsAtMs - nowMs) / 1000));
+      if (localRemaining > 0) {
+        setRestRemaining(localRemaining);
+        setIsResting(true);
+        return;
+      }
+      handleRestCompleteRef.current();
+      void refreshActiveWorkoutTiming();
+      return;
+    }
+    setRestRemaining(timing.restRemainingSeconds);
+    setIsResting(timing.isResting);
+    if (timing.cleanup !== 'none') void refreshActiveWorkoutTiming();
+  }, [activeWorkoutDraft, lineage, refreshActiveWorkoutTiming, routine, user]);
+  reconcileElapsedRef.current = reconcileElapsed;
+  refreshActiveWorkoutTimingRef.current = refreshActiveWorkoutTiming;
+
+  useFocusEffect(useCallback(() => {
+    void refreshActiveWorkoutTimingRef.current();
+    reconcileElapsedRef.current();
+    if (phase === 'active') elapsedRef.current = setInterval(() => reconcileElapsedRef.current(), 1000);
+    const subscription = AppState.addEventListener('change', (state) => {
+      if (state === 'active') {
+        void refreshActiveWorkoutTimingRef.current();
+        reconcileElapsedRef.current();
+      }
+    });
+    return () => {
+      subscription.remove();
+      if (elapsedRef.current) clearInterval(elapsedRef.current);
+    };
+  }, [phase]));
+
+  useEffect(() => {
+    if (!routine || !activeWorkoutDraft || !matchesActiveWorkout(activeWorkoutDraft, { owner: user, routineId: routine.id, ...(lineage ? { lineage } : {}) }) || phase !== 'setup') return;
+    attemptIdRef.current = activeWorkoutDraft.attemptId;
+    startTimeRef.current = activeWorkoutDraft.startedAtMs;
+    setRestSeconds(String(activeWorkoutDraft.restTimerSeconds));
+    setSetValues(activeWorkoutDraft.setValues);
+    setCompletedSets(activeWorkoutDraft.completedSets);
+    const timing = reconcileActiveWorkoutTiming(activeWorkoutDraft, Date.now());
+    setRestRemaining(timing.restRemainingSeconds);
+    setIsResting(timing.isResting);
+    setElapsed(timing.elapsedSeconds);
+    setPhase('active');
+  }, [activeWorkoutDraft, lineage, phase, routine, user]);
+
+  useEffect(() => {
+    if (phase === 'active' && attemptIdRef.current && !activeWorkoutDraft) setPhase('setup');
+  }, [activeWorkoutDraft, phase]);
+
   const handleRestComplete = useCallback(() => {
+    if (restCompletionAlertedRef.current) return;
+    restCompletionAlertedRef.current = true;
+    restEndsAtMsRef.current = null;
     setIsResting(false);
     setRestRemaining(0);
     vibrateRestTimerComplete();
@@ -89,68 +210,86 @@ export default function ExecuteRoutineScreen() {
       [{ text: 'Entendido' }],
     );
   }, []);
+  handleRestCompleteRef.current = handleRestComplete;
 
   const startRestTimer = useCallback(() => {
     if (restRef.current) clearInterval(restRef.current);
+    const restEndsAtMs = Date.now() + restTimerConfig * 1000;
+    restEndsAtMsRef.current = restEndsAtMs;
+    restCompletionAlertedRef.current = false;
     setRestRemaining(restTimerConfig);
     setIsResting(true);
+    if (activeWorkoutDraft) void updateActiveWorkout({ ...activeWorkoutDraft, restEndsAtMs });
     restRef.current = setInterval(() => {
-      setRestRemaining((prev) => {
-        if (prev <= 1) {
-          if (restRef.current) clearInterval(restRef.current);
-          handleRestComplete();
-          return 0;
-        }
-        return prev - 1;
-      });
+      const remaining = Math.max(0, Math.ceil((restEndsAtMs - Date.now()) / 1000));
+      if (remaining === 0) {
+        if (restRef.current) clearInterval(restRef.current);
+        void refreshActiveWorkoutTiming();
+        handleRestComplete();
+      }
+      setRestRemaining(remaining);
     }, 1000);
-  }, [restTimerConfig, handleRestComplete]);
+  }, [activeWorkoutDraft, restTimerConfig, handleRestComplete, refreshActiveWorkoutTiming, updateActiveWorkout]);
 
-  const startWorkout = () => {
-    if (!routine) return;
-    setSetValues(buildSetValues(routine));
+  const startWorkout = async () => {
+    if (!routine || !user) return;
+    const values = buildSetValues(routine);
+    const attemptId = generateId();
+    await startActiveWorkout({ version: 1, owner: user, attemptId, routineId: routine.id, lineage, startedAtMs: Date.now(), restTimerSeconds: restTimerConfig, completedSets: {}, setValues: values });
+    setSetValues(values);
     setCompletedSets({});
+    attemptIdRef.current = attemptId;
+    attemptRef.current = null;
     setPhase('active');
     startTimeRef.current = Date.now();
-    elapsedRef.current = setInterval(() => {
-      setElapsed(Math.floor((Date.now() - startTimeRef.current) / 1000));
-    }, 1000);
   };
 
   const updateSetValue = (setKey: SetKey, field: keyof SetRuntimeValues, value: string) => {
     if (completedSets[setKey]) return;
-    setSetValues((prev) => ({
-      ...prev,
-      [setKey]: { ...prev[setKey], [field]: value },
-    }));
+    setSetValues((prev) => {
+      const next = { ...prev, [setKey]: { ...prev[setKey], [field]: value } };
+      if (activeWorkoutDraft) void updateActiveWorkout({ ...activeWorkoutDraft, setValues: next });
+      return next;
+    });
   };
 
-  const completeSet = (setKey: SetKey) => {
-    if (completedSets[setKey]) return;
+  const completeSet = async (setKey: SetKey, tipo: SetType) => {
+    if (completedSets[setKey] || completingSetsRef.current.has(setKey)) return;
 
     const values = setValues[setKey];
     const weight = parseFloat(values?.weight ?? '0');
     const reps = parseInt(values?.reps ?? '0', 10);
 
-    if (!weight || !reps) {
+    if (!Number.isFinite(weight) || weight < 0 || !Number.isInteger(reps) || reps <= 0) {
       Alert.alert('Datos incompletos', 'Ingresa peso y repeticiones antes de finalizar la serie.');
       return;
     }
 
-    setCompletedSets((prev) => ({ ...prev, [setKey]: true }));
-    awardGems(GEM_REWARDS.setComplete);
-    Alert.alert('¡Serie!', getRandomSetEncouragementMessage(), [{ text: '¡Vamos!' }]);
-    startRestTimer();
+    completingSetsRef.current.add(setKey);
+    try {
+      setCompletedSets((prev) => {
+        const next = { ...prev, [setKey]: true };
+        if (activeWorkoutDraft) void updateActiveWorkout({ ...activeWorkoutDraft, completedSets: next });
+        return next;
+      });
+      Alert.alert('¡Serie!', getRandomSetEncouragementMessage(), [{ text: '¡Vamos!' }]);
+      startRestTimer();
+    } finally {
+      completingSetsRef.current.delete(setKey);
+    }
   };
 
-  const finishWorkout = () => {
-    if (!routine) return;
+  const finishWorkout = async () => {
+    if (!routine || finishInFlightRef.current) return;
+    finishInFlightRef.current = true;
+    setIsFinishing(true);
 
     if (elapsedRef.current) clearInterval(elapsedRef.current);
     if (restRef.current) clearInterval(restRef.current);
 
     const exercises: CompletedExercise[] = routine.exercises.map((exercise) => ({
       exerciseId: exercise.id,
+      catalogExerciseId: exercise.catalogExerciseId,
       name: exercise.name,
       sets: exercise.sets.map((set): CompletedSet => {
         const key = `${exercise.id}-${set.id}`;
@@ -164,21 +303,38 @@ export default function ExecuteRoutineScreen() {
       }),
     }));
 
-    addSession({
-      routineId: routine.id,
-      routineName: routine.name,
-      completedAt: new Date().toISOString(),
-      durationSeconds: elapsed,
-      restTimerSeconds: restTimerConfig,
-      exercises,
-    });
-
-    awardGems(GEM_REWARDS.routineComplete);
-    setPhase('done');
+    try {
+      if (!user) throw new Error('Authentication required.');
+      const attempt = attemptRef.current ?? createWorkoutAttempt({
+        id: attemptIdRef.current ?? (attemptIdRef.current = generateId()),
+        owner: user,
+        routine,
+        completedAt: new Date().toISOString(),
+        durationSeconds: elapsed,
+        restTimerSeconds: restTimerConfig,
+        lineage,
+        results: Object.fromEntries(exercises.flatMap((exercise) => exercise.sets.map((set) =>
+          [`${exercise.exerciseId}:${set.setId}`, { performed: set.completed, reps: set.reps, load: set.weight }]))),
+      });
+      attemptRef.current = attempt;
+      await addAttempt(attempt);
+      await cancelActiveWorkout();
+      await retryPendingRewards();
+      setEarnedGems(attempt.reward.totalGems);
+      setPhase('done');
+    } catch {
+      Alert.alert(
+        'No se pudo guardar el entrenamiento',
+        'El entrenamiento no se completó. Revisa el almacenamiento e inténtalo de nuevo.',
+      );
+    } finally {
+      finishInFlightRef.current = false;
+      setIsFinishing(false);
+    }
   };
 
   const handleFinishConfirm = () => {
-    Alert.alert('Finalizar rutina', '¿Terminaste la rutina?', [
+    Alert.alert('Finalizar entrenamiento', '¿Terminaste el entrenamiento?', [
       { text: 'Seguir', style: 'cancel' },
       { text: 'Finalizar', onPress: finishWorkout },
     ]);
@@ -191,7 +347,7 @@ export default function ExecuteRoutineScreen() {
       <ThemeBackground>
         <SafeAreaView style={styles.safe}>
           <AppNavBar onBack={() => router.back()} backLabel="← Cancelar" />
-          <AppScreenHeader title={routine.name} subtitle="Configura antes de iniciar" />
+          <AppScreenHeader title={routine.name} subtitle="Configura el entrenamiento antes de iniciar" />
           <GlassCard>
             <Text style={[styles.label, { color: theme.textMuted }]}>
               Temporizador de descanso (segundos)
@@ -208,7 +364,7 @@ export default function ExecuteRoutineScreen() {
             </Text>
           </GlassCard>
           <View style={styles.spacer} />
-          <GlassButton title="Iniciar cronómetro" onPress={startWorkout} />
+          <GlassButton title="Iniciar entrenamiento" onPress={startWorkout} />
         </SafeAreaView>
       </ThemeBackground>
     );
@@ -220,12 +376,12 @@ export default function ExecuteRoutineScreen() {
         <SafeAreaView style={[styles.safe, styles.center]}>
           <GlassCard style={styles.doneCard}>
             <Text style={styles.doneEmoji}>🎉</Text>
-            <Text style={[styles.doneTitle, { color: theme.text }]}>¡Rutina completada!</Text>
+            <Text style={[styles.doneTitle, { color: theme.text }]}>¡Entrenamiento completado!</Text>
             <Text style={[styles.doneMeta, { color: theme.textMuted }]}>
               Tiempo: {formatTime(elapsed)}
             </Text>
             <Text style={[styles.doneGems, { color: theme.primary }]}>
-              +{GEM_REWARDS.routineComplete} gemas
+              +{earnedGems} gemas
             </Text>
             <View style={styles.spacer} />
             <GlassButton
@@ -292,11 +448,14 @@ export default function ExecuteRoutineScreen() {
                     ]}
                   >
                     <View style={styles.setCardHeader}>
-                      <Text style={[styles.setTitle, { color: theme.text }]}>
-                        Serie {setIndex + 1}
+                      <Text style={[styles.setTitle, { color: theme.text }]}> 
+                        {getSetTypeLabel(set.tipo)}
+                      </Text>
+                      <Text style={[styles.setTypeHint, { color: theme.textMuted }]}>
+                        {isFailureSet(set.tipo) ? 'Sin repeticiones' : `Bloque ${setIndex + 1}`}
                       </Text>
                       {completed && (
-                        <View style={[styles.completedBadge, { backgroundColor: theme.success }]}>
+                        <View style={[styles.completedBadge, { backgroundColor: theme.success }]}> 
                           <Text style={styles.completedBadgeText}>✓ Hecha</Text>
                         </View>
                       )}
@@ -304,7 +463,9 @@ export default function ExecuteRoutineScreen() {
 
                     <View style={styles.inputRow}>
                       <View style={styles.inputGroup}>
-                        <Text style={[styles.fieldLabel, { color: theme.textMuted }]}>Peso (kg)</Text>
+                        <Text style={[styles.fieldLabel, { color: theme.textMuted }]}>
+                          {exercise.loadMode === 'bodyweight' ? 'Peso corporal' : exercise.loadMode === 'assisted' ? 'Asistencia' : 'Carga externa'} ({exercise.loadUnit ?? 'kg'})
+                        </Text>
                         <GlassInput
                           style={styles.setInput}
                           keyboardType="decimal-pad"
@@ -314,22 +475,31 @@ export default function ExecuteRoutineScreen() {
                           onChangeText={(text) => updateSetValue(setKey, 'weight', text)}
                         />
                       </View>
-                      <View style={styles.inputGroup}>
-                        <Text style={[styles.fieldLabel, { color: theme.textMuted }]}>Reps</Text>
-                        <GlassInput
-                          style={styles.setInput}
-                          keyboardType="number-pad"
-                          value={values.reps}
-                          editable={!completed}
-                          placeholder="0"
-                          onChangeText={(text) => updateSetValue(setKey, 'reps', text)}
-                        />
-                      </View>
+                      {isFailureSet(set.tipo) ? (
+                        <View style={styles.inputGroup}>
+                          <Text style={[styles.fieldLabel, { color: theme.textMuted }]}>Repeticiones al fallo</Text>
+                          <GlassInput style={styles.setInput} keyboardType="number-pad" value={values.reps}
+                            editable={!completed} placeholder="0"
+                            onChangeText={(text) => updateSetValue(setKey, 'reps', text)} />
+                        </View>
+                      ) : (
+                        <View style={styles.inputGroup}>
+                          <Text style={[styles.fieldLabel, { color: theme.textMuted }]}>Repeticiones</Text>
+                          <GlassInput
+                            style={styles.setInput}
+                            keyboardType="number-pad"
+                            value={values.reps}
+                            editable={!completed}
+                            placeholder="0"
+                            onChangeText={(text) => updateSetValue(setKey, 'reps', text)}
+                          />
+                        </View>
+                      )}
                     </View>
 
                     {!completed && (
                       <HapticPressable
-                        onPress={() => completeSet(setKey)}
+                        onPress={() => completeSet(setKey, set.tipo)}
                         style={[styles.completeBtn, { backgroundColor: theme.primary }]}
                       >
                         <Text style={styles.completeBtnText}>Finalizar serie</Text>
@@ -343,7 +513,13 @@ export default function ExecuteRoutineScreen() {
         </ScrollView>
 
         <View style={styles.footer}>
-          <GlassButton title="Finalizar rutina" onPress={handleFinishConfirm} />
+          <GlassButton
+            title="Finalizar entrenamiento"
+            onPress={handleFinishConfirm}
+            loading={isFinishing}
+            disabled={isFinishing}
+          />
+          <GlassButton title="Cancelar entrenamiento" variant="secondary" onPress={() => { void cancelActiveWorkout(); router.back(); }} />
         </View>
       </SafeAreaView>
     </ThemeBackground>
@@ -401,6 +577,12 @@ const styles = StyleSheet.create({
     paddingHorizontal: 10,
     paddingVertical: 4,
   },
+  setTypeHint: {
+    fontSize: 12,
+    fontWeight: '600',
+    marginLeft: 'auto',
+    marginRight: 8,
+  },
   completedBadgeText: {
     color: '#FFF',
     fontSize: 12,
@@ -421,6 +603,14 @@ const styles = StyleSheet.create({
   setInput: {
     paddingVertical: 10,
     textAlign: 'center',
+  },
+  failurePlaceholder: {
+    borderWidth: 1,
+    borderRadius: 14,
+    minHeight: 48,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 12,
   },
   completeBtn: {
     marginTop: 12,

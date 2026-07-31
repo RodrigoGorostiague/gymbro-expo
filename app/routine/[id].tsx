@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
   Alert,
   KeyboardAvoidingView,
@@ -11,20 +11,54 @@ import {
 import { router, useLocalSearchParams } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { AppNavBar } from '../../components/AppNavBar';
+import { ExercisePicker } from '../../components/ExercisePicker';
 import { GlassCard, ThemeBackground } from '../../components/GlassCard';
 import { HapticPressable } from '../../components/HapticPressable';
+import { MuscleGroupSelector } from '../../components/MuscleGroupSelector';
 import { GlassButton, GlassInput } from '../../components/UI';
+import { MUSCLE_GROUP_LABELS } from '../../constants/muscleGroups';
 import { useData } from '../../context/DataContext';
+import { useAuth } from '../../context/AuthContext';
 import { useTheme } from '../../context/ThemeContext';
-import { Exercise, ExerciseSet } from '../../types';
+import { Exercise, ExerciseSet, MuscleGroup, RoutineExercise } from '../../types';
+import { buildDecimalDraftMap, type DecimalDraftMap, normalizeDecimalInput } from '../../utils/decimalInput';
 import { generateId } from '../../utils/storage';
+import { matchesActiveWorkout } from '../../utils/activeWorkoutReentry';
 
 export default function EditRoutineScreen() {
-  const { id } = useLocalSearchParams<{ id: string }>();
-  const { getRoutine, updateRoutine } = useData();
+  const { id, addExerciseId } = useLocalSearchParams<{ id: string; addExerciseId?: string }>();
+  const {
+    exercises: catalogExercises,
+    getExercise,
+    getRoutine,
+    updateRoutine,
+    activeWorkoutDraft,
+  } = useData();
+  const { user } = useAuth();
   const { theme } = useTheme();
   const [name, setName] = useState('');
-  const [exercises, setExercises] = useState<Exercise[]>([]);
+  const [exercises, setExercises] = useState<RoutineExercise[]>([]);
+  const [draftWeights, setDraftWeights] = useState<DecimalDraftMap>({});
+  const [routineMuscleGroups, setRoutineMuscleGroups] = useState<MuscleGroup[]>([]);
+  const [pickerVisible, setPickerVisible] = useState(false);
+  const handledAutoAddId = useRef<string | null>(null);
+
+  const createRoutineExercise = (exercise: Exercise): RoutineExercise => ({
+    id: generateId(),
+    catalogExerciseId: exercise.id,
+    name: exercise.name,
+    muscleGroups: [...exercise.muscleGroups],
+    loadMode: exercise.loadMode,
+    loadUnit: exercise.loadUnit,
+    attribution: exercise.attribution,
+    variant: exercise.variant,
+    sets: exercise.defaultSets.map((set) => ({
+      id: generateId(),
+      tipo: set.tipo,
+      weight: set.weight,
+      reps: set.reps,
+    })),
+  });
 
   useEffect(() => {
     const routine = getRoutine(id);
@@ -32,76 +66,123 @@ export default function EditRoutineScreen() {
       router.back();
       return;
     }
+
     setName(routine.name);
     setExercises(routine.exercises);
-  }, [id]);
+    setRoutineMuscleGroups(routine.muscleGroups ?? []);
+    setDraftWeights(buildDecimalDraftMap(routine.exercises.flatMap((exercise) => exercise.sets)));
+  }, [getRoutine, id]);
+
+  useEffect(() => {
+    if (!addExerciseId || handledAutoAddId.current === addExerciseId) return;
+
+    const exercise = getExercise(addExerciseId);
+    if (!exercise) return;
+
+    handledAutoAddId.current = addExerciseId;
+    const nextExercise = createRoutineExercise(exercise);
+    setExercises((current) => [...current, nextExercise]);
+    setDraftWeights((current) => ({ ...current, ...buildDecimalDraftMap(nextExercise.sets) }));
+    router.setParams({ addExerciseId: undefined });
+  }, [addExerciseId, getExercise]);
 
   const save = () => {
     const routine = getRoutine(id);
     if (!routine) return;
-    updateRoutine({ ...routine, name: name.trim() || routine.name, exercises });
+    if (routineMuscleGroups.length === 0) {
+      Alert.alert('Validación', 'Selecciona al menos un grupo muscular.');
+      return;
+    }
+
+    const normalizedExercises: RoutineExercise[] = [];
+    for (const exercise of exercises) {
+      const normalizedSets: ExerciseSet[] = [];
+      for (const set of exercise.sets) {
+        const weight = normalizeDecimalInput(draftWeights[set.id] ?? '');
+        if (weight === null) {
+          Alert.alert('Validación', 'Cada serie debe tener un peso válido mayor o igual a 0.');
+          return;
+        }
+        normalizedSets.push({ ...set, weight });
+      }
+
+      normalizedExercises.push({
+        ...exercise,
+        sets: normalizedSets,
+      });
+    }
+
+    updateRoutine({
+      ...routine,
+      name: name.trim() || routine.name,
+      muscleGroups: routineMuscleGroups,
+      exercises: normalizedExercises,
+    });
     Alert.alert('Guardado', 'Rutina actualizada');
   };
 
-  const addExercise = () => {
-    setExercises([
-      ...exercises,
-      {
-        id: generateId(),
-        name: '',
-        sets: [{ id: generateId(), weight: 0, reps: 0 }],
-      },
-    ]);
-  };
-
-  const updateExercise = (exerciseId: string, patch: Partial<Exercise>) => {
-    setExercises(
-      exercises.map((e) => (e.id === exerciseId ? { ...e, ...patch } : e)),
-    );
+  const addExerciseFromCatalog = (exercise: Exercise) => {
+    setExercises((current) => [...current, createRoutineExercise(exercise)]);
+    setPickerVisible(false);
   };
 
   const removeExercise = (exerciseId: string) => {
-    setExercises(exercises.filter((e) => e.id !== exerciseId));
+    setExercises((current) => current.filter((exercise) => exercise.id !== exerciseId));
   };
 
   const addSet = (exerciseId: string) => {
-    setExercises(
-      exercises.map((e) =>
-        e.id === exerciseId
+    const nextId = generateId();
+    setExercises((current) =>
+      current.map((exercise) =>
+        exercise.id === exerciseId
           ? {
-              ...e,
-              sets: [...e.sets, { id: generateId(), weight: 0, reps: 0 }],
+              ...exercise,
+              sets: [
+                ...exercise.sets,
+                {
+                  id: nextId,
+                  tipo: exercise.sets.length + 1,
+                  weight: 0,
+                  reps: 0,
+                },
+              ],
             }
-          : e,
+          : exercise,
       ),
     );
+    setDraftWeights((current) => ({ ...current, [nextId]: '' }));
   };
 
-  const updateSet = (
-    exerciseId: string,
-    setId: string,
-    patch: Partial<ExerciseSet>,
-  ) => {
-    setExercises(
-      exercises.map((e) =>
-        e.id === exerciseId
+  const updateSet = (exerciseId: string, setId: string, patch: Partial<ExerciseSet>) => {
+    setExercises((current) =>
+      current.map((exercise) =>
+        exercise.id === exerciseId
           ? {
-              ...e,
-              sets: e.sets.map((s) => (s.id === setId ? { ...s, ...patch } : s)),
+              ...exercise,
+              sets: exercise.sets.map((set) =>
+                set.id === setId ? { ...set, ...patch } : set,
+              ),
             }
-          : e,
+          : exercise,
       ),
     );
   };
 
   const removeSet = (exerciseId: string, setId: string) => {
-    setExercises(
-      exercises.map((e) =>
-        e.id === exerciseId
-          ? { ...e, sets: e.sets.filter((s) => s.id !== setId) }
-          : e,
+    setExercises((current) =>
+      current.map((exercise) =>
+        exercise.id === exerciseId
+          ? {
+              ...exercise,
+              sets: exercise.sets.filter((set) => set.id !== setId),
+            }
+          : exercise,
       ),
     );
+  };
+
+  const updateDraftWeight = (setId: string, value: string) => {
+    setDraftWeights((current) => ({ ...current, [setId]: value }));
   };
 
   return (
@@ -110,8 +191,11 @@ export default function EditRoutineScreen() {
         <AppNavBar
           onBack={() => router.back()}
           trailing={
-            <HapticPressable onPress={() => router.push(`/routine/execute/${id}`)}>
-              <Text style={{ color: theme.primary, fontWeight: '800' }}>▶ Ejecutar</Text>
+            <HapticPressable
+              accessibilityLabel={`${matchesActiveWorkout(activeWorkoutDraft, { owner: user, routineId: id }) ? 'Continuar' : 'Ejecutar'} ${getRoutine(id)?.name ?? ''}`}
+              onPress={() => router.push(`/routine/execute/${id}`)}
+            >
+              <Text style={{ color: theme.primary, fontWeight: '800' }}>▶ {matchesActiveWorkout(activeWorkoutDraft, { owner: user, routineId: id }) ? 'Continuar' : 'Ejecutar'}</Text>
             </HapticPressable>
           }
         />
@@ -125,81 +209,132 @@ export default function EditRoutineScreen() {
             keyboardShouldPersistTaps="handled"
             showsVerticalScrollIndicator={false}
           >
-          <Text style={[styles.screenTitle, { color: theme.text }]}>Editar Rutina</Text>
-          <Text style={[styles.screenSubtitle, { color: theme.textMuted }]}>
-            Ejercicios y series
-          </Text>
-          <GlassCard style={styles.nameCard}>
-            <Text style={[styles.label, { color: theme.textMuted }]}>Nombre</Text>
-            <GlassInput value={name} onChangeText={setName} placeholder="Nombre de la rutina" />
-          </GlassCard>
+            <Text style={[styles.screenTitle, { color: theme.text }]}>Editar rutina</Text>
+            <Text style={[styles.screenSubtitle, { color: theme.textMuted }]}>Ejercicios y series</Text>
 
-          {exercises.map((exercise, exIndex) => (
-            <GlassCard key={exercise.id} style={styles.exerciseCard}>
-              <View style={styles.exerciseHeader}>
-                <Text style={[styles.exerciseNum, { color: theme.primary }]}>
-                  {exIndex + 1}
-                </Text>
-                <GlassInput
-                  style={styles.exerciseNameInput}
-                  placeholder="Nombre del ejercicio"
-                  value={exercise.name}
-                  onChangeText={(text) => updateExercise(exercise.id, { name: text })}
-                />
-                <HapticPressable onPress={() => removeExercise(exercise.id)}>
-                  <Text style={{ color: theme.textMuted }}>✕</Text>
-                </HapticPressable>
-              </View>
+            <GlassCard style={styles.nameCard}>
+              <Text style={[styles.label, { color: theme.textMuted }]}>Nombre</Text>
+              <GlassInput value={name} onChangeText={setName} placeholder="Nombre de la rutina" />
+            </GlassCard>
 
-              <View style={styles.setHeader}>
-                <Text style={[styles.setCol, { color: theme.textMuted }]}>Serie</Text>
-                <Text style={[styles.setCol, { color: theme.textMuted }]}>Peso</Text>
-                <Text style={[styles.setCol, { color: theme.textMuted }]}>Reps</Text>
-                <View style={{ width: 28 }} />
-              </View>
+            <GlassCard style={styles.nameCard}>
+              <Text style={[styles.label, { color: theme.textMuted }]}>Grupos musculares</Text>
+              <MuscleGroupSelector
+                value={routineMuscleGroups}
+                onChange={setRoutineMuscleGroups}
+              />
+            </GlassCard>
 
-              {exercise.sets.map((set, setIndex) => (
-                <View key={set.id} style={styles.setRow}>
-                  <Text style={[styles.setNum, { color: theme.text }]}>{setIndex + 1}</Text>
-                  <GlassInput
-                    style={styles.setInput}
-                    keyboardType="numeric"
-                    value={set.weight ? String(set.weight) : ''}
-                    placeholder="kg"
-                    onChangeText={(t) =>
-                      updateSet(exercise.id, set.id, { weight: parseFloat(t) || 0 })
-                    }
-                  />
-                  <GlassInput
-                    style={styles.setInput}
-                    keyboardType="numeric"
-                    value={set.reps ? String(set.reps) : ''}
-                    placeholder="reps"
-                    onChangeText={(t) =>
-                      updateSet(exercise.id, set.id, { reps: parseInt(t, 10) || 0 })
-                    }
-                  />
-                  <HapticPressable onPress={() => removeSet(exercise.id, set.id)}>
-                    <Text style={{ color: theme.textMuted }}>−</Text>
+            {exercises.length === 0 ? (
+              <GlassCard style={styles.emptyStateCard}>
+                <Text style={[styles.emptyStateTitle, { color: theme.text }]}>Todavía no agregaste ejercicios</Text>
+                <Text style={[styles.emptyStateText, { color: theme.textMuted }]}>Empieza con una plantilla del catálogo para que la rutina quede usable sin perder el acceso al botón principal.</Text>
+              </GlassCard>
+            ) : null}
+
+            {exercises.map((exercise, exIndex) => (
+              <GlassCard key={exercise.id} style={styles.exerciseCard}>
+                <View style={styles.exerciseHeader}>
+                  <Text style={[styles.exerciseNum, { color: theme.primary }]}>{exIndex + 1}</Text>
+                  <View style={styles.exerciseInfo}>
+                    <Text style={[styles.exerciseName, { color: theme.text }]}>{exercise.name}</Text>
+                    <Text style={[styles.exerciseMeta, { color: theme.textMuted }]}>
+                      {exercise.variant}
+                    </Text>
+                    <View style={styles.tags}>
+                      {exercise.muscleGroups.map((group) => (
+                        <View
+                          key={group}
+                          style={[
+                            styles.tag,
+                            { backgroundColor: theme.glass, borderColor: theme.glassBorder },
+                          ]}
+                        >
+                          <Text style={[styles.tagText, { color: theme.text }]}>
+                            {MUSCLE_GROUP_LABELS[group]}
+                          </Text>
+                        </View>
+                      ))}
+                    </View>
+                  </View>
+                  <HapticPressable onPress={() => removeExercise(exercise.id)}>
+                    <Text style={{ color: theme.textMuted }}>✕</Text>
                   </HapticPressable>
                 </View>
-              ))}
 
-              <HapticPressable
-                onPress={() => addSet(exercise.id)}
-                style={[styles.addSetBtn, { borderColor: theme.glassBorder }]}
-              >
-                <Text style={{ color: theme.primary, fontWeight: '600' }}>+ Serie</Text>
-              </HapticPressable>
-            </GlassCard>
-          ))}
+                <Text style={[styles.lockedNote, { color: theme.textMuted }]}>Nombre, grupos musculares y variante quedan bloqueados en la rutina. Solo puedes editar las series.</Text>
 
-          <GlassButton title="+ Agregar ejercicio" onPress={addExercise} variant="secondary" />
-          <View style={styles.spacer} />
-          <GlassButton title="Guardar rutina" onPress={save} />
+                <View style={styles.setHeader}>
+                  <Text style={[styles.setCol, { color: theme.textMuted }]}>Serie</Text>
+                  <Text style={[styles.setCol, { color: theme.textMuted }]}>Peso</Text>
+                  <Text style={[styles.setCol, { color: theme.textMuted }]}>Repeticiones</Text>
+                  <View style={{ width: 28 }} />
+                </View>
+
+                {exercise.sets.map((set, setIndex) => (
+                  <View key={set.id} style={styles.setRow}>
+                    <Text style={[styles.setNum, { color: theme.text }]}>{setIndex + 1}</Text>
+                    <GlassInput
+                      style={styles.setInput}
+                      keyboardType="decimal-pad"
+                      value={draftWeights[set.id] ?? ''}
+                      placeholder="kg"
+                      onChangeText={(text) => updateDraftWeight(set.id, text)}
+                    />
+                    <GlassInput
+                      style={styles.setInput}
+                      keyboardType="numeric"
+                      value={set.reps ? String(set.reps) : ''}
+                      placeholder="repeticiones"
+                      onChangeText={(text) =>
+                        updateSet(exercise.id, set.id, { reps: parseInt(text, 10) || 0 })
+                      }
+                    />
+                    <HapticPressable onPress={() => removeSet(exercise.id, set.id)}>
+                      <Text style={{ color: theme.textMuted }}>−</Text>
+                    </HapticPressable>
+                  </View>
+                ))}
+
+                <HapticPressable
+                  onPress={() => addSet(exercise.id)}
+                  style={[styles.addSetBtn, { borderColor: theme.glassBorder }]}
+                >
+                  <Text style={{ color: theme.primary, fontWeight: '600' }}>+ Serie</Text>
+                </HapticPressable>
+              </GlassCard>
+            ))}
+
+            <View style={styles.footerActions}>
+              <GlassButton
+                title="+ Agregar ejercicio"
+                onPress={() => setPickerVisible(true)}
+                variant="secondary"
+              />
+              <View style={styles.spacer} />
+            </View>
+            <GlassButton title="Guardar rutina" onPress={save} />
           </ScrollView>
         </KeyboardAvoidingView>
       </SafeAreaView>
+
+      <ExercisePicker
+        exercises={catalogExercises}
+        routineMuscleGroups={routineMuscleGroups}
+        visible={pickerVisible}
+        onClose={() => setPickerVisible(false)}
+        onSelect={addExerciseFromCatalog}
+        onCreateNew={() => {
+          setPickerVisible(false);
+          router.push({
+            pathname: '/exercise/create',
+            params: {
+              muscleGroups: routineMuscleGroups.join(','),
+              returnToRoutineId: id,
+            },
+          });
+        }}
+      />
     </ThemeBackground>
   );
 }
@@ -220,10 +355,13 @@ const styles = StyleSheet.create({
   },
   nameCard: { marginBottom: 16 },
   label: { fontSize: 13, marginBottom: 8 },
+  emptyStateCard: { marginBottom: 12 },
+  emptyStateTitle: { fontSize: 18, fontWeight: '800', marginBottom: 8 },
+  emptyStateText: { fontSize: 14, lineHeight: 20 },
   exerciseCard: { marginBottom: 12 },
   exerciseHeader: {
     flexDirection: 'row',
-    alignItems: 'center',
+    alignItems: 'flex-start',
     gap: 10,
     marginBottom: 12,
   },
@@ -231,8 +369,38 @@ const styles = StyleSheet.create({
     fontSize: 18,
     fontWeight: '800',
     width: 24,
+    paddingTop: 2,
   },
-  exerciseNameInput: { flex: 1 },
+  exerciseInfo: { flex: 1 },
+  exerciseName: {
+    fontSize: 17,
+    fontWeight: '800',
+  },
+  exerciseMeta: {
+    fontSize: 13,
+    marginTop: 2,
+  },
+  lockedNote: {
+    fontSize: 12,
+    lineHeight: 18,
+    marginBottom: 12,
+  },
+  tags: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+    marginTop: 10,
+  },
+  tag: {
+    borderWidth: 1,
+    borderRadius: 999,
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+  },
+  tagText: {
+    fontSize: 12,
+    fontWeight: '700',
+  },
   setHeader: {
     flexDirection: 'row',
     marginBottom: 8,
@@ -254,6 +422,10 @@ const styles = StyleSheet.create({
     paddingVertical: 10,
     alignItems: 'center',
     marginTop: 4,
+  },
+  footerActions: {
+    marginTop: 4,
+    marginBottom: 4,
   },
   spacer: { height: 12 },
 });

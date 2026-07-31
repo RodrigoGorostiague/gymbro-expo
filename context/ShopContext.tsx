@@ -11,12 +11,13 @@ import { PARTNER_PROFILE } from '../constants/kiss';
 import { subscribeToEquippedThemes, syncEquippedTheme } from '../services/themeSync';
 import { ShopState, UserProfile } from '../types';
 import { shouldAwardWeeklyGoalBonus } from '../utils/gems';
-import { loadShop, saveShop } from '../utils/storage';
+import { loadShop, mutateShop, recoverPendingAttemptRewards } from '../utils/storage';
 import { useAuth } from './AuthContext';
 import { useData } from './DataContext';
 
 const DEFAULT_SHOP: ShopState = {
   gems: 0,
+  rewardReceiptIds: [],
   purchasedThemeIds: ['white', 'black', 'profile-rodaja', 'profile-brisas'],
   equippedThemeId: null,
   combineWithPartner: false,
@@ -32,7 +33,8 @@ interface ShopContextValue {
   combineWithPartner: boolean;
   previewThemeId: string | null;
   isLoading: boolean;
-  awardGems: (amount: number) => void;
+  retryPendingRewards: () => Promise<void>;
+  awardGems: (amount: number) => Promise<void>;
   purchaseTheme: (themeId: string) => boolean;
   equipTheme: (themeId: string) => void;
   unequipTheme: () => void;
@@ -45,9 +47,28 @@ const PREVIEW_DURATION_MS = 5000;
 
 const ShopContext = createContext<ShopContextValue | null>(null);
 
+export async function loadRecoveredShop(profile: UserProfile): Promise<ShopState> {
+  const persisted = await loadShop(profile);
+  try {
+    return (await recoverPendingAttemptRewards(profile)).shop;
+  } catch {
+    return loadShop(profile).catch(() => persisted);
+  }
+}
+
+export function applyThemePurchase(current: Readonly<ShopState>, themeId: string, price: number): ShopState {
+  if (current.purchasedThemeIds.includes(themeId) || current.gems < price) return current;
+  return {
+    ...current,
+    gems: current.gems - price,
+    purchasedThemeIds: [...current.purchasedThemeIds, themeId],
+    equippedThemeId: themeId,
+  };
+}
+
 export function ShopProvider({ children }: { children: React.ReactNode }) {
   const { user } = useAuth();
-  const { sessions } = useData();
+  const { attempts } = useData();
   const [shop, setShop] = useState<ShopState>(DEFAULT_SHOP);
   const [partnerEquippedThemeId, setPartnerEquippedThemeId] = useState<string | null>(null);
   const [previewThemeId, setPreviewThemeId] = useState<string | null>(null);
@@ -68,13 +89,25 @@ export function ShopProvider({ children }: { children: React.ReactNode }) {
       clearPreviewTimer();
       setPreviewThemeId(null);
       if (showPayMessage) {
-        Alert.alert('paga ratona 🐭');
+        Alert.alert('Finalizó la vista previa', 'Compra el tema para seguir usándolo.');
       }
     },
     [clearPreviewTimer],
   );
 
   useEffect(() => () => clearPreviewTimer(), [clearPreviewTimer]);
+
+  const retryPendingRewards = useCallback(async () => {
+    if (!user) return;
+    setIsLoading(true);
+    try {
+      const recovered = await loadRecoveredShop(user);
+      setShop(recovered);
+      syncEquippedTheme(user, recovered.equippedThemeId);
+    } finally {
+      setIsLoading(false);
+    }
+  }, [user]);
 
   useEffect(() => {
     if (!user) {
@@ -84,13 +117,8 @@ export function ShopProvider({ children }: { children: React.ReactNode }) {
       return;
     }
 
-    setIsLoading(true);
-    loadShop(user).then((loaded) => {
-      setShop(loaded);
-      syncEquippedTheme(user, loaded.equippedThemeId);
-      setIsLoading(false);
-    });
-  }, [user]);
+    void retryPendingRewards();
+  }, [user, attempts, retryPendingRewards]);
 
   useEffect(() => {
     if (!partner) return;
@@ -109,64 +137,57 @@ export function ShopProvider({ children }: { children: React.ReactNode }) {
   }, [partner]);
 
   const persist = useCallback(
-    (next: ShopState) => {
-      if (!user) return;
-      setShop(next);
-      saveShop(user, next);
-      syncEquippedTheme(user, next.equippedThemeId);
+    (mutation: (current: Readonly<ShopState>) => ShopState) => {
+      if (!user) return Promise.resolve();
+      return mutateShop(user, mutation).then((next) => {
+        setShop(next);
+        syncEquippedTheme(user, next.equippedThemeId);
+      });
     },
     [user],
   );
 
   const awardGems = useCallback(
     (amount: number) => {
-      if (!user || amount <= 0) return;
-      setShop((prev) => {
-        const next = { ...prev, gems: prev.gems + amount };
-        saveShop(user, next);
-        return next;
-      });
+      if (!user || amount <= 0) return Promise.resolve();
+      return persist((current) => ({ ...current, gems: current.gems + amount }));
     },
-    [user],
+    [persist, user],
   );
 
   useEffect(() => {
     if (isLoading || !user) return;
 
-    const check = shouldAwardWeeklyGoalBonus(sessions, shop.weeklyGoal.bonusWeekKey);
+    const check = shouldAwardWeeklyGoalBonus(attempts, shop.weeklyGoal.bonusWeekKey);
     if (!check.award) return;
 
-    const next: ShopState = {
-      ...shop,
-      gems: shop.gems + GEM_REWARDS.weeklyGoalImprovement,
-      weeklyGoal: {
-        bonusWeekKey: check.weekKey,
-        lastWeekWorkouts: check.lastWeek,
-      },
-    };
-    persist(next);
+    persist((current) => current.weeklyGoal.bonusWeekKey === check.weekKey ? current : {
+      ...current,
+      gems: current.gems + GEM_REWARDS.weeklyGoalImprovement,
+      weeklyGoal: { bonusWeekKey: check.weekKey, lastWeekWorkouts: check.lastWeek },
+    });
     Alert.alert(
       'Objetivo semanal superado',
       `Superaste la semana anterior (${check.lastWeek} → ${check.currentWeek} rutinas). +${GEM_REWARDS.weeklyGoalImprovement} gemas`,
     );
-  }, [isLoading, sessions.length, shop.weeklyGoal.bonusWeekKey, persist, shop, user]);
+  }, [isLoading, attempts, shop.weeklyGoal.bonusWeekKey, persist, shop, user]);
 
   const equipTheme = useCallback(
     (themeId: string) => {
       if (!shop.purchasedThemeIds.includes(themeId) && !isProfileThemeId(themeId)) return;
       endPreview(false);
-      persist({ ...shop, equippedThemeId: themeId });
+      persist((current) => ({ ...current, equippedThemeId: themeId }));
     },
     [shop, persist, endPreview],
   );
 
   const unequipTheme = useCallback(() => {
-    persist({ ...shop, equippedThemeId: null });
-  }, [shop, persist]);
+    persist((current) => ({ ...current, equippedThemeId: null }));
+  }, [persist]);
 
   const setCombineWithPartner = useCallback(
     (value: boolean) => {
-      persist({ ...shop, combineWithPartner: value });
+      persist((current) => ({ ...current, combineWithPartner: value }));
     },
     [shop, persist],
   );
@@ -203,12 +224,7 @@ export function ShopProvider({ children }: { children: React.ReactNode }) {
         return false;
       }
 
-      persist({
-        ...shop,
-        gems: shop.gems - themeItem.price,
-        purchasedThemeIds: [...shop.purchasedThemeIds, themeId],
-        equippedThemeId: themeId,
-      });
+      persist((current) => applyThemePurchase(current, themeId, themeItem.price));
       endPreview(false);
       Alert.alert('Compra exitosa', `Desbloqueaste el tema "${themeItem.name}".`);
       return true;
@@ -227,6 +243,7 @@ export function ShopProvider({ children }: { children: React.ReactNode }) {
         combineWithPartner: shop.combineWithPartner,
         previewThemeId,
         isLoading,
+        retryPendingRewards,
         awardGems,
         purchaseTheme,
         equipTheme,

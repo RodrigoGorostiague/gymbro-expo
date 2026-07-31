@@ -76,7 +76,7 @@ export const SHOP_THEMES: ShopTheme[] = [
   },
   {
     id: 'lila-suave',
-    name: 'Lila Suave',
+    name: 'Lila suave',
     price: 18,
     category: 'violet',
     preview: '#E1BEE7',
@@ -254,7 +254,7 @@ export const SHOP_THEMES: ShopTheme[] = [
     name: 'Luna · Noche',
     price: 650,
     category: 'special',
-    description: 'Noche lilac',
+    description: 'Noche lila',
     preview: '#7986CB',
     decoration: 'moon',
     primary: '#9FA8DA',
@@ -336,7 +336,7 @@ export const SHOP_THEMES: ShopTheme[] = [
 export const SHOP_CATEGORIES: { key: ShopThemeCategory; label: string }[] = [
   { key: 'profile', label: 'Temas de perfil' },
   { key: 'basic', label: 'Colores clásicos' },
-  { key: 'violet', label: 'Violetas & lilas' },
+  { key: 'violet', label: 'Violetas y lilas' },
   { key: 'special', label: 'Temas especiales' },
 ];
 

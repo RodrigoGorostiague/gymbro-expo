@@ -47,3 +47,5 @@ yarn-error.*
 .cursor/
 .engram/
 .claude/
+.capiforge/
+.codegraph/

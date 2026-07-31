@@ -1,4 +1,4 @@
-import { WorkoutSession } from '../types';
+import { WorkoutAttempt } from '../types';
 import { startOfWeek } from './analytics';
 
 export function getWeekKey(date: Date = new Date()): string {
@@ -16,21 +16,24 @@ function getWeekRange(weeksAgo: number): { start: Date; end: Date } {
   return { start, end };
 }
 
-export function getWorkoutsInWeek(sessions: WorkoutSession[], weeksAgo: number): number {
+export function getWorkoutsInWeek(
+  attempts: readonly WorkoutAttempt[],
+  weeksAgo: number,
+): number {
   const { start, end } = getWeekRange(weeksAgo);
-  return sessions.filter((s) => {
-    const d = new Date(s.completedAt);
-    return d >= start && d <= end;
+  return attempts.filter((attempt) => {
+    const d = new Date(attempt.completedAt);
+    return attempt.completion.status !== 'partial' && d >= start && d <= end;
   }).length;
 }
 
 export function shouldAwardWeeklyGoalBonus(
-  sessions: WorkoutSession[],
+  attempts: readonly WorkoutAttempt[],
   bonusWeekKey: string | null,
 ): { award: boolean; weekKey: string; currentWeek: number; lastWeek: number } {
   const weekKey = getWeekKey();
-  const currentWeek = getWorkoutsInWeek(sessions, 0);
-  const lastWeek = getWorkoutsInWeek(sessions, 1);
+  const currentWeek = getWorkoutsInWeek(attempts, 0);
+  const lastWeek = getWorkoutsInWeek(attempts, 1);
 
   if (bonusWeekKey === weekKey) {
     return { award: false, weekKey, currentWeek, lastWeek };
