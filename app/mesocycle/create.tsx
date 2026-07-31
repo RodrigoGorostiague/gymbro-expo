@@ -9,7 +9,8 @@ import { HapticPressable } from '../../components/HapticPressable';
 import { GlassButton, GlassInput } from '../../components/UI';
 import { useData } from '../../context/DataContext';
 import { useTheme } from '../../context/ThemeContext';
-import { MesocycleStatus } from '../../types';
+import { MesocycleEntry, MesocycleStatus } from '../../types';
+import { deriveFirstEntryStartDate } from '../../utils/mesocycles';
 import { generateId } from '../../utils/storage';
 
 const STATUS_OPTIONS: { value: MesocycleStatus; label: string }[] = [
@@ -36,15 +37,18 @@ const normalizeStartDate = (value: string) => {
 
 export default function CreateMesocycleScreen() {
   const { theme } = useTheme();
-  const { addMesocycle } = useData();
+  const { addMesocycle, routines } = useData();
   const [name, setName] = useState('');
   const [goal, setGoal] = useState('');
   const [status, setStatus] = useState<MesocycleStatus>('draft');
   const [durationWeeks, setDurationWeeks] = useState('4');
   const [startDate, setStartDate] = useState('');
+  const [firstEntry, setFirstEntry] = useState<MesocycleEntry>();
   const [isSaving, setIsSaving] = useState(false);
 
   const parsedWeeks = useMemo(() => Number.parseInt(durationWeeks, 10), [durationWeeks]);
+  const entries = firstEntry ? [firstEntry] : [];
+  const derivedStartDate = deriveFirstEntryStartDate(entries);
 
   const save = async () => {
     if (isSaving) return;
@@ -64,8 +68,8 @@ export default function CreateMesocycleScreen() {
         goal: goal.trim(),
         status,
         durationWeeks: parsedWeeks,
-        startDate: normalizeStartDate(startDate),
-        weeks: buildWeeks(parsedWeeks),
+        startDate: derivedStartDate ?? normalizeStartDate(startDate),
+        weeks: buildWeeks(parsedWeeks).map((week, index) => index === 0 ? { ...week, entries } : week),
       });
       router.replace(`/mesocycle/summary/${created.id}`);
     } catch (error) {
@@ -135,9 +139,20 @@ export default function CreateMesocycleScreen() {
             </GlassCard>
 
             <GlassCard style={styles.section}>
+              <Text style={[styles.label, { color: theme.textMuted }]}>Primera sesión</Text>
+              <View style={styles.rowWrap}>
+                {(routines ?? []).map((routine) => {
+                  const selected = !!firstEntry && !('kind' in firstEntry) && firstEntry.ref.routineId === routine.id;
+                  return <HapticPressable key={routine.id} accessibilityRole="button" accessibilityLabel={`Programar ${routine.name}`} onPress={() => setFirstEntry({ id: generateId(), ref: { routineId: routine.id, routineName: routine.name, source: 'local' }, order: 1 })} style={[styles.optionChip, { borderColor: theme.glassBorder, backgroundColor: selected ? theme.primary : theme.glass }]}><Text style={{ color: selected ? theme.onPrimary : theme.text, fontWeight: '700' }}>{routine.name}</Text></HapticPressable>;
+                })}
+                <HapticPressable accessibilityRole="button" accessibilityLabel="Programar descanso" onPress={() => setFirstEntry({ id: generateId(), kind: 'rest' })} style={[styles.optionChip, { borderColor: theme.glassBorder, backgroundColor: firstEntry && 'kind' in firstEntry ? theme.primary : theme.glass }]}><Text style={{ color: firstEntry && 'kind' in firstEntry ? theme.onPrimary : theme.text, fontWeight: '700' }}>Descanso</Text></HapticPressable>
+              </View>
+            </GlassCard>
+
+            <GlassCard style={styles.section}>
               <Text style={[styles.label, { color: theme.textMuted }]}>Fecha de inicio (opcional)</Text>
-              <DateTimeField value={startDate} onChange={setStartDate} mode="date" placeholder="Sin fecha definida" testID="mesocycle-create-start-date-picker" />
-              <Text style={[styles.hint, { color: theme.textMuted }]}>Elegí la fecha desde el selector para dejar el bloque listo para la próxima etapa del plan.</Text>
+              <DateTimeField value={derivedStartDate ?? startDate} onChange={setStartDate} mode="date" placeholder="Sin fecha definida" testID="mesocycle-create-start-date-picker" />
+              <Text style={[styles.hint, { color: theme.textMuted }]}>{derivedStartDate ? 'La primera sesión define esta fecha.' : 'Elegí la fecha desde el selector para dejar el bloque listo para la próxima etapa del plan.'}</Text>
             </GlassCard>
 
             <GlassCard style={styles.section}>

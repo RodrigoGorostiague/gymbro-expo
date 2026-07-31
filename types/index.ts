@@ -171,6 +171,19 @@ export interface WorkoutSession {
   exercises: CompletedExercise[];
 }
 
+export interface ActiveWorkoutDraft {
+  version: 1;
+  owner: UserProfile;
+  attemptId: string;
+  routineId: string;
+  startedAtMs: number;
+  restTimerSeconds: number;
+  completedSets: Record<string, boolean>;
+  setValues: Record<string, { weight: string; reps: string }>;
+  restEndsAtMs?: number;
+  lineage?: WorkoutLineage;
+}
+
 export const WORKOUT_ATTEMPT_VERSION = 1 as const;
 
 export type WorkoutAttemptStatus = 'partial' | 'completed' | 'fully-completed';

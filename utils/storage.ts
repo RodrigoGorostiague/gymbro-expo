@@ -1,5 +1,6 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import {
+  ActiveWorkoutDraft,
   Exercise,
   ExerciseCatalog,
   ExerciseVariant,
@@ -14,6 +15,7 @@ import {
   WorkoutAttempt,
   WorkoutSession,
 } from '../types';
+import { reconcileActiveWorkoutTiming } from './activeWorkoutTiming';
 
 const KEYS = {
   user: '@gymbro/user',
@@ -28,6 +30,7 @@ const KEYS = {
   sessionMigration: '@gymbro/migrations/profile-attempts-v1',
   sessionQuarantine: '@gymbro/quarantine/ownerless-sessions-v1',
   attempts: (profile: UserProfile) => `@gymbro/attempts/v1/${profile}`,
+  activeWorkout: (profile: UserProfile) => `@gymbro/active-workout/v1/${profile}`,
   hiddenSharedRoutineIds: '@gymbro/hiddenSharedRoutineIds',
   shop: (profile: UserProfile) => `@gymbro/shop/${profile}`,
   legacyShop: '@gymbro/shop',
@@ -623,6 +626,62 @@ export async function loadAttempts(profile: UserProfile): Promise<WorkoutAttempt
   return attempts.filter(
     (attempt) => attempt.owner === profile && attempt.version === WORKOUT_ATTEMPT_VERSION,
   );
+}
+
+function isActiveWorkoutDraft(value: unknown, owner: UserProfile): value is ActiveWorkoutDraft {
+  const draft = value as Partial<ActiveWorkoutDraft> | null;
+  return !!draft && draft.version === 1 && draft.owner === owner && typeof draft.attemptId === 'string' && typeof draft.routineId === 'string'
+    && Number.isFinite(draft.startedAtMs) && Number.isFinite(draft.restTimerSeconds) && !!draft.completedSets && !!draft.setValues;
+}
+export async function loadActiveWorkoutDraft(owner: UserProfile, nowMs = Date.now()): Promise<ActiveWorkoutDraft | null> {
+  const raw = await AsyncStorage.getItem(KEYS.activeWorkout(owner));
+  if (!raw) return null;
+  try {
+    const draft: unknown = JSON.parse(raw);
+    if (isActiveWorkoutDraft(draft, owner)) {
+      const timing = reconcileActiveWorkoutTiming(draft, nowMs);
+      if (timing.cleanup === 'remove-draft') {
+        return await removeActiveWorkoutDraftIfMatches(owner, draft.attemptId)
+          ? null
+          : loadStoredActiveWorkoutDraft(owner);
+      }
+      if (timing.cleanup === 'clear-rest' && timing.draft) {
+        if (!await saveActiveWorkoutDraftIfMatches(timing.draft, draft.attemptId)) {
+          return loadStoredActiveWorkoutDraft(owner);
+        }
+      }
+      return timing.draft;
+    }
+  } catch { /* invalid records are removed */ }
+  await AsyncStorage.removeItem(KEYS.activeWorkout(owner));
+  return null;
+}
+export async function saveActiveWorkoutDraft(draft: ActiveWorkoutDraft): Promise<void> {
+  if (!isActiveWorkoutDraft(draft, draft.owner)) throw new Error('El borrador activo no es válido.');
+  await AsyncStorage.setItem(KEYS.activeWorkout(draft.owner), JSON.stringify(draft));
+}
+export async function removeActiveWorkoutDraft(owner: UserProfile): Promise<void> { await AsyncStorage.removeItem(KEYS.activeWorkout(owner)); }
+export async function saveActiveWorkoutDraftIfMatches(draft: ActiveWorkoutDraft, attemptId: string): Promise<boolean> {
+  const current = await loadStoredActiveWorkoutDraft(draft.owner);
+  if (!current || current.attemptId !== attemptId) return false;
+  await AsyncStorage.setItem(KEYS.activeWorkout(draft.owner), JSON.stringify(draft));
+  return true;
+}
+export async function removeActiveWorkoutDraftIfMatches(owner: UserProfile, attemptId: string): Promise<boolean> {
+  const current = await loadStoredActiveWorkoutDraft(owner);
+  if (!current || current.attemptId !== attemptId) return false;
+  await AsyncStorage.removeItem(KEYS.activeWorkout(owner));
+  return true;
+}
+async function loadStoredActiveWorkoutDraft(owner: UserProfile): Promise<ActiveWorkoutDraft | null> {
+  const raw = await AsyncStorage.getItem(KEYS.activeWorkout(owner));
+  if (!raw) return null;
+  try {
+    const draft: unknown = JSON.parse(raw);
+    return isActiveWorkoutDraft(draft, owner) ? draft : null;
+  } catch {
+    return null;
+  }
 }
 
 export async function saveAttempts(

@@ -1,12 +1,13 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   Alert,
+  AppState,
   ScrollView,
   StyleSheet,
   Text,
   View,
 } from 'react-native';
-import { router, useLocalSearchParams } from 'expo-router';
+import { router, useFocusEffect, useLocalSearchParams } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { AppNavBar } from '../../../components/AppNavBar';
 import { AppScreenHeader } from '../../../components/AppScreenHeader';
@@ -22,6 +23,8 @@ import { CompletedExercise, CompletedSet, Routine, SetType, WorkoutAttempt } fro
 import { vibrateRestTimerComplete } from '../../../utils/haptics';
 import { generateId } from '../../../utils/storage';
 import { createWorkoutAttempt } from '../../../utils/workoutAttempts';
+import { matchesActiveWorkout } from '../../../utils/activeWorkoutReentry';
+import { reconcileActiveWorkoutTiming } from '../../../utils/activeWorkoutTiming';
 
 function readSingleParam(value: string | string[] | undefined): string | undefined {
   if (typeof value === 'string') {
@@ -94,7 +97,7 @@ export default function ExecuteRoutineScreen() {
   }>();
   const id = readSingleParam(params.id) ?? '';
   const { user } = useAuth();
-  const { getRoutine, addAttempt } = useData();
+  const { getRoutine, addAttempt, activeWorkoutDraft, startActiveWorkout, updateActiveWorkout, cancelActiveWorkout, refreshActiveWorkoutTiming = async () => undefined } = useData();
   const { retryPendingRewards } = useShop();
   const { theme } = useTheme();
   const routine = getRoutine(id);
@@ -117,6 +120,11 @@ export default function ExecuteRoutineScreen() {
   const finishInFlightRef = useRef(false);
   const attemptRef = useRef<WorkoutAttempt | null>(null);
   const attemptIdRef = useRef<string | null>(null);
+  const restEndsAtMsRef = useRef<number | null>(null);
+  const restCompletionAlertedRef = useRef(false);
+  const reconcileElapsedRef = useRef<() => void>(() => undefined);
+  const handleRestCompleteRef = useRef<() => void>(() => undefined);
+  const refreshActiveWorkoutTimingRef = useRef(refreshActiveWorkoutTiming);
   const restTimerConfig = parseInt(restSeconds, 10) || 90;
 
   useEffect(() => {
@@ -130,7 +138,69 @@ export default function ExecuteRoutineScreen() {
     };
   }, []);
 
+  const reconcileElapsed = useCallback(() => {
+    if (!activeWorkoutDraft || !routine || !matchesActiveWorkout(activeWorkoutDraft, { owner: user, routineId: routine.id, ...(lineage ? { lineage } : {}) })) return;
+    const nowMs = Date.now();
+    const localRestEndsAtMs = restEndsAtMsRef.current;
+    if (localRestEndsAtMs && activeWorkoutDraft.restEndsAtMs) restEndsAtMsRef.current = null;
+    const timing = reconcileActiveWorkoutTiming(activeWorkoutDraft, nowMs);
+    setElapsed(timing.elapsedSeconds);
+    if (localRestEndsAtMs && !activeWorkoutDraft.restEndsAtMs) {
+      const localRemaining = Math.max(0, Math.ceil((localRestEndsAtMs - nowMs) / 1000));
+      if (localRemaining > 0) {
+        setRestRemaining(localRemaining);
+        setIsResting(true);
+        return;
+      }
+      handleRestCompleteRef.current();
+      void refreshActiveWorkoutTiming();
+      return;
+    }
+    setRestRemaining(timing.restRemainingSeconds);
+    setIsResting(timing.isResting);
+    if (timing.cleanup !== 'none') void refreshActiveWorkoutTiming();
+  }, [activeWorkoutDraft, lineage, refreshActiveWorkoutTiming, routine, user]);
+  reconcileElapsedRef.current = reconcileElapsed;
+  refreshActiveWorkoutTimingRef.current = refreshActiveWorkoutTiming;
+
+  useFocusEffect(useCallback(() => {
+    void refreshActiveWorkoutTimingRef.current();
+    reconcileElapsedRef.current();
+    if (phase === 'active') elapsedRef.current = setInterval(() => reconcileElapsedRef.current(), 1000);
+    const subscription = AppState.addEventListener('change', (state) => {
+      if (state === 'active') {
+        void refreshActiveWorkoutTimingRef.current();
+        reconcileElapsedRef.current();
+      }
+    });
+    return () => {
+      subscription.remove();
+      if (elapsedRef.current) clearInterval(elapsedRef.current);
+    };
+  }, [phase]));
+
+  useEffect(() => {
+    if (!routine || !activeWorkoutDraft || !matchesActiveWorkout(activeWorkoutDraft, { owner: user, routineId: routine.id, ...(lineage ? { lineage } : {}) }) || phase !== 'setup') return;
+    attemptIdRef.current = activeWorkoutDraft.attemptId;
+    startTimeRef.current = activeWorkoutDraft.startedAtMs;
+    setRestSeconds(String(activeWorkoutDraft.restTimerSeconds));
+    setSetValues(activeWorkoutDraft.setValues);
+    setCompletedSets(activeWorkoutDraft.completedSets);
+    const timing = reconcileActiveWorkoutTiming(activeWorkoutDraft, Date.now());
+    setRestRemaining(timing.restRemainingSeconds);
+    setIsResting(timing.isResting);
+    setElapsed(timing.elapsedSeconds);
+    setPhase('active');
+  }, [activeWorkoutDraft, lineage, phase, routine, user]);
+
+  useEffect(() => {
+    if (phase === 'active' && attemptIdRef.current && !activeWorkoutDraft) setPhase('setup');
+  }, [activeWorkoutDraft, phase]);
+
   const handleRestComplete = useCallback(() => {
+    if (restCompletionAlertedRef.current) return;
+    restCompletionAlertedRef.current = true;
+    restEndsAtMsRef.current = null;
     setIsResting(false);
     setRestRemaining(0);
     vibrateRestTimerComplete();
@@ -140,42 +210,47 @@ export default function ExecuteRoutineScreen() {
       [{ text: 'Entendido' }],
     );
   }, []);
+  handleRestCompleteRef.current = handleRestComplete;
 
   const startRestTimer = useCallback(() => {
     if (restRef.current) clearInterval(restRef.current);
+    const restEndsAtMs = Date.now() + restTimerConfig * 1000;
+    restEndsAtMsRef.current = restEndsAtMs;
+    restCompletionAlertedRef.current = false;
     setRestRemaining(restTimerConfig);
     setIsResting(true);
+    if (activeWorkoutDraft) void updateActiveWorkout({ ...activeWorkoutDraft, restEndsAtMs });
     restRef.current = setInterval(() => {
-      setRestRemaining((prev) => {
-        if (prev <= 1) {
-          if (restRef.current) clearInterval(restRef.current);
-          handleRestComplete();
-          return 0;
-        }
-        return prev - 1;
-      });
+      const remaining = Math.max(0, Math.ceil((restEndsAtMs - Date.now()) / 1000));
+      if (remaining === 0) {
+        if (restRef.current) clearInterval(restRef.current);
+        void refreshActiveWorkoutTiming();
+        handleRestComplete();
+      }
+      setRestRemaining(remaining);
     }, 1000);
-  }, [restTimerConfig, handleRestComplete]);
+  }, [activeWorkoutDraft, restTimerConfig, handleRestComplete, refreshActiveWorkoutTiming, updateActiveWorkout]);
 
-  const startWorkout = () => {
-    if (!routine) return;
-    setSetValues(buildSetValues(routine));
+  const startWorkout = async () => {
+    if (!routine || !user) return;
+    const values = buildSetValues(routine);
+    const attemptId = generateId();
+    await startActiveWorkout({ version: 1, owner: user, attemptId, routineId: routine.id, lineage, startedAtMs: Date.now(), restTimerSeconds: restTimerConfig, completedSets: {}, setValues: values });
+    setSetValues(values);
     setCompletedSets({});
-    attemptIdRef.current = generateId();
+    attemptIdRef.current = attemptId;
     attemptRef.current = null;
     setPhase('active');
     startTimeRef.current = Date.now();
-    elapsedRef.current = setInterval(() => {
-      setElapsed(Math.floor((Date.now() - startTimeRef.current) / 1000));
-    }, 1000);
   };
 
   const updateSetValue = (setKey: SetKey, field: keyof SetRuntimeValues, value: string) => {
     if (completedSets[setKey]) return;
-    setSetValues((prev) => ({
-      ...prev,
-      [setKey]: { ...prev[setKey], [field]: value },
-    }));
+    setSetValues((prev) => {
+      const next = { ...prev, [setKey]: { ...prev[setKey], [field]: value } };
+      if (activeWorkoutDraft) void updateActiveWorkout({ ...activeWorkoutDraft, setValues: next });
+      return next;
+    });
   };
 
   const completeSet = async (setKey: SetKey, tipo: SetType) => {
@@ -192,7 +267,11 @@ export default function ExecuteRoutineScreen() {
 
     completingSetsRef.current.add(setKey);
     try {
-      setCompletedSets((prev) => ({ ...prev, [setKey]: true }));
+      setCompletedSets((prev) => {
+        const next = { ...prev, [setKey]: true };
+        if (activeWorkoutDraft) void updateActiveWorkout({ ...activeWorkoutDraft, completedSets: next });
+        return next;
+      });
       Alert.alert('¡Serie!', getRandomSetEncouragementMessage(), [{ text: '¡Vamos!' }]);
       startRestTimer();
     } finally {
@@ -239,6 +318,7 @@ export default function ExecuteRoutineScreen() {
       });
       attemptRef.current = attempt;
       await addAttempt(attempt);
+      await cancelActiveWorkout();
       await retryPendingRewards();
       setEarnedGems(attempt.reward.totalGems);
       setPhase('done');
@@ -439,6 +519,7 @@ export default function ExecuteRoutineScreen() {
             loading={isFinishing}
             disabled={isFinishing}
           />
+          <GlassButton title="Cancelar entrenamiento" variant="secondary" onPress={() => { void cancelActiveWorkout(); router.back(); }} />
         </View>
       </SafeAreaView>
     </ThemeBackground>

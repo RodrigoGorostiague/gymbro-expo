@@ -22,12 +22,13 @@ import { useTheme } from '../../../context/ThemeContext';
 import { PARTNER_PROFILE } from '../../../constants/kiss';
 import { MUSCLE_GROUP_LABELS } from '../../../constants/muscleGroups';
 import { Routine } from '../../../types';
+import { matchesActiveWorkout } from '../../../utils/activeWorkoutReentry';
 
 export default function RoutinesScreen() {
   const { theme } = useTheme();
   const { user, welcomeMessage, setWelcomeMessage } = useAuth();
   const partner = user ? PARTNER_PROFILE[user] : null;
-  const { routines, deleteRoutine } = useData();
+  const { routines, deleteRoutine, activeWorkoutDraft } = useData();
   const { pendingShares, hasPendingShare } = useShare();
   const [shareTarget, setShareTarget] = useState<Routine | null>(null);
 
@@ -208,6 +209,7 @@ export default function RoutinesScreen() {
                   )}
                   <View style={styles.cardActions}>
                     <HapticPressable
+                      accessibilityLabel={`${matchesActiveWorkout(activeWorkoutDraft, { owner: user, routineId: item.id }) ? 'Continuar' : 'Entrenar'} ${item.name}`}
                       onPress={() => router.push(`/routine/execute/${item.id}`)}
                       style={styles.actionWrap}
                     >
@@ -217,7 +219,7 @@ export default function RoutinesScreen() {
                         end={{ x: 1, y: 0.5 }}
                         style={styles.actionBtn}
                       >
-                        <Text style={styles.actionText}>▶ Entrenar</Text>
+                        <Text style={styles.actionText}>▶ {matchesActiveWorkout(activeWorkoutDraft, { owner: user, routineId: item.id }) ? 'Continuar' : 'Entrenar'}</Text>
                       </LinearGradient>
                     </HapticPressable>
                     <HapticPressable

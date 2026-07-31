@@ -11,6 +11,23 @@ export const Alert = {
   alert: vi.fn(),
 };
 
+const appStateListeners = new Set<(state: string) => void>();
+export const AppState = {
+  addEventListener: vi.fn((_event: 'change', listener: (state: string) => void) => {
+    appStateListeners.add(listener);
+    return { remove: () => appStateListeners.delete(listener) };
+  }),
+};
+
+export function __emitAppState(state: string) {
+  appStateListeners.forEach((listener) => listener(state));
+}
+
+export function __resetAppState() {
+  appStateListeners.clear();
+  AppState.addEventListener.mockClear();
+}
+
 export const Dimensions = { get: () => ({ width: 390, height: 844 }) };
 export const FlatList = ({ data, renderItem, keyExtractor, ...props }: any) => React.createElement(
   'FlatList',

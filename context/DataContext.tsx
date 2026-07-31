@@ -1,5 +1,5 @@
 import React, { createContext, useContext, useEffect, useMemo, useRef, useState } from 'react';
-import { Exercise, ExerciseCatalog, ExerciseVariant, Mesocycle, MuscleGroup, PlannedSessionRef, Routine, UserProfile, WorkoutAttempt, WorkoutSession } from '../types';
+import { ActiveWorkoutDraft, Exercise, ExerciseCatalog, ExerciseVariant, Mesocycle, MuscleGroup, PlannedSessionRef, Routine, UserProfile, WorkoutAttempt, WorkoutSession } from '../types';
 import {
   addCatalogExercise,
   assertRoutineMutationReady,
@@ -9,6 +9,7 @@ import {
   deleteAttempt,
   generateId,
   loadAttempts,
+  loadActiveWorkoutDraft,
   loadCatalogWithRoutines,
   loadHiddenSharedRoutineIds,
   loadMesocycles,
@@ -20,11 +21,16 @@ import {
   saveHiddenSharedRoutineIds,
   saveSessions,
   saveCapturedAttempt,
+  removeActiveWorkoutDraft,
+  removeActiveWorkoutDraftIfMatches,
+  saveActiveWorkoutDraft,
+  saveActiveWorkoutDraftIfMatches,
   resolveSessionQuarantine,
   renameCatalogVariant,
   updateAttempt,
   updateCatalogExercise,
 } from '../utils/storage';
+import { reconcileActiveWorkoutTiming } from '../utils/activeWorkoutTiming';
 import { applySessionEdits, attemptToSession } from '../utils/workoutAttempts';
 import { updateSharedRoutine } from '../services/shareSync';
 import { useAuth } from './AuthContext';
@@ -66,9 +72,21 @@ interface DataContextValue {
   deleteSession: (id: string) => Promise<void>;
   addAttempt: (attempt: WorkoutAttempt) => Promise<void>;
   editAttempt: (attempt: WorkoutAttempt) => Promise<void>;
+  activeWorkoutDraft: ActiveWorkoutDraft | null;
+  cancelActiveWorkout: () => Promise<void>;
+  startActiveWorkout: (draft: ActiveWorkoutDraft) => Promise<void>;
+  updateActiveWorkout: (draft: ActiveWorkoutDraft) => Promise<void>;
+  refreshActiveWorkoutTiming: () => Promise<void>;
 }
 
 const DataContext = createContext<DataContextValue | null>(null);
+
+function sameActiveWorkoutDraft(
+  current: ActiveWorkoutDraft | null,
+  next: ActiveWorkoutDraft | null,
+): boolean {
+  return JSON.stringify(current) === JSON.stringify(next);
+}
 
 export function DataProvider({ children }: { children: React.ReactNode }) {
   const { user } = useAuth();
@@ -80,6 +98,9 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
   const [hiddenSharedRoutineIds, setHiddenSharedRoutineIds] = useState<string[]>([]);
   const [sessions, setSessions] = useState<PersistedWorkoutSession[]>([]);
   const [attempts, setAttempts] = useState<WorkoutAttempt[]>([]);
+  const [activeWorkoutDraft, setActiveWorkoutDraft] = useState<ActiveWorkoutDraft | null>(null);
+  const activeWorkoutDraftRef = useRef<ActiveWorkoutDraft | null>(null);
+  activeWorkoutDraftRef.current = activeWorkoutDraft;
   const [quarantinedSessionCount, setQuarantinedSessionCount] = useState(0);
   const mesocyclesRef = useRef<Mesocycle[]>([]);
   const sessionsRef = useRef<PersistedWorkoutSession[]>([]);
@@ -103,6 +124,7 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
       sessionsRef.current = [];
       setSessions([]);
       setAttempts([]);
+      setActiveWorkoutDraft(null);
       setQuarantinedSessionCount(0);
       setIsLoading(false);
       setDataState('ready');
@@ -117,7 +139,7 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
     routinesLoadedRef.current = false;
     mesocyclesLoadedRef.current = false;
     const operation = sessionMutationQueueRef.current.then(async () => {
-      const [loadedRoutineData, loadedMesocycles, loadedSessions, loadedHiddenShareIds, loadedAttempts, quarantine] =
+      const [loadedRoutineData, loadedMesocycles, loadedSessions, loadedHiddenShareIds, loadedAttempts, quarantine, draft] =
         await Promise.all([
           loadCatalogWithRoutines(),
           resetLegacyMesocycleStorage(user).then(() => loadMesocycles(user)),
@@ -125,6 +147,7 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
           loadHiddenSharedRoutineIds(),
           loadAttempts(user),
           loadSessionQuarantine(),
+          loadActiveWorkoutDraft(user),
         ]);
       const { catalog: loadedCatalog, catalogError, routines: loadedRoutines } = loadedRoutineData;
       const migratedSessions = loadedSessions.filter(
@@ -147,6 +170,7 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
       sessionsRef.current = sortedSessions;
       setSessions(sortedSessions);
       setAttempts(loadedAttempts);
+      setActiveWorkoutDraft(draft);
       setQuarantinedSessionCount(quarantine.length);
       setHiddenSharedRoutineIds(loadedHiddenShareIds);
       if (catalogError) throw catalogError;
@@ -167,6 +191,43 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
   }, [user, reloadToken]);
 
   const retryData = () => setReloadToken((value) => value + 1);
+  const startActiveWorkout = async (draft: ActiveWorkoutDraft) => {
+    const owner = activeUserRef.current;
+    if (!owner || draft.owner !== owner) throw new Error('Se requiere el propietario activo.');
+    if (activeWorkoutDraft && activeWorkoutDraft.attemptId !== draft.attemptId) throw new Error('Ya hay un entrenamiento activo para este perfil.');
+    await saveActiveWorkoutDraft(draft);
+    if (activeUserRef.current === owner) setActiveWorkoutDraft(draft);
+  };
+  const updateActiveWorkout = async (draft: ActiveWorkoutDraft) => {
+    if (!activeWorkoutDraft || draft.owner !== activeWorkoutDraft.owner || draft.attemptId !== activeWorkoutDraft.attemptId) throw new Error('El borrador activo no coincide.');
+    await startActiveWorkout(draft);
+  };
+  const cancelActiveWorkout = async () => { const owner = activeUserRef.current; if (!owner) throw new Error('Se requiere autenticación.'); await removeActiveWorkoutDraft(owner); if (activeUserRef.current === owner) setActiveWorkoutDraft(null); };
+  const refreshActiveWorkoutTiming = async () => {
+    const owner = activeUserRef.current;
+    const expectedAttemptId = activeWorkoutDraftRef.current?.attemptId;
+    if (!owner || !expectedAttemptId) return;
+    const operation = sessionMutationQueueRef.current.then(async () => {
+      const loaded = await loadActiveWorkoutDraft(owner);
+      if (activeUserRef.current !== owner || activeWorkoutDraftRef.current?.attemptId !== expectedAttemptId) return;
+      if (!loaded) {
+        await removeActiveWorkoutDraftIfMatches(owner, expectedAttemptId);
+        if (activeWorkoutDraftRef.current?.attemptId === expectedAttemptId) setActiveWorkoutDraft(null);
+        return;
+      }
+      const timing = reconcileActiveWorkoutTiming(loaded, Date.now());
+      if (timing.cleanup === 'remove-draft') {
+        await removeActiveWorkoutDraftIfMatches(owner, expectedAttemptId);
+        if (activeWorkoutDraftRef.current?.attemptId === expectedAttemptId) setActiveWorkoutDraft(null);
+      } else if (timing.cleanup === 'clear-rest' && timing.draft) {
+        if (await saveActiveWorkoutDraftIfMatches(timing.draft, expectedAttemptId)) setActiveWorkoutDraft(timing.draft);
+      } else if (!sameActiveWorkoutDraft(activeWorkoutDraftRef.current, timing.draft)) {
+        setActiveWorkoutDraft(timing.draft);
+      }
+    });
+    sessionMutationQueueRef.current = operation.then(() => undefined, () => undefined);
+    return operation;
+  };
 
   const resolveQuarantine = async (action: 'delete' | 'assign') => {
     const owner = activeUserRef.current;
@@ -559,7 +620,12 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
         updateSession,
         deleteSession,
         addAttempt,
-        editAttempt,
+         editAttempt,
+         activeWorkoutDraft,
+         cancelActiveWorkout,
+         startActiveWorkout,
+          updateActiveWorkout,
+          refreshActiveWorkoutTiming,
       }}
     >
       {children}

@@ -18,10 +18,12 @@ import { MuscleGroupSelector } from '../../components/MuscleGroupSelector';
 import { GlassButton, GlassInput } from '../../components/UI';
 import { MUSCLE_GROUP_LABELS } from '../../constants/muscleGroups';
 import { useData } from '../../context/DataContext';
+import { useAuth } from '../../context/AuthContext';
 import { useTheme } from '../../context/ThemeContext';
 import { Exercise, ExerciseSet, MuscleGroup, RoutineExercise } from '../../types';
 import { buildDecimalDraftMap, type DecimalDraftMap, normalizeDecimalInput } from '../../utils/decimalInput';
 import { generateId } from '../../utils/storage';
+import { matchesActiveWorkout } from '../../utils/activeWorkoutReentry';
 
 export default function EditRoutineScreen() {
   const { id, addExerciseId } = useLocalSearchParams<{ id: string; addExerciseId?: string }>();
@@ -30,7 +32,9 @@ export default function EditRoutineScreen() {
     getExercise,
     getRoutine,
     updateRoutine,
+    activeWorkoutDraft,
   } = useData();
+  const { user } = useAuth();
   const { theme } = useTheme();
   const [name, setName] = useState('');
   const [exercises, setExercises] = useState<RoutineExercise[]>([]);
@@ -187,8 +191,11 @@ export default function EditRoutineScreen() {
         <AppNavBar
           onBack={() => router.back()}
           trailing={
-            <HapticPressable onPress={() => router.push(`/routine/execute/${id}`)}>
-              <Text style={{ color: theme.primary, fontWeight: '800' }}>▶ Ejecutar</Text>
+            <HapticPressable
+              accessibilityLabel={`${matchesActiveWorkout(activeWorkoutDraft, { owner: user, routineId: id }) ? 'Continuar' : 'Ejecutar'} ${getRoutine(id)?.name ?? ''}`}
+              onPress={() => router.push(`/routine/execute/${id}`)}
+            >
+              <Text style={{ color: theme.primary, fontWeight: '800' }}>▶ {matchesActiveWorkout(activeWorkoutDraft, { owner: user, routineId: id }) ? 'Continuar' : 'Ejecutar'}</Text>
             </HapticPressable>
           }
         />

@@ -1,8 +1,8 @@
 import React from 'react';
 import TestRenderer, { act, type ReactTestInstance, type ReactTestRenderer } from 'react-test-renderer';
 import { vi } from 'vitest';
-import { __setParams, router as expoRouter } from './expoRouterStub';
-import { Alert as nativeAlert } from './reactNativeStub';
+import { __blurFocus, __setParams, router as expoRouter } from './expoRouterStub';
+import { Alert as nativeAlert, __resetAppState } from './reactNativeStub';
 
 declare global {
   // eslint-disable-next-line no-var
@@ -150,6 +150,8 @@ vi.mock('../../components/UI', uiMock);
 vi.mock('../../../components/UI', uiMock);
 
 export function resetRuntimeHarness() {
+  __blurFocus();
+  __resetAppState();
   __setParams({});
   currentTheme = baseTheme;
   currentData = {};

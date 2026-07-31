@@ -23,6 +23,13 @@ export type MesocycleDayGuidance =
   | null;
 
 const isRoutine = (entry: MesocycleEntry): entry is PlannedSession => !('kind' in entry && entry.kind === 'rest');
+export function deriveFirstEntryStartDate(entries: readonly MesocycleEntry[], today = new Date()): string | undefined {
+  if (!entries.length) return undefined;
+  const year = today.getFullYear();
+  const month = `${today.getMonth() + 1}`.padStart(2, '0');
+  const day = `${today.getDate()}`.padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
 const parseLocalDate = (value?: string): Date | null => {
   const match = value?.match(/^(\d{4})-(\d{2})-(\d{2})$/);
   if (!match) return null;

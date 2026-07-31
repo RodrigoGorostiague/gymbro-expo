@@ -15,6 +15,7 @@ import {
   buildMesocycleDraft,
   clonePlannedWeekEntries,
   deriveMesocycleAdherence,
+  deriveFirstEntryStartDate,
   deriveMesocycleScheduleProjection,
   MesocycleScheduleProjectionEntry,
 } from '../../utils/mesocycles';
@@ -71,14 +72,16 @@ export default function MesocycleDetailScreen() {
       : week),
   }));
 
-  const schedule = deriveMesocycleScheduleProjection({ ...draft, startDate: startDate || undefined }, routines, attempts);
+  const derivedStartDate = deriveFirstEntryStartDate([...draft.weeks].sort((a, b) => a.weekNumber - b.weekNumber).flatMap((week) => week.entries));
+  const effectiveStartDate = derivedStartDate ?? (startDate || undefined);
+  const schedule = deriveMesocycleScheduleProjection({ ...draft, startDate: effectiveStartDate }, routines, attempts);
   const scheduleByEntry = new Map(schedule.map((entry) => [entry.entryId, entry]));
   const adherence = deriveMesocycleAdherence(draft, attempts);
 
   return <ThemeBackground><SafeAreaView style={styles.safe}><AppNavBar onBack={() => router.back()} /><ScrollView contentContainerStyle={styles.scroll}>
     <Text style={[styles.title, { color: theme.text }]}>{draft.name}</Text>
     <GlassInput value={draft.name} onChangeText={(name) => change((value) => ({ ...value, name }))} />
-    <DateTimeField value={startDate} onChange={setStartDate} mode="date" testID="mesocycle-edit-start-date-picker" />
+    <DateTimeField value={derivedStartDate ?? startDate} onChange={setStartDate} mode="date" testID="mesocycle-edit-start-date-picker" />
     {draft.weeks.map((week) => <WeekCard
       key={week.id}
       week={week}
@@ -93,7 +96,7 @@ export default function MesocycleDetailScreen() {
       onRemove={(entryId) => removeEntry(week.weekNumber, entryId)}
       onCopy={() => copyPrevious(week.weekNumber)}
     />)}
-    <GlassButton title="Guardar planificación" onPress={() => updateMesocycle({ ...draft, startDate: startDate || undefined }).then(() => Alert.alert('Mesociclo actualizado', 'La planificación semanal quedó guardada.'))} />
+    <GlassButton title="Guardar planificación" onPress={() => updateMesocycle({ ...draft, startDate: effectiveStartDate }).then(() => Alert.alert('Mesociclo actualizado', 'La planificación semanal quedó guardada.'))} />
   </ScrollView></SafeAreaView></ThemeBackground>;
 }
 
@@ -127,11 +130,14 @@ function WeekCard({ week, progress, scheduleByEntry, theme, open, routines, onOp
       </View>;
     })}
     <View style={styles.actions}><GlassButton title="Agregar descanso" variant="secondary" disabled={week.entries.length >= 7} onPress={() => onAddRest(week.weekNumber)} /><GlassButton title={open ? 'Cerrar rutinas' : 'Agregar rutina'} variant="secondary" disabled={week.entries.length >= 7} onPress={onOpen} /></View>
-    {open ? routines.map((routine) => <HapticPressable key={routine.id} onPress={() => onAddRoutine(week.weekNumber, routine)}><Text style={{ color: theme.primary }}>{routine.name}</Text></HapticPressable>) : null}
+    {open ? routines.map((routine) => {
+      const selected = week.entries.some((entry) => !isRest(entry) && entry.ref.routineId === routine.id);
+      return <HapticPressable key={routine.id} accessibilityRole="button" accessibilityLabel={`Programar ${routine.name}`} accessibilityState={{ selected }} onPress={() => onAddRoutine(week.weekNumber, routine)} style={[styles.option, { borderColor: theme.glassBorder, backgroundColor: selected ? theme.primary : 'transparent' }]}><Text style={{ color: selected ? '#fff' : theme.primary }}>{routine.name}</Text></HapticPressable>;
+    }) : null}
     {week.weekNumber > 1 ? <GlassButton title="Copiar semana anterior" variant="secondary" onPress={onCopy} /> : null}
   </GlassCard>;
 }
 
 const styles = StyleSheet.create({
-  safe: { flex: 1, paddingHorizontal: 20, paddingTop: 8 }, scroll: { paddingBottom: 40 }, title: { fontSize: 26, fontWeight: '900', marginBottom: 8 }, card: { marginBottom: 14 }, heading: { fontSize: 18, fontWeight: '800' }, entry: { marginTop: 10, paddingTop: 10, borderTopWidth: 1, flexDirection: 'row', gap: 10 }, entryContent: { flex: 1, gap: 3 }, dateLabel: { fontSize: 12, fontWeight: '800', textTransform: 'capitalize' }, removeAction: { width: 36, height: 36, alignItems: 'center', justifyContent: 'center' }, actions: { gap: 8, marginTop: 12 },
+  safe: { flex: 1, paddingHorizontal: 20, paddingTop: 8 }, scroll: { paddingBottom: 40 }, title: { fontSize: 26, fontWeight: '900', marginBottom: 8 }, card: { marginBottom: 14 }, heading: { fontSize: 18, fontWeight: '800' }, entry: { marginTop: 10, paddingTop: 10, borderTopWidth: 1, flexDirection: 'row', gap: 10 }, entryContent: { flex: 1, gap: 3 }, dateLabel: { fontSize: 12, fontWeight: '800', textTransform: 'capitalize' }, removeAction: { width: 36, height: 36, alignItems: 'center', justifyContent: 'center' }, actions: { gap: 8, marginTop: 12 }, option: { borderWidth: 1, borderRadius: 12, marginTop: 8, padding: 10 },
 });

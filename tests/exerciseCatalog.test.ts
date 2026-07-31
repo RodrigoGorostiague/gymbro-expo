@@ -259,6 +259,13 @@ describe('global exercise variant catalog', () => {
     expect((await loadExerciseCatalog()).exercises[0].defaultSets[0].weight).toBe(0.5);
   });
 
+  test('persists a name-only catalog update after reload', async () => {
+    await loadExerciseCatalog();
+    const created = await addCatalogExercise({ name: 'Old name', variant: 'libre', muscleGroups: ['pecho'], defaultSets: [] });
+    await updateCatalogExercise({ ...created.result, name: 'New name' });
+    expect((await loadExerciseCatalog()).exercises[0].name).toBe('New name');
+  });
+
   test('keeps decimal draft text visible in the exercise editor until save', async () => {
     const updateExercise = vi.fn(async () => undefined);
     setMockParams({ exerciseId: 'exercise-1' });
