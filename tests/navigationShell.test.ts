@@ -59,6 +59,7 @@ describe('navigation shell', () => {
   test('keeps routable Train child routes hidden from the bottom bar', async () => {
     expect(__resolveHref('/routines')).toBe('routines/index');
     expect(__resolveHref('/mesocycles')).toBe('mesocycles/index');
+    expect(__resolveHref('/exercises')).toBe('exercises/index');
 
     let tree: TestRenderer.ReactTestRenderer;
     await act(async () => { tree = TestRenderer.create(React.createElement(TabsLayout)); });

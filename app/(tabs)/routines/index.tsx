@@ -20,7 +20,7 @@ import { useTheme } from '../../../context/ThemeContext';
 import { matchesActiveWorkout } from '../../../utils/activeWorkoutReentry';
 import { muscleGroupLabel } from '../../../utils/catalogMuscleGroups';
 
-export default function RoutinesScreen() {
+export default function RoutinesScreen({ navigation }: { navigation?: React.ReactNode }) {
   const { theme } = useTheme();
   const { user, welcomeMessage, setWelcomeMessage } = useAuth();
   const { routines, deleteRoutine, activeWorkoutDraft, catalogMuscleGroups = [] } = useData();
@@ -63,6 +63,7 @@ export default function RoutinesScreen() {
             </>
           }
         />
+        {navigation}
 
         {routines.length === 0 ? (
           <GlassCard style={styles.emptyCard}>

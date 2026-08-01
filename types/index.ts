@@ -28,7 +28,15 @@ export interface Exercise {
   catalog?: {
     movementPattern: string | null;
     equipment: string | null;
+    muscleParticipations: CatalogMuscleParticipation[];
   };
+}
+
+export interface CatalogMuscleParticipation {
+  muscleGroupId: MuscleGroup;
+  role: 'Principal' | 'Secundario';
+  relevance: number;
+  originalLabel: string;
 }
 
 export interface ExerciseCatalog {

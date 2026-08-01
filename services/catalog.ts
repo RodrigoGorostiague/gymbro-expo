@@ -1,4 +1,4 @@
-import { Exercise } from '../types';
+import { CatalogMuscleParticipation, Exercise } from '../types';
 import { supabase, supabaseConfigurationError } from './supabase';
 
 export type CatalogParticipationMode = 'primary_only' | 'primary_and_secondary' | 'all_roles';
@@ -20,6 +20,14 @@ type CatalogExerciseRow = {
   equipment: string | null;
   muscle_group_ids: string[];
   primary_muscle_group_ids: string[];
+  muscle_participations?: CatalogMuscleParticipationRow[];
+};
+
+type CatalogMuscleParticipationRow = {
+  muscle_group_id: string;
+  role: 'Principal' | 'Secundario';
+  relevance: number;
+  original_label: string;
 };
 
 type CatalogMuscleGroupRow = {
@@ -45,6 +53,12 @@ function requireCatalogClient() {
 }
 
 function toExercise(row: CatalogExerciseRow): Exercise {
+  const muscleParticipations = (row.muscle_participations ?? []).map((participation) => ({
+    muscleGroupId: participation.muscle_group_id,
+    role: participation.role,
+    relevance: participation.relevance,
+    originalLabel: participation.original_label,
+  }));
   return {
     id: row.exercise_id,
     name: row.canonical_name,
@@ -52,7 +66,7 @@ function toExercise(row: CatalogExerciseRow): Exercise {
     attribution: { primary: row.primary_muscle_group_ids[0] ?? row.muscle_group_ids[0], secondary: row.muscle_group_ids.filter((id) => !row.primary_muscle_group_ids.includes(id)) },
     variant: row.equipment ?? 'Sin implemento',
     defaultSets: [],
-    catalog: { movementPattern: row.movement_pattern, equipment: row.equipment },
+    catalog: { movementPattern: row.movement_pattern, equipment: row.equipment, muscleParticipations },
   };
 }
 
@@ -89,5 +103,11 @@ export async function filterCatalogExercises(groupId: string, mode: CatalogParti
     equipment: row.equipment,
     muscle_group_ids: [row.matched_muscle_group_id],
     primary_muscle_group_ids: row.role === 'Principal' ? [row.matched_muscle_group_id] : [],
+    muscle_participations: [{
+      muscle_group_id: row.matched_muscle_group_id,
+      role: row.role as 'Principal' | 'Secundario',
+      relevance: row.relevance,
+      original_label: row.matched_muscle_name,
+    }],
   }));
 }

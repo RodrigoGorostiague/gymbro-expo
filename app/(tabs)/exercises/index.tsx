@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { FlatList, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { router } from 'expo-router';
 import { AppScreenHeader } from '../../../components/AppScreenHeader';
 import { GlassCard, ThemeBackground } from '../../../components/GlassCard';
 import { HapticPressable } from '../../../components/HapticPressable';
@@ -16,11 +17,15 @@ export default function ExercisesScreen() {
   const [mode, setMode] = useState<CatalogParticipationMode>('all_roles');
   const [filtersExpanded, setFiltersExpanded] = useState(false);
   const [query, setQuery] = useState('');
+  const [exerciseQuery, setExerciseQuery] = useState('');
   const [filteredExercises, setFilteredExercises] = useState(exercises);
 
   const activeFilterLabel = filter ? catalogMuscleGroups.find((group) => group.id === filter)?.displayName ?? null : null;
   const visibleGroups = catalogMuscleGroups.filter((group) => (
     isSelectableMuscleParent(group) && group.displayName.toLocaleLowerCase('es').includes(query.trim().toLocaleLowerCase('es'))
+  ));
+  const visibleExercises = filteredExercises.filter((exercise) => (
+    exercise.name.toLocaleLowerCase('es').includes(exerciseQuery.trim().toLocaleLowerCase('es'))
   ));
 
   useEffect(() => {
@@ -42,7 +47,15 @@ export default function ExercisesScreen() {
       <SafeAreaView style={styles.safe}>
         <AppScreenHeader
           title="Ejercicios"
-          subtitle="Catálogo curado y normalizado"
+          subtitle="Catálogo curado para explorar y planificar"
+        />
+
+        <TextInput
+          value={exerciseQuery}
+          onChangeText={setExerciseQuery}
+          placeholder="Buscar ejercicio"
+          placeholderTextColor={theme.textMuted}
+          style={[styles.exerciseSearch, { color: theme.text, borderColor: theme.glassBorder, backgroundColor: theme.glass }]}
         />
 
         <View style={styles.filterSection}>
@@ -104,38 +117,43 @@ export default function ExercisesScreen() {
           ) : null}
         </View>
 
-        {filteredExercises.length === 0 ? (
+        {visibleExercises.length === 0 ? (
           <GlassCard style={styles.emptyCard}>
             <Text style={[styles.emptyTitle, { color: theme.text }]}>No hay ejercicios todavía</Text>
             <Text style={[styles.emptyText, { color: theme.textMuted }]}>No hay ejercicios para la selección actual.</Text>
           </GlassCard>
         ) : (
           <FlatList
-            data={filteredExercises}
+            data={visibleExercises}
             keyExtractor={(item) => item.id}
             contentContainerStyle={styles.list}
             renderItem={({ item }) => {
-              return <GlassCard style={styles.card}>
-                <View style={styles.cardHeader}>
-                  <View style={{ flex: 1 }}>
-                    <Text style={[styles.title, { color: theme.text }]}>{item.name}</Text>
-                    <Text style={[styles.meta, { color: theme.textMuted }]}>
-                       {item.catalog?.movementPattern ?? item.variant} · {item.variant}
-                    </Text>
-                  </View>
-                   <Text style={[styles.link, { color: theme.textMuted }]}>{item.id}</Text>
-                </View>
-
-                <View style={styles.tags}>
-                   {item.muscleGroups.map((group) => (
-                    <View key={group} style={[styles.tag, { backgroundColor: theme.glass, borderColor: theme.glassBorder }]}>
-                       <Text style={[styles.tagText, { color: theme.text }]}>{muscleGroupLabel(catalogMuscleGroups, group)}</Text>
+              return (
+                <HapticPressable
+                  accessibilityRole="button"
+                  accessibilityLabel={`Ver detalle de ${item.name}`}
+                  onPress={() => router.push(`/exercise/${item.id}`)}
+                >
+                  <GlassCard style={styles.card}>
+                    <View style={styles.cardHeader}>
+                      <View style={{ flex: 1 }}>
+                        <Text style={[styles.title, { color: theme.text }]}>{item.name}</Text>
+                        <Text style={[styles.meta, { color: theme.textMuted }]}>
+                          {item.catalog?.movementPattern ?? 'Patrón no especificado'} · {item.variant}
+                        </Text>
+                      </View>
+                      <Text style={[styles.link, { color: theme.primary }]}>Ver detalle</Text>
                     </View>
-                  ))}
-                </View>
-
-                 <Text style={[styles.meta, { color: theme.textMuted, marginTop: 14 }]}>Los datos del catálogo se administran únicamente mediante la importación validada.</Text>
-              </GlassCard>
+                    <View style={styles.tags}>
+                      {item.muscleGroups.map((group) => (
+                        <View key={group} style={[styles.tag, { backgroundColor: theme.glass, borderColor: theme.glassBorder }]}>
+                          <Text style={[styles.tagText, { color: theme.text }]}>{muscleGroupLabel(catalogMuscleGroups, group)}</Text>
+                        </View>
+                      ))}
+                    </View>
+                  </GlassCard>
+                </HapticPressable>
+              );
             }}
           />
         )}
@@ -147,6 +165,7 @@ export default function ExercisesScreen() {
 const styles = StyleSheet.create({
   safe: { flex: 1, paddingHorizontal: 20, paddingTop: 12 },
   filterSection: { paddingBottom: 16, gap: 10 },
+  exerciseSearch: { borderWidth: 1, borderRadius: 16, paddingHorizontal: 14, paddingVertical: 12, marginBottom: 12, fontSize: 14 },
   filterTrigger: {
     minHeight: 56,
     borderWidth: 1,
@@ -178,5 +197,4 @@ const styles = StyleSheet.create({
   tags: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 14 },
   tag: { borderWidth: 1, borderRadius: 999, paddingHorizontal: 10, paddingVertical: 6 },
   tagText: { fontSize: 12, fontWeight: '700' },
-  actions: { flexDirection: 'row', gap: 10, marginTop: 14 },
 });

@@ -514,7 +514,10 @@ describe('global exercise variant catalog', () => {
       flexWrap: 'wrap',
       alignItems: 'flex-start',
     }));
-    const pechoChip = findPressableByText(denseScreen.root, 'Pecho');
+    const pechoChip = denseStrip.find(
+      (node: any) => (node.type as any) === 'HapticPressable'
+        && node.findAll((child: any) => (child.type as any) === 'Text' && child.children.join('') === 'Pecho').length > 0,
+    );
     press(pechoChip);
 
     expect(findTextsContaining(denseScreen.root, 'Activo: Pecho')).toHaveLength(1);

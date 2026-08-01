@@ -54,7 +54,7 @@ function MesocycleCard({ mesocycle, onDelete }: { mesocycle: Mesocycle; onDelete
   );
 }
 
-export default function MesocyclesScreen() {
+export default function MesocyclesScreen({ navigation }: { navigation?: React.ReactNode }) {
   const { theme } = useTheme();
   const { mesocycles, deleteMesocycle } = useData();
 
@@ -86,6 +86,7 @@ export default function MesocyclesScreen() {
           subtitle="Bloques para planificar semanas de entrenamiento"
           trailing={<GlassButton title="+ Nuevo" onPress={() => router.push('/mesocycle/create')} />}
         />
+        {navigation}
 
         {mesocycles.length === 0 ? (
           <GlassCard style={styles.emptyCard}>

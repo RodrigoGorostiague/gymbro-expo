@@ -7,6 +7,7 @@ let focusCleanups: Array<() => void> = [];
 const staticRouteModules = {
   '/mesocycles': 'mesocycles/index',
   '/routines': 'routines/index',
+  '/exercises': 'exercises/index',
 } as const;
 
 export const router = {

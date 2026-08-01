@@ -7,11 +7,16 @@ vi.mock('../components/LogoutButton', () => ({ LogoutButton: () => null }));
 
 import TrainEntryScreen from '../app/(tabs)/train';
 
+const findPressableByText = (root: any, text: string) => root.find(
+  (node: any) => (node.type as any) === 'HapticPressable'
+    && node.findAll((child: any) => (child.type as any) === 'Text' && child.children.join('') === text).length > 0,
+);
+
 describe('Train entry ownership', () => {
   beforeEach(() => resetRuntimeHarness());
 
   test('renders mesocycles when routines exist without navigating away from Train', () => {
-    setMockData({ dataState: 'ready', routines: [{ id: 'routine-1' }], mesocycles: [] });
+    setMockData({ dataState: 'ready', routines: [{ id: 'routine-1', name: 'Rutina', exercises: [], muscleGroups: [] }], mesocycles: [] });
     const tree = render(React.createElement(TrainEntryScreen));
 
     expect(findText(tree.root, 'Mesociclos')).toBeDefined();
@@ -26,6 +31,20 @@ describe('Train entry ownership', () => {
     expect(findText(tree.root, 'Biblioteca de rutinas')).toBeDefined();
     expect(mockRouter.replace).not.toHaveBeenCalled();
     expect(mockRouter.push).not.toHaveBeenCalled();
+  });
+
+  test('allows switching between Mesocycles and Routines without leaving Train', () => {
+    setMockData({ dataState: 'ready', routines: [{ id: 'routine-1', name: 'Rutina', exercises: [], muscleGroups: [] }], mesocycles: [] });
+    const tree = render(React.createElement(TrainEntryScreen));
+
+    press(findPressableByText(tree.root, 'Rutinas'));
+
+    expect(findText(tree.root, 'Biblioteca de rutinas')).toBeDefined();
+    expect(mockRouter.replace).not.toHaveBeenCalled();
+    expect(mockRouter.push).not.toHaveBeenCalled();
+
+    press(findPressableByText(tree.root, 'Mesociclos'));
+    expect(findText(tree.root, 'Mesociclos')).toBeDefined();
   });
 
   test('keeps the loading screen until the data lifecycle is ready', () => {
