@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { KeyboardAvoidingView, Platform, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Alert, KeyboardAvoidingView, Platform, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { router } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { AppScreenHeader } from '../../components/AppScreenHeader';
@@ -18,7 +18,7 @@ export default function CreateRoutineScreen() {
   const [nameError, setNameError] = useState('');
   const [muscleGroupsError, setMuscleGroupsError] = useState('');
 
-  const handleCreate = () => {
+  const handleCreate = async () => {
     const trimmedName = name.trim();
 
     setNameError(trimmedName ? '' : 'Ingresa un nombre para la rutina.');
@@ -28,8 +28,12 @@ export default function CreateRoutineScreen() {
 
     if (!trimmedName || muscleGroups.length === 0) return;
 
-    const routine = addRoutine(trimmedName, muscleGroups);
-    router.replace(`/routine/${routine.id}`);
+    try {
+      const routine = await addRoutine(trimmedName, muscleGroups);
+      router.replace(`/routine/${routine.id}`);
+    } catch (error) {
+      Alert.alert('No se pudo crear', error instanceof Error ? error.message : 'Inténtalo nuevamente.');
+    }
   };
 
   return (

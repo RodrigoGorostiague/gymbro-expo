@@ -36,7 +36,17 @@ export default function RoutinesScreen() {
   const handleDelete = (id: string, name: string) => {
     Alert.alert('Eliminar rutina', `¿Eliminar "${name}"?`, [
       { text: 'Cancelar', style: 'cancel' },
-      { text: 'Eliminar', style: 'destructive', onPress: () => deleteRoutine(id) },
+      {
+        text: 'Eliminar',
+        style: 'destructive',
+        onPress: async () => {
+          try {
+            await deleteRoutine(id);
+          } catch (error) {
+            Alert.alert('No se pudo eliminar', error instanceof Error ? error.message : 'Inténtalo nuevamente.');
+          }
+        },
+      },
     ]);
   };
 

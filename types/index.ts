@@ -220,6 +220,7 @@ export interface WorkoutRecapInput {
   exerciseCount: number;
   metrics: Record<string, number>;
   exercises: WorkoutRecapExercise[];
+  sharePayload?: WorkoutRecapSharePayload;
   caption?: string;
 }
 
@@ -239,10 +240,38 @@ export interface WorkoutRecap {
   metrics: Record<string, number>;
   caption: string | null;
   createdAt: string;
+  templateAvailable: boolean;
+  mesocycleAvailable: boolean;
+  isAuthor: boolean;
 }
 
 export interface WorkoutRecapDetail extends WorkoutRecap {
   exercises: WorkoutRecapExercise[];
+  sharePayload: WorkoutRecapSharePayload | null;
+}
+
+export interface WorkoutRecapSharePayload {
+  version: 1;
+  routine?: {
+    name: string;
+    muscleGroups: MuscleGroup[];
+    exercises: Array<{
+      name: string;
+      muscleGroups: MuscleGroup[];
+      loadMode: ExerciseLoadMode;
+      loadUnit: LoadUnit;
+      variant: ExerciseVariant;
+      sets: Array<Pick<CatalogSet, 'tipo' | 'weight' | 'reps'>>;
+    }>;
+  };
+  mesocycle?: {
+    name: string;
+    goal: string;
+    durationWeeks: number;
+    weeks: Array<Array<{ routineIndex: number; dayLabel?: string } | null>>;
+    routines: NonNullable<WorkoutRecapSharePayload['routine']>[];
+  };
+  performedSets?: Array<{ exerciseIndex: number; sets: Array<{ weight: number; reps: number; completed: boolean }> }>;
 }
 
 export interface WorkoutRecapPage {

@@ -219,8 +219,8 @@ export default function ShopScreen() {
           showsVerticalScrollIndicator={false}
         >
           <AppScreenHeader
-            title="Tienda"
-            subtitle="Selecciona un tema para previsualizarlo"
+            title="Más"
+            subtitle="Tienda, temas y ayuda"
             trailing={<LogoutButton />}
           />
 

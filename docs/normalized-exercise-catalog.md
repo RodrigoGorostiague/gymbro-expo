@@ -42,7 +42,7 @@ npm run catalog:reset -- \
 
 The importer validates worksheets and headers by name, checks IDs, references, names, duplicate associations, relevance range, roles, missing primary muscles, and hierarchy cycles before beginning its transaction. It then wipes association rows, hierarchy rows, exercises, and groups in FK-safe order, imports the complete dataset, verifies the database report, and commits. Any failure rolls the entire database transaction back.
 
-The app independently performs a one-time, versioned AsyncStorage reset of legacy exercise, routine, mesocycle, set, attempt, session, and active-workout records. Authentication, profile, theme, shop, and social data remain untouched.
+The app retains only immutable normalized catalog cache locally. Mutable training data is imported once into authenticated server-owned storage; see [Training State Persistence](training-state-persistence.md).
 
 ## Verification
 

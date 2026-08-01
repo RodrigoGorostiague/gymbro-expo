@@ -98,7 +98,6 @@ export default function ExecuteRoutineScreen() {
   const id = readSingleParam(params.id) ?? '';
   const { user } = useAuth();
   const { getRoutine, addAttempt, activeWorkoutDraft, startActiveWorkout, updateActiveWorkout, cancelActiveWorkout, refreshActiveWorkoutTiming = async () => undefined } = useData();
-  const { retryPendingRewards } = useShop();
   const { theme } = useTheme();
   const routine = getRoutine(id);
   const lineage = parseLineage(params);
@@ -319,8 +318,7 @@ export default function ExecuteRoutineScreen() {
       attemptRef.current = attempt;
       await addAttempt(attempt);
       await cancelActiveWorkout();
-      await retryPendingRewards();
-      setEarnedGems(attempt.reward.totalGems);
+      setEarnedGems(0);
       setPhase('done');
     } catch {
       Alert.alert(

@@ -1,3 +1,4 @@
+import React, { useEffect, useState } from 'react';
 import { Tabs, Redirect } from 'expo-router';
 import { Platform, StyleSheet, View } from 'react-native';
 import { BlurView } from 'expo-blur';
@@ -6,6 +7,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { ThemePreviewBar } from '../../components/ThemePreviewBar';
 import { useAuth } from '../../context/AuthContext';
 import { useTheme } from '../../context/ThemeContext';
+import { useSocial } from '../../context/SocialContext';
 
 type TabIconName = keyof typeof Ionicons.glyphMap;
 
@@ -60,6 +62,19 @@ function TabBarBackground() {
 export default function TabsLayout() {
   const { user, isLoading } = useAuth();
   const { theme } = useTheme();
+  const { requests, realtimeRevision } = useSocial();
+  const [pendingRequestBadge, setPendingRequestBadge] = useState<number | string | undefined>();
+
+  useEffect(() => {
+    let active = true;
+    void requests().then((page) => {
+      if (!active) return;
+      setPendingRequestBadge(page.nextCursor ? `${page.profiles.length}+` : page.profiles.length || undefined);
+    }).catch(() => {
+      if (active) setPendingRequestBadge(undefined);
+    });
+    return () => { active = false; };
+  }, [requests, realtimeRevision]);
 
   if (isLoading) return null;
   if (!user) return <Redirect href="/" />;
@@ -89,27 +104,9 @@ export default function TabsLayout() {
         }}
       >
         <Tabs.Screen
-          name="mesocycles/index"
+          name="train"
           options={{
-            title: 'Mesociclos',
-            tabBarIcon: ({ focused }) => (
-              <TabIcon name={focused ? 'calendar' : 'calendar-outline'} focused={focused} />
-            ),
-          }}
-        />
-        <Tabs.Screen
-          name="routines/index"
-          options={{
-            title: 'Rutinas',
-            tabBarIcon: ({ focused }) => (
-              <TabIcon name={focused ? 'layers' : 'layers-outline'} focused={focused} />
-            ),
-          }}
-        />
-        <Tabs.Screen
-          name="exercises/index"
-          options={{
-            title: 'Ejercicios',
+            title: 'Entrenar',
             tabBarIcon: ({ focused }) => (
               <TabIcon name={focused ? 'barbell' : 'barbell-outline'} focused={focused} />
             ),
@@ -120,29 +117,40 @@ export default function TabsLayout() {
           options={{
             title: 'Progreso',
             tabBarIcon: ({ focused }) => (
-              <TabIcon
-                name={focused ? 'analytics' : 'analytics-outline'}
-                focused={focused}
-              />
+              <TabIcon name={focused ? 'analytics' : 'analytics-outline'} focused={focused} />
             ),
           }}
         />
         <Tabs.Screen
-          name="social"
+          name="community"
           options={{
             title: 'Comunidad',
+            tabBarBadge: pendingRequestBadge,
+            tabBarAccessibilityLabel: pendingRequestBadge ? `Comunidad, ${pendingRequestBadge} solicitudes pendientes` : 'Comunidad',
             tabBarIcon: ({ focused }) => <TabIcon name={focused ? 'people' : 'people-outline'} focused={focused} />,
           }}
         />
         <Tabs.Screen
-          name="shop"
+          name="profile"
           options={{
-            title: 'Tienda',
+            title: 'Perfil',
+            tabBarIcon: ({ focused }) => <TabIcon name={focused ? 'person' : 'person-outline'} focused={focused} />,
+          }}
+        />
+        <Tabs.Screen
+          name="more"
+          options={{
+            title: 'Más',
             tabBarIcon: ({ focused }) => (
-              <TabIcon name={focused ? 'storefront' : 'storefront-outline'} focused={focused} />
+              <TabIcon name={focused ? 'grid' : 'grid-outline'} focused={focused} />
             ),
           }}
         />
+        <Tabs.Screen name="mesocycles/index" options={{ href: null }} />
+        <Tabs.Screen name="routines/index" options={{ href: null }} />
+        <Tabs.Screen name="exercises/index" options={{ href: null }} />
+        <Tabs.Screen name="social" options={{ href: null }} />
+        <Tabs.Screen name="shop" options={{ href: null }} />
       </Tabs>
       <ThemePreviewBar />
     </View>

@@ -101,7 +101,7 @@ export default function EditRoutineScreen() {
     router.setParams({ addExerciseId: undefined });
   }, [addExerciseId, getExercise]);
 
-  const save = () => {
+  const save = async () => {
     const routine = getRoutine(id);
     if (!routine) return;
     if (routineMuscleGroups.length === 0) {
@@ -127,13 +127,17 @@ export default function EditRoutineScreen() {
       });
     }
 
-    updateRoutine({
-      ...routine,
-      name: name.trim() || routine.name,
-      muscleGroups: routineMuscleGroups,
-      exercises: normalizedExercises,
-    });
-    Alert.alert('Guardado', 'Rutina actualizada');
+    try {
+      await updateRoutine({
+        ...routine,
+        name: name.trim() || routine.name,
+        muscleGroups: routineMuscleGroups,
+        exercises: normalizedExercises,
+      });
+      Alert.alert('Guardado', 'Rutina actualizada');
+    } catch (error) {
+      Alert.alert('No se pudo guardar', error instanceof Error ? error.message : 'Inténtalo nuevamente.');
+    }
   };
 
   const addExerciseFromCatalog = (exercise: Exercise) => {

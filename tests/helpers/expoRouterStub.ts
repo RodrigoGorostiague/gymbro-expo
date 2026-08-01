@@ -4,6 +4,11 @@ import { vi } from 'vitest';
 let currentParams: Record<string, unknown> = {};
 let focusCleanups: Array<() => void> = [];
 
+const staticRouteModules = {
+  '/mesocycles': 'mesocycles/index',
+  '/routines': 'routines/index',
+} as const;
+
 export const router = {
   push: vi.fn(),
   replace: vi.fn(),
@@ -12,8 +17,24 @@ export const router = {
   setParams: vi.fn(),
 };
 
+type TabsProps = { children?: React.ReactNode };
+type TabScreenProps = { name: string; options?: Record<string, unknown> };
+
+export const Tabs: React.FC<TabsProps> & { Screen: React.FC<TabScreenProps> } = Object.assign(
+  ({ children }: TabsProps) => React.createElement('Tabs', null, children),
+  { Screen: (props: TabScreenProps) => React.createElement('TabsScreen', props) },
+);
+
+export function Redirect({ href }: { href: string }) {
+  return React.createElement('Redirect', { href });
+}
+
 export function __setParams(params: Record<string, unknown>) {
   currentParams = params;
+}
+
+export function __resolveHref(href: string) {
+  return staticRouteModules[href as keyof typeof staticRouteModules] ?? null;
 }
 
 export function useLocalSearchParams() {

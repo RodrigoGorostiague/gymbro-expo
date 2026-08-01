@@ -24,6 +24,10 @@ export default function RootLayout() {
               <Stack screenOptions={{ headerShown: false, animation: 'fade' }}>
                 <Stack.Screen name="index" />
                 <Stack.Screen name="(tabs)" />
+                <Stack.Screen name="community/discover" options={{ animation: 'slide_from_right', presentation: 'card' }} />
+                <Stack.Screen name="community/circle" options={{ animation: 'slide_from_right', presentation: 'card' }} />
+                <Stack.Screen name="community/requests" options={{ animation: 'slide_from_right', presentation: 'card' }} />
+                <Stack.Screen name="profile/blocked" options={{ animation: 'slide_from_right', presentation: 'card' }} />
                 <Stack.Screen name="social/[uid]" options={{ animation: 'slide_from_right', presentation: 'card' }} />
                 <Stack.Screen name="social/recap/[id]" options={{ animation: 'slide_from_bottom', presentation: 'modal' }} />
                 <Stack.Screen

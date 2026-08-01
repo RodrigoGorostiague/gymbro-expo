@@ -3,15 +3,15 @@ import { useAuth } from './AuthContext';
 import { useData } from './DataContext';
 import {
   getBlockedUsersPage, getCirclePage, getDiscoveryPage, getGraphSummary, getOwnProfile, getPublicProfile, getRequestPage, GraphCommand, GraphSummary,
-  OwnProfile, PublicProfile, runGraphCommand, saveOwnProfile, searchProfiles, subscribeToSocialGraphChanges,
+  OwnProfile, OwnProfileSave, PublicProfile, runGraphCommand, saveOwnProfile, searchProfiles, subscribeToSocialGraphChanges,
 } from '../services/socialGraph';
-import { createWorkoutRecap, deleteWorkoutRecap, getWorkoutRecapDetail, getWorkoutRecapPage, publishAutomaticWorkoutRecaps, subscribeToWorkoutRecapChanges } from '../services/workoutRecapFeed';
+import { createWorkoutRecap, deleteWorkoutRecap, getWorkoutRecapDetail, getWorkoutRecapPage, recapInputFromSession, recapSharePayload, subscribeToWorkoutRecapChanges } from '../services/workoutRecapFeed';
 import { attemptToSession } from '../utils/workoutAttempts';
 
 type SocialContextValue = {
   ownProfile: OwnProfile | null;
   refreshOwnProfile: () => Promise<void>;
-  saveProfile: (profile: Omit<OwnProfile, 'uid'>) => Promise<void>;
+  saveProfile: (profile: OwnProfileSave) => Promise<void>;
   discover: typeof getDiscoveryPage;
   search: typeof searchProfiles;
   circle: typeof getCirclePage;
@@ -33,7 +33,7 @@ const SocialContext = createContext<SocialContextValue | null>(null);
 
 export function SocialProvider({ children }: { children: React.ReactNode }) {
   const { user } = useAuth();
-  const { attempts } = useData();
+  const { attempts, routines, mesocycles } = useData();
   const [ownProfile, setOwnProfile] = useState<OwnProfile | null>(null);
   const [realtimeRevision, setRealtimeRevision] = useState(0);
   const [failedAutoRecapSessionIds, setFailedAutoRecapSessionIds] = useState<ReadonlySet<string>>(new Set());
@@ -43,7 +43,7 @@ export function SocialProvider({ children }: { children: React.ReactNode }) {
     if (!current.has(sessionId)) return current;
     const next = new Set(current); next.delete(sessionId); return next;
   }), []);
-  const saveProfile = useCallback(async (profile: Omit<OwnProfile, 'uid'>) => {
+  const saveProfile = useCallback(async (profile: OwnProfileSave) => {
     await saveOwnProfile(profile);
     await refreshOwnProfile();
   }, [refreshOwnProfile]);
@@ -75,14 +75,18 @@ export function SocialProvider({ children }: { children: React.ReactNode }) {
       if (!attempt.recapPublicationKey || autoPublishingKeys.current.has(attempt.recapPublicationKey)) continue;
       autoPublishingKeys.current.add(attempt.recapPublicationKey);
       const session = attemptToSession(attempt);
-      void publishAutomaticWorkoutRecaps([session], true).then((failedSessionIds) => setFailedAutoRecapSessionIds((current) => {
+      const publicationKey = session.recapPublicationKey;
+      if (!publicationKey) continue;
+      const input = recapInputFromSession(session);
+      input.sharePayload = recapSharePayload(session, routines.find(({ id }) => id === session.routineId), session.lineage ? mesocycles.find(({ id }) => id === session.lineage?.mesocycleId) : undefined, routines, ownProfile);
+      void createWorkoutRecap(input, publicationKey).then(() => []).catch(() => [session.id]).then((failedSessionIds) => setFailedAutoRecapSessionIds((current) => {
         const next = new Set(current);
         if (failedSessionIds.length) next.add(session.id);
         else next.delete(session.id);
         return next;
       }));
     }
-  }, [attempts, ownProfile?.autoShareCompletedWorkouts]);
+  }, [attempts, createWorkoutRecap, mesocycles, ownProfile, routines]);
   const value = useMemo(() => ({ ownProfile, refreshOwnProfile, saveProfile, discover: getDiscoveryPage, search: searchProfiles, circle: getCirclePage, requests: getRequestPage, blockedUsers: getBlockedUsersPage, getProfile: getPublicProfile, getSummary: getGraphSummary, command: runGraphCommand, getWorkoutRecaps: getWorkoutRecapPage, getWorkoutRecapDetail, createWorkoutRecap, deleteWorkoutRecap, failedAutoRecapSessionIds, clearFailedAutoRecapSession, realtimeRevision }), [ownProfile, realtimeRevision, refreshOwnProfile, saveProfile, failedAutoRecapSessionIds, clearFailedAutoRecapSession]);
   return <SocialContext.Provider value={value}>{children}</SocialContext.Provider>;
 }

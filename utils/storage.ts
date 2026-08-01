@@ -50,6 +50,88 @@ const KEYS = {
   legacyShop: '@gymbro/shop',
 };
 
+const TRAINING_CLEAN_SLATE_VERSION = 'training-clean-slate-v1';
+
+function isCustomDefinition(value: unknown, owner: UserId): value is ExerciseDefinition {
+  const definition = value as Partial<ExerciseDefinition> | null;
+  return !!definition && typeof definition.id === 'string' && !!definition.id.trim()
+    && definition.source?.kind === 'custom' && definition.source.owner === owner
+    && typeof definition.source.originId === 'string' && !!definition.source.originId.trim()
+    && typeof definition.name === 'string' && !!definition.name.trim()
+    && Array.isArray(definition.muscleGroups) && Array.isArray(definition.defaultSets)
+    && ['external-load', 'bodyweight', 'assisted'].includes(definition.loadMode ?? '')
+    && ['kg', 'lb'].includes(definition.loadUnit ?? '');
+}
+
+function parseCustomDefinitions(raw: string | null, owner: UserId): ExerciseDefinition[] {
+  if (!raw) return [];
+  try {
+    const value = JSON.parse(raw) as Partial<CatalogLibrary>;
+    return Array.isArray(value.definitions) ? value.definitions.filter((item) => isCustomDefinition(item, owner)) : [];
+  } catch {
+    return [];
+  }
+}
+
+function addCustomDefinitions(
+  definitionsByOwner: Map<UserId, Map<string, ExerciseDefinition>>,
+  owner: UserId,
+  definitions: ExerciseDefinition[],
+): void {
+  const definitionsById = definitionsByOwner.get(owner) ?? new Map<string, ExerciseDefinition>();
+  definitions.forEach((definition) => {
+    if (!definitionsById.has(definition.id)) definitionsById.set(definition.id, definition);
+  });
+  definitionsByOwner.set(owner, definitionsById);
+}
+
+export async function readLegacyCustomDefinitions(owner: UserId): Promise<ExerciseDefinition[]> {
+  const marker = `@gymbro/migrations/${TRAINING_CLEAN_SLATE_VERSION}`;
+  if (await AsyncStorage.getItem(marker)) return [];
+
+  const keys = await AsyncStorage.getAllKeys();
+  const customDefinitions = new Map<UserId, Map<string, ExerciseDefinition>>();
+  for (const key of keys.filter((item) => item.startsWith('@gymbro/catalog-library/v2/'))) {
+    const profile = key.slice('@gymbro/catalog-library/v2/'.length);
+    const definitions = parseCustomDefinitions(await AsyncStorage.getItem(key), profile);
+    addCustomDefinitions(customDefinitions, profile, definitions);
+  }
+  const journal = await AsyncStorage.getItem(KEYS.catalogLibraryJournal);
+  try {
+    const value = journal ? JSON.parse(journal) as Partial<CatalogLibraryJournal> : null;
+    if (value?.version === 1 && value.libraries && typeof value.libraries === 'object') {
+      Object.entries(value.libraries).forEach(([profile, library]) => {
+        if (library) addCustomDefinitions(customDefinitions, profile, parseCustomDefinitions(JSON.stringify(library), profile));
+      });
+    }
+  } catch {
+    // A corrupt journal is runtime state and is deleted without recovery.
+  }
+  return [...(customDefinitions.get(owner)?.values() ?? [])];
+}
+
+export async function wipeLegacyTrainingRuntimeState(): Promise<void> {
+  const marker = `@gymbro/migrations/${TRAINING_CLEAN_SLATE_VERSION}`;
+  if (await AsyncStorage.getItem(marker)) return;
+  const keys = await AsyncStorage.getAllKeys();
+  const runtimeKeys = keys.filter((key) => key === KEYS.routines
+    || key === KEYS.legacyMesocycles
+    || key === KEYS.sessions
+    || key === KEYS.sessionMigration
+    || key === KEYS.sessionQuarantine
+    || key === KEYS.catalogLibraryJournal
+    || key === KEYS.hiddenSharedRoutineIds
+    || key === KEYS.legacyShop
+    || key.startsWith('@gymbro/catalog-library/v2/')
+    || key.startsWith('@gymbro/mesocycles/')
+    || key.startsWith('@gymbro/attempts/')
+    || key.startsWith('@gymbro/active-workout/')
+    || key.startsWith('@gymbro/sessions/v2/')
+    || key.startsWith('@gymbro/shop/'));
+  if (runtimeKeys.length) await AsyncStorage.multiRemove(runtimeKeys);
+  await AsyncStorage.setItem(marker, 'complete');
+}
+
 const SESSION_MIGRATION_VERSION = 'profile-attempts-v1';
 let storageMigrationPromise: Promise<void> | null = null;
 let storageMigrationError: Error | null = null;

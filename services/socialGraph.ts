@@ -6,7 +6,14 @@ export type ProfileVisibility = Record<string, boolean>;
 export type RelationshipStatus = 'discover' | 'bro' | 'partner' | 'incoming_request' | 'outgoing_request';
 export type RelationshipKind = 'bro' | 'partner';
 export type PublicProfile = { uid: string; alias: string; categories: ProfileCategories; relationshipStatus?: RelationshipStatus; requestedKind?: RelationshipKind };
-export type OwnProfile = PublicProfile & { categoryVisibility: ProfileVisibility; autoShareCompletedWorkouts: boolean };
+export type OwnProfile = PublicProfile & {
+  categoryVisibility: ProfileVisibility;
+  autoShareCompletedWorkouts: boolean;
+  shareRoutineTemplate: boolean;
+  shareMesocycleTemplate: boolean;
+  sharePerformedSetDetails: boolean;
+};
+export type OwnProfileSave = Omit<OwnProfile, 'uid' | 'shareRoutineTemplate' | 'shareMesocycleTemplate' | 'sharePerformedSetDetails'> & Partial<Pick<OwnProfile, 'shareRoutineTemplate' | 'shareMesocycleTemplate' | 'sharePerformedSetDetails'>>;
 export type GraphSummary = {
   targetId: string;
   relationshipKind?: RelationshipKind | null;
@@ -22,6 +29,20 @@ export type GraphCommand =
 export type SocialRealtimeUnsubscribe = () => void;
 
 const PAGE_SIZE = 20;
+
+function stringRecord(value: unknown): ProfileCategories {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return {};
+  return Object.fromEntries(Object.entries(value).filter(([, entry]) => typeof entry === 'string'));
+}
+
+function booleanRecord(value: unknown): ProfileVisibility {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return {};
+  return Object.fromEntries(Object.entries(value).filter(([, entry]) => typeof entry === 'boolean'));
+}
+
+function booleanOrDefault(value: unknown): boolean {
+  return typeof value === 'boolean' ? value : true;
+}
 
 function requireClient() {
   if (!supabase) throw new Error(supabaseConfigurationError ?? 'Supabase is unavailable.');
@@ -82,13 +103,13 @@ export function getBlockedUsersPage(cursor: string | null = null) {
 }
 
 export async function getOwnProfile(): Promise<OwnProfile | null> {
-  const { data, error } = await requireClient().from('profiles').select('id, alias, categories, category_visibility, auto_share_completed_workouts').maybeSingle();
+  const { data, error } = await requireClient().from('profiles').select('id, alias, categories, category_visibility, auto_share_completed_workouts, share_routine_template, share_mesocycle_template, share_performed_set_details').maybeSingle();
   if (error) throw new Error(error.message);
   if (!data) return null;
-  return { uid: data.id, alias: data.alias, categories: data.categories ?? {}, categoryVisibility: data.category_visibility ?? {}, autoShareCompletedWorkouts: data.auto_share_completed_workouts ?? true };
+  return { uid: data.id, alias: data.alias, categories: stringRecord(data.categories), categoryVisibility: booleanRecord(data.category_visibility), autoShareCompletedWorkouts: booleanOrDefault(data.auto_share_completed_workouts), shareRoutineTemplate: booleanOrDefault(data.share_routine_template), shareMesocycleTemplate: booleanOrDefault(data.share_mesocycle_template), sharePerformedSetDetails: booleanOrDefault(data.share_performed_set_details) };
 }
 
-export async function saveOwnProfile(profile: Omit<OwnProfile, 'uid'>): Promise<void> {
+export async function saveOwnProfile(profile: OwnProfileSave): Promise<void> {
   const { data: auth, error: authError } = await requireClient().auth.getUser();
   if (authError || !auth.user) throw new Error('Authentication is required to save a profile.');
   const { error } = await requireClient().from('profiles').upsert({
@@ -97,6 +118,9 @@ export async function saveOwnProfile(profile: Omit<OwnProfile, 'uid'>): Promise<
     categories: profile.categories,
     category_visibility: profile.categoryVisibility,
     auto_share_completed_workouts: profile.autoShareCompletedWorkouts,
+    share_routine_template: profile.shareRoutineTemplate ?? true,
+    share_mesocycle_template: profile.shareMesocycleTemplate ?? true,
+    share_performed_set_details: profile.sharePerformedSetDetails ?? true,
   });
   if (error) throw new Error(error.message);
 }

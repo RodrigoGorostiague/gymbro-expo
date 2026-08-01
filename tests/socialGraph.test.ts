@@ -99,10 +99,26 @@ describe('social graph client boundary', () => {
       : undefined);
     client.auth.getUser.mockResolvedValue({ data: { user: { id: 'member-1' } }, error: null });
 
-    await expect(getOwnProfile()).resolves.toEqual({ uid: 'member-1', alias: 'Bro', categories: {}, categoryVisibility: {}, autoShareCompletedWorkouts: true });
+    await expect(getOwnProfile()).resolves.toEqual({ uid: 'member-1', alias: 'Bro', categories: {}, categoryVisibility: {}, autoShareCompletedWorkouts: true, shareRoutineTemplate: true, shareMesocycleTemplate: true, sharePerformedSetDetails: true });
     await saveOwnProfile({ alias: 'Bro', categories: {}, categoryVisibility: {}, autoShareCompletedWorkouts: false });
     expect(upsert).toHaveBeenCalledWith({
-      id: 'member-1', alias: 'Bro', categories: {}, category_visibility: {}, auto_share_completed_workouts: false,
+      id: 'member-1', alias: 'Bro', categories: {}, category_visibility: {}, auto_share_completed_workouts: false, share_routine_template: true, share_mesocycle_template: true, share_performed_set_details: true,
+    });
+  });
+
+  test('normalizes malformed profile records without coercing false preferences', async () => {
+    const maybeSingle = vi.fn().mockResolvedValue({ data: {
+      id: 'member-1', alias: 'Bro', categories: { legacy: 'keep', malformed: 4 },
+      category_visibility: { legacy: false, malformed: 'false' }, auto_share_completed_workouts: false,
+      share_routine_template: 'false', share_mesocycle_template: {}, share_performed_set_details: false,
+    }, error: null });
+    client.from.mockImplementation((table: string) => table === 'profiles'
+      ? { select: vi.fn(() => ({ maybeSingle })) }
+      : undefined);
+
+    await expect(getOwnProfile()).resolves.toEqual({
+      uid: 'member-1', alias: 'Bro', categories: { legacy: 'keep' }, categoryVisibility: { legacy: false },
+      autoShareCompletedWorkouts: false, shareRoutineTemplate: true, shareMesocycleTemplate: true, sharePerformedSetDetails: false,
     });
   });
 

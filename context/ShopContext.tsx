@@ -10,8 +10,7 @@ import {
 import { PARTNER_PROFILE } from '../constants/kiss';
 import { subscribeToEquippedThemes, syncEquippedTheme } from '../services/themeSync';
 import { ShopState, UserProfile } from '../types';
-import { shouldAwardWeeklyGoalBonus } from '../utils/gems';
-import { loadShop, mutateShop, recoverPendingAttemptRewards } from '../utils/storage';
+import { loadShop, mutateShop } from '../utils/storage';
 import { useAuth } from './AuthContext';
 import { useData } from './DataContext';
 
@@ -33,8 +32,6 @@ interface ShopContextValue {
   combineWithPartner: boolean;
   previewThemeId: string | null;
   isLoading: boolean;
-  retryPendingRewards: () => Promise<void>;
-  awardGems: (amount: number) => Promise<void>;
   purchaseTheme: (themeId: string) => boolean;
   equipTheme: (themeId: string) => void;
   unequipTheme: () => void;
@@ -48,12 +45,7 @@ const PREVIEW_DURATION_MS = 5000;
 const ShopContext = createContext<ShopContextValue | null>(null);
 
 export async function loadRecoveredShop(profile: UserProfile): Promise<ShopState> {
-  const persisted = await loadShop(profile);
-  try {
-    return (await recoverPendingAttemptRewards(profile)).shop;
-  } catch {
-    return loadShop(profile).catch(() => persisted);
-  }
+  return loadShop(profile);
 }
 
 export function applyThemePurchase(current: Readonly<ShopState>, themeId: string, price: number): ShopState {
@@ -97,18 +89,6 @@ export function ShopProvider({ children }: { children: React.ReactNode }) {
 
   useEffect(() => () => clearPreviewTimer(), [clearPreviewTimer]);
 
-  const retryPendingRewards = useCallback(async () => {
-    if (!user) return;
-    setIsLoading(true);
-    try {
-      const recovered = await loadRecoveredShop(user);
-      setShop(recovered);
-      syncEquippedTheme(user, recovered.equippedThemeId);
-    } finally {
-      setIsLoading(false);
-    }
-  }, [user]);
-
   useEffect(() => {
     if (!user) {
       setShop(DEFAULT_SHOP);
@@ -117,8 +97,12 @@ export function ShopProvider({ children }: { children: React.ReactNode }) {
       return;
     }
 
-    void retryPendingRewards();
-  }, [user, attempts, retryPendingRewards]);
+    setIsLoading(true);
+    void loadShop(user).then((loaded) => {
+      setShop(loaded);
+      syncEquippedTheme(user, loaded.equippedThemeId);
+    }).finally(() => setIsLoading(false));
+  }, [user]);
 
   useEffect(() => {
     if (!partner) return;
@@ -146,31 +130,6 @@ export function ShopProvider({ children }: { children: React.ReactNode }) {
     },
     [user],
   );
-
-  const awardGems = useCallback(
-    (amount: number) => {
-      if (!user || amount <= 0) return Promise.resolve();
-      return persist((current) => ({ ...current, gems: current.gems + amount }));
-    },
-    [persist, user],
-  );
-
-  useEffect(() => {
-    if (isLoading || !user) return;
-
-    const check = shouldAwardWeeklyGoalBonus(attempts, shop.weeklyGoal.bonusWeekKey);
-    if (!check.award) return;
-
-    persist((current) => current.weeklyGoal.bonusWeekKey === check.weekKey ? current : {
-      ...current,
-      gems: current.gems + GEM_REWARDS.weeklyGoalImprovement,
-      weeklyGoal: { bonusWeekKey: check.weekKey, lastWeekWorkouts: check.lastWeek },
-    });
-    Alert.alert(
-      'Objetivo semanal superado',
-      `Superaste la semana anterior (${check.lastWeek} → ${check.currentWeek} rutinas). +${GEM_REWARDS.weeklyGoalImprovement} gemas`,
-    );
-  }, [isLoading, attempts, shop.weeklyGoal.bonusWeekKey, persist, shop, user]);
 
   const equipTheme = useCallback(
     (themeId: string) => {
@@ -243,8 +202,6 @@ export function ShopProvider({ children }: { children: React.ReactNode }) {
         combineWithPartner: shop.combineWithPartner,
         previewThemeId,
         isLoading,
-        retryPendingRewards,
-        awardGems,
         purchaseTheme,
         equipTheme,
         unequipTheme,

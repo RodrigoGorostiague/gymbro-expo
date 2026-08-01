@@ -11,7 +11,7 @@ const client = vi.hoisted(() => ({
 
 vi.mock('../services/supabase', () => ({ supabase: client, supabaseConfigurationError: null }));
 
-import { createWorkoutRecap, getWorkoutRecapDetail, getWorkoutRecapPage, recapInputFromSession, subscribeToWorkoutRecapChanges } from '../services/workoutRecapFeed';
+import { createWorkoutRecap, getWorkoutRecapDetail, getWorkoutRecapPage, recapImportPlan, recapInputFromSession, subscribeToWorkoutRecapChanges } from '../services/workoutRecapFeed';
 
 const session: WorkoutSession = {
   id: 'local-session', routineId: 'local-routine', routineName: 'Upper', completedAt: '2026-08-01T10:00:00Z', durationSeconds: 3600, restTimerSeconds: 0,
@@ -29,10 +29,10 @@ describe('workout recap feed boundary', () => {
 
   test('uses protected RPCs and maps only their feed projection', async () => {
     client.rpc.mockResolvedValueOnce({ data: 'recap-1', error: null }).mockResolvedValueOnce({
-      data: { recaps: [{ id: 'recap-1', author_alias: 'Bro', routine_name: 'Upper', completed_at: '2026-08-01T10:00:00Z', duration_seconds: 3600, exercise_count: 1, muscle_group_ids: ['pecho'], metrics: { volume: 500 }, caption: null, created_at: '2026-08-01T10:01:00Z' }], next_cursor: 'next' }, error: null,
+      data: { recaps: [{ id: 'recap-1', author_alias: 'Bro', routine_name: 'Upper', completed_at: '2026-08-01T10:00:00Z', duration_seconds: 3600, exercise_count: 1, muscle_group_ids: ['pecho'], metrics: { volume: 500 }, caption: null, created_at: '2026-08-01T10:01:00Z', is_author: true }], next_cursor: 'next' }, error: null,
     });
     await createWorkoutRecap(recapInputFromSession(session), 'publication-key');
-    await expect(getWorkoutRecapPage()).resolves.toEqual({ recaps: [{ id: 'recap-1', authorAlias: 'Bro', routineName: 'Upper', completedAt: '2026-08-01T10:00:00Z', durationSeconds: 3600, exerciseCount: 1, muscleGroupIds: ['pecho'], metrics: { volume: 500 }, caption: null, createdAt: '2026-08-01T10:01:00Z' }], nextCursor: 'next' });
+    await expect(getWorkoutRecapPage()).resolves.toEqual({ recaps: [{ id: 'recap-1', authorAlias: 'Bro', routineName: 'Upper', completedAt: '2026-08-01T10:00:00Z', durationSeconds: 3600, exerciseCount: 1, muscleGroupIds: ['pecho'], metrics: { volume: 500 }, caption: null, createdAt: '2026-08-01T10:01:00Z', templateAvailable: false, mesocycleAvailable: false, isAuthor: true }], nextCursor: 'next' });
     expect(client.rpc).toHaveBeenNthCalledWith(1, 'create_workout_recap', { input: { routine_name: 'Upper', completed_at: '2026-08-01T10:00:00Z', duration_seconds: 3600, exercise_count: 1, metrics: { volume: 500 }, exercise_details: { exercises: [{ name: 'Bench', muscle_group_ids: ['pecho', 'tríceps'] }] }, publication_key: 'publication-key' } });
     expect(client.rpc).toHaveBeenNthCalledWith(2, 'list_workout_recaps', { cursor: null, page_size: 20 });
   });
@@ -47,6 +47,30 @@ describe('workout recap feed boundary', () => {
     await expect(getWorkoutRecapDetail('recap-1')).resolves.toMatchObject({ exercises: [{ name: 'Bench', muscleGroupIds: ['pecho'] }] });
     await expect(getWorkoutRecapDetail('old-recap')).resolves.toMatchObject({ muscleGroupIds: [], exercises: [] });
     expect(client.rpc).toHaveBeenLastCalledWith('get_workout_recap_detail', { recap_id: 'old-recap' });
+  });
+
+  test('builds an idempotent local import plan without exposing author-local identifiers', () => {
+    const payload = { version: 1 as const, routine: { name: 'Upper', muscleGroups: ['pecho'], exercises: [{ name: 'Bench', muscleGroups: ['pecho'], loadMode: 'external-load' as const, loadUnit: 'kg' as const, variant: 'barbell', sets: [{ tipo: 'C' as const, weight: 80, reps: 8 }] }] } };
+    const plan = recapImportPlan('recap-1', 'recipient-1', payload);
+    expect(plan.routines[0].id).toBe('recap:recap-1:routine:0');
+    expect(plan.definitions[0].source).toEqual({ kind: 'custom', owner: 'recipient-1', originId: 'recap:recap-1:definition:0:0' });
+    expect(JSON.stringify(plan)).not.toContain('local-session');
+  });
+
+  test('drops malformed server template payloads instead of rendering or importing them', async () => {
+    client.rpc.mockResolvedValueOnce({ data: { id: 'recap-1', author_alias: 'Bro', routine_name: 'Upper', completed_at: '2026-08-01T10:00:00Z', duration_seconds: 1, exercise_count: 1, metrics: {}, caption: null, created_at: '2026-08-01T10:01:00Z', share_payload: { version: 1, routine: { name: 'Upper', muscleGroups: [], exercises: [{ name: 'Bench', muscleGroups: [], loadMode: 'external-load', loadUnit: 'kg', variant: 'barbell', sets: [null] }] } } }, error: null });
+    await expect(getWorkoutRecapDetail('recap-1')).resolves.toMatchObject({ sharePayload: null });
+  });
+
+  test('drops unknown top-level keys and malformed optional template sections', async () => {
+    const routine = { name: 'Upper', muscleGroups: ['pecho'], exercises: [{ name: 'Bench', muscleGroups: ['pecho'], loadMode: 'external-load', loadUnit: 'kg', variant: 'barbell', sets: [{ tipo: 'C', weight: 80, reps: 8 }] }] };
+    const detail = (share_payload: unknown) => ({ id: 'recap-1', author_alias: 'Bro', routine_name: 'Upper', completed_at: '2026-08-01T10:00:00Z', duration_seconds: 1, exercise_count: 1, metrics: {}, caption: null, created_at: '2026-08-01T10:01:00Z', share_payload });
+    client.rpc.mockResolvedValueOnce({ data: detail({ version: 1, routine, privateMetadata: true }), error: null })
+      .mockResolvedValueOnce({ data: detail({ version: 1, routine, mesocycle: { name: 'Plan', goal: '', durationWeeks: 1, routines: [routine], weeks: [[{ routineIndex: 1 }]] } }), error: null })
+      .mockResolvedValueOnce({ data: detail({ version: 1, routine, performedSets: [{ exerciseIndex: 0, sets: [{ weight: Infinity, reps: 1, completed: true }] }] }), error: null });
+    await expect(getWorkoutRecapDetail('recap-1')).resolves.toMatchObject({ sharePayload: null });
+    await expect(getWorkoutRecapDetail('recap-2')).resolves.toMatchObject({ sharePayload: null });
+    await expect(getWorkoutRecapDetail('recap-3')).resolves.toMatchObject({ sharePayload: null });
   });
 
   test('treats authorized Realtime changes as invalidation only and cleans up', async () => {

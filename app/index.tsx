@@ -25,7 +25,7 @@ export default function LoginScreen() {
 
   useEffect(() => {
     if (!isLoading && user) {
-      router.replace('/(tabs)/routines');
+      router.replace('/(tabs)/train');
     }
   }, [user, isLoading]);
 
