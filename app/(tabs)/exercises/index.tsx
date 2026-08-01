@@ -1,60 +1,48 @@
-import React, { useMemo, useState } from 'react';
-import { Alert, FlatList, StyleSheet, Text, View } from 'react-native';
-import { router } from 'expo-router';
+import React, { useEffect, useState } from 'react';
+import { FlatList, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { AppScreenHeader } from '../../../components/AppScreenHeader';
 import { GlassCard, ThemeBackground } from '../../../components/GlassCard';
 import { HapticPressable } from '../../../components/HapticPressable';
-import { GlassButton } from '../../../components/UI';
-import { MUSCLE_GROUP_LABELS, MUSCLE_GROUP_OPTIONS } from '../../../constants/muscleGroups';
 import { useData } from '../../../context/DataContext';
 import { useTheme } from '../../../context/ThemeContext';
-import { MuscleGroup } from '../../../types';
+import { CatalogParticipationMode } from '../../../services/catalog';
+import { isSelectableMuscleParent, muscleGroupLabel } from '../../../utils/catalogMuscleGroups';
 
 export default function ExercisesScreen() {
   const { theme } = useTheme();
-  const { exercises, deleteExercise } = useData();
-  const [filter, setFilter] = useState<MuscleGroup | null>(null);
+  const { exercises, catalogMuscleGroups = [], filterCatalogExercises } = useData();
+  const [filter, setFilter] = useState<string | null>(null);
+  const [mode, setMode] = useState<CatalogParticipationMode>('all_roles');
   const [filtersExpanded, setFiltersExpanded] = useState(false);
-  const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [query, setQuery] = useState('');
+  const [filteredExercises, setFilteredExercises] = useState(exercises);
 
-  const activeFilterLabel = filter ? MUSCLE_GROUP_LABELS[filter] : null;
+  const activeFilterLabel = filter ? catalogMuscleGroups.find((group) => group.id === filter)?.displayName ?? null : null;
+  const visibleGroups = catalogMuscleGroups.filter((group) => (
+    isSelectableMuscleParent(group) && group.displayName.toLocaleLowerCase('es').includes(query.trim().toLocaleLowerCase('es'))
+  ));
 
-  const filteredExercises = useMemo(
-    () => (filter ? exercises.filter((exercise) => exercise.muscleGroups.includes(filter)) : exercises),
-    [exercises, filter],
-  );
-
-  const confirmDelete = (id: string, name: string) => {
-    Alert.alert('Eliminar ejercicio', `¿Eliminar "${name}" del catálogo?`, [
-      { text: 'Cancelar', style: 'cancel' },
-      {
-        text: 'Eliminar',
-        style: 'destructive',
-        onPress: async () => {
-          setDeletingId(id);
-          try {
-            await deleteExercise(id);
-          } catch (error) {
-            Alert.alert(
-              'No se pudo eliminar',
-               error instanceof Error ? error.message : 'Inténtalo nuevamente.',
-            );
-          } finally {
-            setDeletingId(null);
-          }
-        },
-      },
-    ]);
-  };
+  useEffect(() => {
+    let active = true;
+    if (!filter) {
+      setFilteredExercises(exercises);
+      return () => { active = false; };
+    }
+    void filterCatalogExercises(filter, mode).then((next) => {
+      if (!active) return;
+      const canonicalById = new Map(exercises.map((exercise) => [exercise.id, exercise]));
+      setFilteredExercises(next.map((exercise) => canonicalById.get(exercise.id) ?? exercise));
+    });
+    return () => { active = false; };
+  }, [exercises, filter, filterCatalogExercises, mode]);
 
   return (
     <ThemeBackground>
       <SafeAreaView style={styles.safe}>
         <AppScreenHeader
           title="Ejercicios"
-          subtitle="Catálogo global para reutilizar en rutinas"
-          trailing={<GlassButton title="+ Nuevo" onPress={() => router.push('/exercise/create')} />}
+          subtitle="Catálogo curado y normalizado"
         />
 
         <View style={styles.filterSection}>
@@ -76,70 +64,79 @@ export default function ExercisesScreen() {
             </Text>
           </HapticPressable>
 
-          {filtersExpanded ? (
-            <View testID="exercise-filter-strip" style={styles.filters}>
+           {filtersExpanded ? (
+            <ScrollView
+              testID="exercise-filter-strip"
+              style={styles.filtersScroll}
+              contentContainerStyle={styles.filters}
+              nestedScrollEnabled
+              showsVerticalScrollIndicator
+            >
               <HapticPressable
                 onPress={() => setFilter(null)}
                 style={[styles.filterChip, { backgroundColor: !filter ? theme.primary : theme.glass, borderColor: theme.glassBorder }]}
               >
                 <Text style={{ color: !filter ? theme.onPrimary : theme.text, fontWeight: '700' }}>Todos</Text>
               </HapticPressable>
-              {MUSCLE_GROUP_OPTIONS.map((option) => {
-                const selected = filter === option.value;
+              <TextInput value={query} onChangeText={setQuery} placeholder="Buscar grupo muscular" placeholderTextColor={theme.textMuted} style={[styles.search, { color: theme.text, borderColor: theme.glassBorder }]} />
+              {(['primary_only', 'primary_and_secondary', 'all_roles'] as const).map((item) => {
+                const selected = mode === item;
+                const label = item === 'primary_only' ? 'Principales' : item === 'primary_and_secondary' ? 'Principal + secundaria' : 'Cualquier participación';
                 return (
                   <HapticPressable
-                    key={option.value}
-                    onPress={() => setFilter(selected ? null : option.value)}
+                    key={item}
+                    onPress={() => setMode(item)}
                     style={[styles.filterChip, { backgroundColor: selected ? theme.primary : theme.glass, borderColor: theme.glassBorder }]}
                   >
                     <Text style={{ color: selected ? theme.onPrimary : theme.text, fontWeight: '700' }}>
-                      {option.label}
+                      {label}
                     </Text>
                   </HapticPressable>
                 );
               })}
-            </View>
+              {visibleGroups.map((group) => {
+                const selected = filter === group.id;
+                return <HapticPressable key={group.id} onPress={() => setFilter(selected ? null : group.id)} style={[styles.filterChip, { backgroundColor: selected ? theme.primary : theme.glass, borderColor: theme.glassBorder }]}>
+                  <Text style={{ color: selected ? theme.onPrimary : theme.text, fontWeight: '700' }}>{group.displayName}</Text>
+                </HapticPressable>;
+              })}
+            </ScrollView>
           ) : null}
         </View>
 
         {filteredExercises.length === 0 ? (
           <GlassCard style={styles.emptyCard}>
             <Text style={[styles.emptyTitle, { color: theme.text }]}>No hay ejercicios todavía</Text>
-            <Text style={[styles.emptyText, { color: theme.textMuted }]}>Crea ejercicios con grupos musculares, variante y series por defecto.</Text>
+            <Text style={[styles.emptyText, { color: theme.textMuted }]}>No hay ejercicios para la selección actual.</Text>
           </GlassCard>
         ) : (
           <FlatList
             data={filteredExercises}
             keyExtractor={(item) => item.id}
             contentContainerStyle={styles.list}
-            renderItem={({ item }) => (
-              <GlassCard style={styles.card}>
+            renderItem={({ item }) => {
+              return <GlassCard style={styles.card}>
                 <View style={styles.cardHeader}>
                   <View style={{ flex: 1 }}>
                     <Text style={[styles.title, { color: theme.text }]}>{item.name}</Text>
                     <Text style={[styles.meta, { color: theme.textMuted }]}>
-                      {item.variant} · {item.defaultSets.length} serie{item.defaultSets.length === 1 ? '' : 's'}
+                       {item.catalog?.movementPattern ?? item.variant} · {item.variant}
                     </Text>
                   </View>
-                  <HapticPressable onPress={() => router.push({ pathname: '/exercise/create', params: { exerciseId: item.id } })}>
-                    <Text style={[styles.link, { color: theme.primary }]}>Editar</Text>
-                  </HapticPressable>
+                   <Text style={[styles.link, { color: theme.textMuted }]}>{item.id}</Text>
                 </View>
 
                 <View style={styles.tags}>
-                  {item.muscleGroups.map((group) => (
+                   {item.muscleGroups.map((group) => (
                     <View key={group} style={[styles.tag, { backgroundColor: theme.glass, borderColor: theme.glassBorder }]}>
-                      <Text style={[styles.tagText, { color: theme.text }]}>{MUSCLE_GROUP_LABELS[group]}</Text>
+                       <Text style={[styles.tagText, { color: theme.text }]}>{muscleGroupLabel(catalogMuscleGroups, group)}</Text>
                     </View>
                   ))}
                 </View>
 
-                <View style={styles.actions}>
-                  <GlassButton title="Editar" onPress={() => router.push({ pathname: '/exercise/create', params: { exerciseId: item.id } })} variant="secondary" disabled={deletingId !== null} />
-                  <GlassButton title="Eliminar" onPress={() => confirmDelete(item.id, item.name)} variant="danger" disabled={deletingId !== null} loading={deletingId === item.id} />
-                </View>
+                 <Text style={[styles.meta, { color: theme.textMuted, marginTop: 14 }]}>Los datos del catálogo se administran únicamente mediante la importación validada.</Text>
               </GlassCard>
-            )}
+            }}
           />
         )}
       </SafeAreaView>
@@ -166,6 +163,8 @@ const styles = StyleSheet.create({
   filterTriggerSubtitle: { fontSize: 13, fontWeight: '600' },
   filterTriggerAction: { fontSize: 13, fontWeight: '800' },
   filters: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'flex-start', gap: 8 },
+  filtersScroll: { maxHeight: 280 },
+  search: { width: '100%', borderWidth: 1, borderRadius: 12, paddingHorizontal: 12, paddingVertical: 10 },
   filterChip: { alignSelf: 'flex-start', borderWidth: 1, borderRadius: 999, paddingHorizontal: 14, paddingVertical: 10 },
   list: { paddingBottom: 32, gap: 12 },
   emptyCard: { marginTop: 8 },

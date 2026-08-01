@@ -4,7 +4,6 @@ import { BlurView } from 'expo-blur';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import { ThemePreviewBar } from '../../components/ThemePreviewBar';
-import { ChatFab } from '../../components/ChatFab';
 import { useAuth } from '../../context/AuthContext';
 import { useTheme } from '../../context/ThemeContext';
 
@@ -129,6 +128,13 @@ export default function TabsLayout() {
           }}
         />
         <Tabs.Screen
+          name="social"
+          options={{
+            title: 'Comunidad',
+            tabBarIcon: ({ focused }) => <TabIcon name={focused ? 'people' : 'people-outline'} focused={focused} />,
+          }}
+        />
+        <Tabs.Screen
           name="shop"
           options={{
             title: 'Tienda',
@@ -138,7 +144,6 @@ export default function TabsLayout() {
           }}
         />
       </Tabs>
-      <ChatFab />
       <ThemePreviewBar />
     </View>
   );

@@ -58,17 +58,20 @@ export function createWorkoutAttempt(input: AttemptCaptureInput): WorkoutAttempt
   const lineage = isValidLineage(input.lineage) ? input.lineage : undefined;
   return { version: WORKOUT_ATTEMPT_VERSION, id: input.id, owner: input.owner, routineId: input.routine.id, recordedRoutineName: input.routine.name,
     completedAt: input.completedAt, durationSeconds: input.durationSeconds,
-    restTimerSeconds: input.restTimerSeconds, lineage, exercises, completion, reward,
+    restTimerSeconds: input.restTimerSeconds, lineage, recapPublicationKey: `${Date.now()}-${Math.random().toString(36).slice(2, 14)}`, exercises, completion, reward,
     rewardApplication: { id: `${input.owner}:${input.id}:v${WORKOUT_ATTEMPT_VERSION}`, state: 'pending' } };
 }
 
 export function attemptToSession(attempt: WorkoutAttempt): WorkoutSession {
   return { id: attempt.id, routineId: attempt.routineId ?? '', routineName: attempt.recordedRoutineName,
     completedAt: attempt.completedAt, durationSeconds: attempt.durationSeconds, restTimerSeconds: attempt.restTimerSeconds,
-    lineage: attempt.lineage,
+    lineage: attempt.lineage, recapPublicationKey: attempt.recapPublicationKey,
     exercises: attempt.exercises.map((exercise, exerciseIndex) => ({
       exerciseId: exercise.exerciseId ?? `unknown-${exerciseIndex}`,
       catalogExerciseId: exercise.exerciseId ?? undefined, name: exercise.recordedName,
+      muscleGroupIds: exercise.attribution
+        ? [exercise.attribution.primary, ...exercise.attribution.secondary]
+        : [],
       sets: exercise.sets.map(({ plan, result }) => {
         const performance = result.performance;
         const weight = !performance ? 0 : performance.mode === 'external-load'

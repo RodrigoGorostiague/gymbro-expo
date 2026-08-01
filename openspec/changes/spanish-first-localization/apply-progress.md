@@ -78,3 +78,54 @@ No device was available. Before integration, manually verify phone progress/hist
 - No routes, identifiers, enum/storage/API values, parsers, dependencies, logs, user-created names, rewards, or business logic changed.
 - Staged binary fingerprint remained `511439b156989cb49d0f43143ea78be4365accf7`; no staging, commit, push, branch, PR, verify, or archive operation was performed.
 - Task 3.4 is the only remaining task and requires real phone/tablet runtime evidence for both profiles.
+
+## Task 3.4 Reconciliation Attempt — 2026-07-27
+
+- Request: `spanish-first-localization-reconcile-20260726-01`
+- Revision: `sha256:add0d70ca8883675f5745a851ecbae71f01e83852c68c35a48b2671f8f617006`
+- Outcome: failed to prove task 3.4; the task remains unchecked.
+- Runtime availability: `adb devices` → exit 0 with no attached devices.
+- Device evidence: none. No phone/tablet or `rodaja`/`brisas` walkthrough was executed or inferred.
+
+### Reconciliation Evidence
+
+| Evidence | Exact result |
+|---|---|
+| Focused localization audit | `TZ=America/New_York npx vitest run tests/localizationPr1.test.ts tests/localizationPr2.test.ts tests/localizationPr3.test.ts` → exit 0; 3 files and 6 tests passed |
+| Full regression | `TZ=America/New_York npm test` → exit 1; 10 files passed, 1 failed; 89 tests passed, 1 failed in `tests/mesocycleNavigation.test.ts` because `Hoy es un día de recuperación.` was not rendered |
+| Typecheck | `npx tsc --noEmit` → exit 0 |
+| Android export | `npx expo export --platform android --output-dir /tmp/opencode/gymbro-localization-reconcile-20260726-01` → exit 0; 1 Android bundle and 46 assets exported |
+| Diff safety before artifact edit | `git diff --check` → exit 0; existing unrelated changes only in `exercise-catalog` and `meaningful-progress-dashboard` artifacts |
+| Runtime harness | Device matrix unavailable; production export proves bundling only and does not prove rendered copy, accessibility announcements, form factors, profiles, or state journeys |
+| Rollback boundary | Revert only this reconciliation section in `openspec/changes/spanish-first-localization/apply-progress.md`; no application behavior changed |
+
+### Exact Unproved Criteria
+
+Phone and tablet remain unverified for both `rodaja` and `brisas`. The normal, loading, empty, error, destructive, and accessibility paths remain unverified across dashboard, history, catalog, training, shop, sharing, and profile, including screen-reader context and dynamic names, counts, percentages, and units. Automated audits and export evidence cannot substitute for those device/manual criteria.
+
+## Task 3.4 Device Attempt — 2026-07-27
+
+- Request: `spanish-first-localization-device-20260727-02`
+- Revision: `sha256:d74593a9c5f34a7fc3192e77b665a1e29e373dd44b82a8c3bb5f30d5845d6787`
+- Device: `motorola edge 30 pro` at `192.168.0.194:38637`; physical `1080x2400`, density `400`; this is phone evidence only.
+- Outcome: failed to prove the complete task 3.4 matrix; task 3.4 remains unchecked.
+
+### Device and Regression Evidence
+
+| Evidence | Exact result |
+|---|---|
+| Runtime launch | Installed development build `com.wagiri.gymbro` launched against bounded Metro through `adb reverse tcp:8081 tcp:8081`; runtime logs showed both profile/share subscriptions and no React Native error |
+| Profiles and normal/empty/error states | `rodaja` and `brisas` login/routines exercised; screenshots captured normal routines/catalog/shop, `rodaja` progress values `1`, `18`, `100%`, `49 min`, `brisas` zero-activity progress, empty mesocycles/sharing, Spanish logout confirmation, welcome copy, and invalid-credential error |
+| Dynamic and visual fidelity | Preserved names `Lega`, `Push`, `Pull`, profile names, exercise counts, series counts, percentages, minutes, gem counts `130`/`0`, dual-profile theme copy, Glass cards, gradients, and distinct profile themes were rendered on device |
+| Accessibility | TalkBack was enabled and bound with touch exploration; Spanish `← Rutinas` received accessibility focus. Full labels, hints, chart announcements, errors, and destructive consequences were not traversed or captured |
+| Orientation/form factor | A landscape request retained rotation `0` and portrait `1080x2400`, consistent with `orientation: portrait`; no tablet runtime existed, so this is not tablet or responsive-tablet proof |
+| Focused localization audit | `TZ=America/New_York npx vitest run tests/localizationPr1.test.ts tests/localizationPr2.test.ts tests/localizationPr3.test.ts` → exit 0; 3 files and 6 tests passed |
+| Full regression | `TZ=America/New_York npm test` → exit 1; 10 files passed, 1 failed; 89 passed, 1 failed in `tests/mesocycleNavigation.test.ts` |
+| Regression diagnosis | The test fixes `startDate` to `2026-07-26` but uses the real current date; on `2026-07-27` the rest entry correctly selects past copy instead of `Hoy es un día de recuperación.`. This is time-dependent test debt, not caused by this localization candidate, so no source/test fix was made |
+| Typecheck and diff | `npx tsc --noEmit` and `git diff --check` → exit 0 |
+| Cleanup | Restored `rodaja`, TalkBack/accessibility services, auto-rotation, portrait rotation, font scale, and animation scales to their original values; no user routines, exercises, sessions, shares, themes, or rewards were mutated |
+| Rollback boundary | Revert only this device-attempt section; no application source or user data changed |
+
+### Exact Missing Criteria
+
+No tablet was available. Loading states, full history/session detail, training execution, safe destructive catalog/session operations, share accept/reject/error, shop buy/equip/remove/expiry/insufficient-gems paths, and complete TalkBack labels/hints/announcements were not proved for both profiles. Therefore the manual matrix and passing-suite gate remain unsatisfied.

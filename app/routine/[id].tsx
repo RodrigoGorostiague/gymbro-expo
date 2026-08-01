@@ -16,7 +16,6 @@ import { GlassCard, ThemeBackground } from '../../components/GlassCard';
 import { HapticPressable } from '../../components/HapticPressable';
 import { MuscleGroupSelector } from '../../components/MuscleGroupSelector';
 import { GlassButton, GlassInput } from '../../components/UI';
-import { MUSCLE_GROUP_LABELS } from '../../constants/muscleGroups';
 import { useData } from '../../context/DataContext';
 import { useAuth } from '../../context/AuthContext';
 import { useTheme } from '../../context/ThemeContext';
@@ -24,11 +23,14 @@ import { Exercise, ExerciseSet, MuscleGroup, RoutineExercise } from '../../types
 import { buildDecimalDraftMap, type DecimalDraftMap, normalizeDecimalInput } from '../../utils/decimalInput';
 import { generateId } from '../../utils/storage';
 import { matchesActiveWorkout } from '../../utils/activeWorkoutReentry';
+import { muscleGroupLabel } from '../../utils/catalogMuscleGroups';
 
 export default function EditRoutineScreen() {
   const { id, addExerciseId } = useLocalSearchParams<{ id: string; addExerciseId?: string }>();
   const {
     exercises: catalogExercises,
+    catalogMuscleGroups = [],
+    definitions,
     getExercise,
     getRoutine,
     updateRoutine,
@@ -42,10 +44,22 @@ export default function EditRoutineScreen() {
   const [routineMuscleGroups, setRoutineMuscleGroups] = useState<MuscleGroup[]>([]);
   const [pickerVisible, setPickerVisible] = useState(false);
   const handledAutoAddId = useRef<string | null>(null);
+  const groupLabel = (groupId: string) => muscleGroupLabel(catalogMuscleGroups, groupId);
 
-  const createRoutineExercise = (exercise: Exercise): RoutineExercise => ({
+  const createRoutineExercise = (exercise: Exercise): RoutineExercise => {
+    const definition = definitions?.find((candidate) => candidate.id === exercise.id);
+    return ({
     id: generateId(),
     catalogExerciseId: exercise.id,
+    definitionId: definition?.id,
+    definitionSnapshot: definition ? {
+      id: definition.id,
+      name: definition.name,
+      muscleGroups: [...definition.muscleGroups],
+      loadMode: definition.loadMode,
+      loadUnit: definition.loadUnit,
+      variant: definition.variant,
+    } : undefined,
     name: exercise.name,
     muscleGroups: [...exercise.muscleGroups],
     loadMode: exercise.loadMode,
@@ -58,7 +72,8 @@ export default function EditRoutineScreen() {
       weight: set.weight,
       reps: set.reps,
     })),
-  });
+    });
+  };
 
   useEffect(() => {
     const routine = getRoutine(id);
@@ -242,7 +257,7 @@ export default function EditRoutineScreen() {
                       {exercise.variant}
                     </Text>
                     <View style={styles.tags}>
-                      {exercise.muscleGroups.map((group) => (
+                      {exercise.muscleGroups.slice(0, 2).map((group) => (
                         <View
                           key={group}
                           style={[
@@ -251,10 +266,15 @@ export default function EditRoutineScreen() {
                           ]}
                         >
                           <Text style={[styles.tagText, { color: theme.text }]}>
-                            {MUSCLE_GROUP_LABELS[group]}
+                            {groupLabel(group)}
                           </Text>
                         </View>
                       ))}
+                      {exercise.muscleGroups.length > 2 ? (
+                        <View style={[styles.tag, { backgroundColor: theme.glass, borderColor: theme.glassBorder }]}>
+                          <Text style={[styles.tagText, { color: theme.textMuted }]}>+{exercise.muscleGroups.length - 2}</Text>
+                        </View>
+                      ) : null}
                     </View>
                   </View>
                   <HapticPressable onPress={() => removeExercise(exercise.id)}>
@@ -324,16 +344,6 @@ export default function EditRoutineScreen() {
         visible={pickerVisible}
         onClose={() => setPickerVisible(false)}
         onSelect={addExerciseFromCatalog}
-        onCreateNew={() => {
-          setPickerVisible(false);
-          router.push({
-            pathname: '/exercise/create',
-            params: {
-              muscleGroups: routineMuscleGroups.join(','),
-              returnToRoutineId: id,
-            },
-          });
-        }}
       />
     </ThemeBackground>
   );

@@ -23,32 +23,18 @@ describe('mesocycle first-entry start date', () => {
   });
 });
 
-describe('mesocycle creation schedule selection', () => {
-  test('creates a first-week routine or rest entry with its derived start date', async () => {
+describe('mesocycle creation', () => {
+  test('creates an empty schedule for detailed planning after creation', async () => {
     const addMesocycle = vi.fn(async (value) => ({ ...value, id: 'created' }));
-    setMockData({ routines: [routine], addMesocycle });
+    setMockData({ addMesocycle });
     const screen = render(React.createElement(CreateMesocycleScreen));
 
     changeText(screen.root.findAll((node) => (node.type as any) === 'GlassInput')[0], 'New block');
-    press(screen.root.find((node) => node.props.accessibilityLabel === 'Programar Upper'));
     press(findButton(screen.root, 'Crear mesociclo'));
 
     await vi.waitFor(() => expect(addMesocycle).toHaveBeenCalled());
-    expect(addMesocycle.mock.calls[0][0].startDate).toBe('2026-07-26');
-    expect(addMesocycle.mock.calls[0][0].weeks[0].entries[0]).toMatchObject({
-      ref: { routineId: 'routine-1', routineName: 'Upper', source: 'local' },
-    });
-
-    resetRuntimeHarness();
-    const addRestMesocycle = vi.fn(async (value) => ({ ...value, id: 'rest-created' }));
-    setMockData({ routines: [routine], addMesocycle: addRestMesocycle });
-    const restScreen = render(React.createElement(CreateMesocycleScreen));
-    changeText(restScreen.root.findAll((node) => (node.type as any) === 'GlassInput')[0], 'Rest block');
-    press(restScreen.root.find((node) => node.props.accessibilityLabel === 'Programar descanso'));
-    press(findButton(restScreen.root, 'Crear mesociclo'));
-    await vi.waitFor(() => expect(addRestMesocycle).toHaveBeenCalled());
-    expect(addRestMesocycle.mock.calls[0][0].weeks[0].entries[0]).toMatchObject({ kind: 'rest' });
-    expect(addRestMesocycle.mock.calls[0][0].startDate).toBe('2026-07-26');
+    expect(addMesocycle.mock.calls[0][0].startDate).toBeUndefined();
+    expect(addMesocycle.mock.calls[0][0].weeks[0].entries).toEqual([]);
   });
 });
 
@@ -69,6 +55,22 @@ describe('mesocycle edit schedule selection', () => {
     const saved = updateMesocycle.mock.calls[0]![0];
     expect(saved).toMatchObject({ startDate: '2026-07-26' });
     expect(saved.weeks[0].entries[0]).toMatchObject({ ref: { routineId: 'routine-1' } });
+  });
+
+  test('allows the same routine to be scheduled more than once in a week', async () => {
+    const updateMesocycle = vi.fn(async (_value: any) => undefined);
+    const empty = { ...subject, startDate: undefined, weeks: [{ ...subject.weeks[0], entries: [] }] };
+    setMockData({ getMesocycle: vi.fn(() => empty), routines: [routine], attempts: [], updateMesocycle });
+    const screen = render(React.createElement(MesocycleDetailScreen));
+
+    press(findButton(screen.root, 'Agregar rutina'));
+    press(screen.root.find((node) => node.props.accessibilityLabel === 'Programar Upper'));
+    press(screen.root.find((node) => node.props.accessibilityLabel === 'Agregar otra sesión de Upper'));
+    press(findButton(screen.root, 'Guardar planificación'));
+
+    await vi.waitFor(() => expect(updateMesocycle).toHaveBeenCalled());
+    const entries = updateMesocycle.mock.calls[0]![0].weeks[0].entries;
+    expect(entries.filter((entry: any) => 'ref' in entry && entry.ref.routineId === 'routine-1')).toHaveLength(2);
   });
 });
 

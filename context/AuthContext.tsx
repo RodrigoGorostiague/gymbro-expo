@@ -1,58 +1,95 @@
 import React, { createContext, useContext, useEffect, useState } from 'react';
-import { UserProfile } from '../types';
-import { clearUser, loadUser, saveUser } from '../utils/storage';
+import { UserId } from '../types';
+import { supabase, supabaseConfigurationError, subscribeToSupabaseAppState } from '../services/supabase';
+import { loadLegacyAlias, migrateLegacyAliasToUid } from '../utils/storage';
 
 interface AuthContextValue {
-  user: UserProfile | null;
+  user: UserId | null;
+  userEmail: string | null;
   isLoading: boolean;
+  authError: string | null;
   welcomeMessage: string | null;
-  login: (username: string, password: string) => boolean;
+  login: (email: string, password: string) => Promise<string | null>;
+  register: (email: string, password: string) => Promise<string | null>;
   logout: () => Promise<void>;
   setWelcomeMessage: (message: string | null) => void;
 }
 
 const AuthContext = createContext<AuthContextValue | null>(null);
 
-const CREDENTIALS: Record<string, { password: string; profile: UserProfile }> = {
-  rodaja: { password: '1234', profile: 'rodaja' },
-  brisas: { password: 'sonrisas', profile: 'brisas' },
-};
-
 export function AuthProvider({ children }: { children: React.ReactNode }) {
-  const [user, setUser] = useState<UserProfile | null>(null);
+  const [user, setUser] = useState<UserId | null>(null);
+  const [userEmail, setUserEmail] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+  const [authError, setAuthError] = useState<string | null>(supabaseConfigurationError);
   const [welcomeMessage, setWelcomeMessage] = useState<string | null>(null);
 
   useEffect(() => {
-    loadUser().then((profile) => {
-      setUser(profile);
+    let active = true;
+    let legacyAlias: Awaited<ReturnType<typeof loadLegacyAlias>> = null;
+    const client = supabase;
+    if (!client) {
       setIsLoading(false);
+      return () => { active = false; };
+    }
+
+    const applySession = async (session: { user: { id: string; email?: string | null } } | null) => {
+      if (!session) {
+        if (active) { setUser(null); setUserEmail(null); }
+        return;
+      }
+      await migrateLegacyAliasToUid(legacyAlias, session.user.id);
+      if (active) { setUser(session.user.id); setUserEmail(session.user.email ?? null); }
+    };
+
+    const initialize = async () => {
+      try {
+        legacyAlias = await loadLegacyAlias();
+        const { data, error } = await client.auth.getSession();
+        if (error) throw error;
+        await applySession(data.session);
+        if (active) setAuthError(null);
+      } catch (error) {
+        if (active) setAuthError(error instanceof Error ? error.message : 'No se pudo restaurar la sesión.');
+      } finally {
+        if (active) setIsLoading(false);
+      }
+    };
+
+    void initialize();
+    const { data: { subscription } } = client.auth.onAuthStateChange((_event, session) => {
+      void applySession(session);
     });
+    const unsubscribeAppState = subscribeToSupabaseAppState();
+    return () => {
+      active = false;
+      subscription.unsubscribe();
+      unsubscribeAppState();
+    };
   }, []);
 
-  const login = (username: string, password: string): boolean => {
-    const key = username.trim().toLowerCase();
-    const cred = CREDENTIALS[key];
-    if (!cred || cred.password !== password) return false;
+  const login = async (email: string, password: string): Promise<string | null> => {
+    if (!supabase) return supabaseConfigurationError;
+    const { error } = await supabase.auth.signInWithPassword({ email: email.trim(), password });
+    return error?.message ?? null;
+  };
 
-    setUser(cred.profile);
-    saveUser(cred.profile);
-    return true;
+  const register = async (email: string, password: string): Promise<string | null> => {
+    if (!supabase) return supabaseConfigurationError;
+    const { data, error } = await supabase.auth.signUp({ email: email.trim(), password });
+    if (error) return error.message;
+    return data.session ? null : 'Revisa tu correo electrónico para confirmar la cuenta.';
   };
 
   const logout = async () => {
-    await clearUser();
+    if (!supabase) return;
+    const { error } = await supabase.auth.signOut();
+    if (error) throw error;
     setUser(null);
-    setWelcomeMessage(null);
+    setUserEmail(null);
   };
 
-  return (
-    <AuthContext.Provider
-      value={{ user, isLoading, welcomeMessage, login, logout, setWelcomeMessage }}
-    >
-      {children}
-    </AuthContext.Provider>
-  );
+  return <AuthContext.Provider value={{ user, userEmail, isLoading, authError, welcomeMessage, login, register, logout, setWelcomeMessage }}>{children}</AuthContext.Provider>;
 }
 
 export function useAuth() {

@@ -1,10 +1,11 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   Alert,
   KeyboardAvoidingView,
   Platform,
   ScrollView,
   StyleSheet,
+  Text,
   View,
 } from 'react-native';
 import { router } from 'expo-router';
@@ -13,25 +14,14 @@ import { DualLoginBackground } from '../components/login/DualLoginBackground';
 import { DualLoginFooter } from '../components/login/DualLoginFooter';
 import { DualLoginHeader } from '../components/login/DualLoginHeader';
 import { LoginFormPanel } from '../components/login/LoginFormPanel';
-import { getRandomWelcomeMessage } from '../constants/welcome';
 import { useAuth } from '../context/AuthContext';
 import { useLoginThemes } from '../hooks/useLoginThemes';
-import { UserProfile } from '../types';
-
-function resolveActiveProfile(username: string): UserProfile | null {
-  const value = username.trim().toLowerCase();
-  if (value === 'rodaja' || value.startsWith('rod')) return 'rodaja';
-  if (value === 'brisas' || value.startsWith('bri')) return 'brisas';
-  return null;
-}
 
 export default function LoginScreen() {
-  const { user, isLoading, login, setWelcomeMessage } = useAuth();
+  const { user, isLoading, authError, login, register } = useAuth();
   const loginThemes = useLoginThemes();
-  const [username, setUsername] = useState('');
+  const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
-
-  const activeProfile = useMemo(() => resolveActiveProfile(username), [username]);
 
   useEffect(() => {
     if (!isLoading && user) {
@@ -39,22 +29,9 @@ export default function LoginScreen() {
     }
   }, [user, isLoading]);
 
-  const handleLogin = () => {
-    const success = login(username.trim(), password);
-    if (!success) {
-      Alert.alert('Error', 'Usuario o contraseña incorrectos');
-      return;
-    }
-
-    if (username.trim().toLowerCase() === 'brisas') {
-      setWelcomeMessage(getRandomWelcomeMessage());
-    }
-
-    router.replace('/(tabs)/routines');
-  };
-
-  const handleSelectProfile = (profile: UserProfile) => {
-    setUsername(profile);
+  const submit = async (action: typeof login) => {
+    const error = await action(email, password);
+    if (error) Alert.alert('Error', error);
   };
 
   return (
@@ -74,24 +51,26 @@ export default function LoginScreen() {
             <DualLoginHeader
               rodaja={loginThemes.rodaja}
               brisas={loginThemes.brisas}
-              activeProfile={activeProfile}
+              activeProfile={null}
             />
 
             <LoginFormPanel
               rodaja={loginThemes.rodaja}
               brisas={loginThemes.brisas}
-              activeProfile={activeProfile}
-              username={username}
+              activeProfile={null}
+              username={email}
               password={password}
-              onUsernameChange={setUsername}
+              onUsernameChange={setEmail}
               onPasswordChange={setPassword}
-              onSelectProfile={handleSelectProfile}
-              onSubmit={handleLogin}
+              onSelectProfile={() => undefined}
+              onSubmit={() => void submit(login)}
+              onRegister={() => void submit(register)}
             />
 
             <DualLoginFooter rodaja={loginThemes.rodaja} brisas={loginThemes.brisas} />
           </ScrollView>
         </KeyboardAvoidingView>
+        {authError ? <Text style={styles.configError}>{authError}</Text> : null}
       </SafeAreaView>
     </View>
   );
@@ -113,5 +92,11 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     paddingHorizontal: 22,
     paddingVertical: 16,
+  },
+  configError: {
+    color: '#FCA5A5',
+    paddingHorizontal: 22,
+    paddingBottom: 16,
+    textAlign: 'center',
   },
 });

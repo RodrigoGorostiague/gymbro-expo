@@ -391,6 +391,23 @@ describe('global exercise variant catalog', () => {
     screen.unmount();
   });
 
+  test('renders and saves an intentional zero kilogram prescription', async () => {
+    const updateRoutine = vi.fn();
+    const routine = {
+      id: 'routine-zero', name: 'Zero load', muscleGroups: ['pecho'], createdAt: '2026-07-31T00:00:00.000Z',
+      exercises: [{ id: 'routine-ex-zero', definitionId: 'system:press-banca', name: 'Press banca', muscleGroups: ['pecho'], variant: 'barra', sets: [{ id: 'set-zero', tipo: 1, weight: 0, reps: 8 }] }],
+    };
+    setMockParams({ id: 'routine-zero' });
+    setMockData({ exercises: [], definitions: [], getExercise: vi.fn(), getRoutine: vi.fn(() => routine), updateRoutine });
+
+    const screen = render(React.createElement(EditRoutineScreen));
+    const [weightInput] = findInputs(screen.root, (node) => node.props.keyboardType === 'decimal-pad');
+    expect(weightInput.props.value).toBe('0');
+    await Promise.resolve(findButton(screen.root, 'Guardar rutina').props.onPress());
+    expect(updateRoutine).toHaveBeenCalledWith(expect.objectContaining({ exercises: [expect.objectContaining({ sets: [expect.objectContaining({ weight: 0 })] })] }));
+    screen.unmount();
+  });
+
   test('keeps the add-exercise CTA reachable for empty and dense routine layouts', () => {
     setMockParams({ id: 'routine-1' });
     setMockData({
@@ -442,7 +459,12 @@ describe('global exercise variant catalog', () => {
   test('collapses the exercises tab filters until requested and keeps the active state visible', () => {
     const deleteExercise = vi.fn();
     const renderScreen = (exercises: Exercise[]) => {
-      setMockData({ exercises, deleteExercise });
+      setMockData({
+        exercises,
+        deleteExercise,
+        catalogMuscleGroups: [{ id: 'pecho', name: 'Pecho', displayName: 'Pecho', type: 'Grupo padre', level: 2, visibleInFilters: true, path: 'Cuerpo > Pecho' }],
+        filterCatalogExercises: vi.fn(async () => exercises),
+      });
       return render(React.createElement(ExercisesScreen));
     };
 
@@ -458,8 +480,8 @@ describe('global exercise variant catalog', () => {
     const emptyExpandedTrigger = findByTestId(emptyScreen.root, 'exercise-filter-trigger');
     const emptyStrip = findByTestId(emptyScreen.root, 'exercise-filter-strip');
     expect(emptyExpandedTrigger.props.accessibilityState).toEqual({ expanded: true });
-    expect((emptyStrip.type as any).displayName).toBe('View');
-    expect(emptyStrip.props.style).toEqual(expect.objectContaining({
+    expect((emptyStrip.type as any).displayName).toBe('ScrollView');
+    expect(emptyStrip.props.contentContainerStyle).toEqual(expect.objectContaining({
       flexDirection: 'row',
       flexWrap: 'wrap',
       alignItems: 'flex-start',
@@ -473,7 +495,7 @@ describe('global exercise variant catalog', () => {
     const fewTrigger = findByTestId(fewScreen.root, 'exercise-filter-trigger');
     press(fewTrigger);
     const fewStrip = findByTestId(fewScreen.root, 'exercise-filter-strip');
-    expect(fewStrip.props.style).toEqual(expect.objectContaining({
+    expect(fewStrip.props.contentContainerStyle).toEqual(expect.objectContaining({
       flexDirection: 'row',
       flexWrap: 'wrap',
       alignItems: 'flex-start',
@@ -487,7 +509,7 @@ describe('global exercise variant catalog', () => {
     const denseTrigger = findByTestId(denseScreen.root, 'exercise-filter-trigger');
     press(denseTrigger);
     const denseStrip = findByTestId(denseScreen.root, 'exercise-filter-strip');
-    expect(denseStrip.props.style).toEqual(expect.objectContaining({
+    expect(denseStrip.props.contentContainerStyle).toEqual(expect.objectContaining({
       flexDirection: 'row',
       flexWrap: 'wrap',
       alignItems: 'flex-start',

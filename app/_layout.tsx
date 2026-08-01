@@ -4,10 +4,9 @@ import { Stack } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { AuthProvider } from '../context/AuthContext';
 import { DataProvider } from '../context/DataContext';
-import { KissProvider } from '../context/KissContext';
-import { ShareProvider } from '../context/ShareContext';
 import { ShopProvider } from '../context/ShopContext';
 import { ThemeProvider, useTheme } from '../context/ThemeContext';
+import { SocialProvider } from '../context/SocialContext';
 
 function RootStatusBar() {
   const { theme } = useTheme();
@@ -17,53 +16,49 @@ function RootStatusBar() {
 export default function RootLayout() {
   return (
     <AuthProvider>
-      <KissProvider>
-        <ShareProvider>
-          <DataProvider>
-            <ShopProvider>
+      <DataProvider>
+        <ShopProvider>
+          <SocialProvider>
             <ThemeProvider>
-            <RootStatusBar />
-            <Stack screenOptions={{ headerShown: false, animation: 'fade' }}>
-            <Stack.Screen name="index" />
-            <Stack.Screen name="(tabs)" />
-            <Stack.Screen
-              name="routine/[id]"
-              options={{ animation: 'slide_from_right', presentation: 'card' }}
-            />
-            <Stack.Screen
-              name="routine/create"
-              options={{ animation: 'slide_from_bottom', presentation: 'modal' }}
-            />
-            <Stack.Screen
-              name="mesocycle/create"
-              options={{ animation: 'slide_from_bottom', presentation: 'modal' }}
-            />
-            <Stack.Screen
-              name="mesocycle/summary/[id]"
-              options={{ animation: 'slide_from_right', presentation: 'card' }}
-            />
-            <Stack.Screen
-              name="mesocycle/[id]"
-              options={{ animation: 'slide_from_right', presentation: 'card' }}
-            />
-            <Stack.Screen
-              name="exercise/create"
-              options={{ animation: 'slide_from_bottom', presentation: 'modal' }}
-            />
-            <Stack.Screen
-              name="routine/execute/[id]"
-              options={{ animation: 'slide_from_right', presentation: 'fullScreenModal' }}
-            />
-            <Stack.Screen
-              name="session/[id]"
-              options={{ animation: 'slide_from_right', presentation: 'card' }}
-            />
-            </Stack>
+              <RootStatusBar />
+              <Stack screenOptions={{ headerShown: false, animation: 'fade' }}>
+                <Stack.Screen name="index" />
+                <Stack.Screen name="(tabs)" />
+                <Stack.Screen name="social/[uid]" options={{ animation: 'slide_from_right', presentation: 'card' }} />
+                <Stack.Screen name="social/recap/[id]" options={{ animation: 'slide_from_bottom', presentation: 'modal' }} />
+                <Stack.Screen
+                  name="routine/[id]"
+                  options={{ animation: 'slide_from_right', presentation: 'card' }}
+                />
+                <Stack.Screen
+                  name="routine/create"
+                  options={{ animation: 'slide_from_bottom', presentation: 'modal' }}
+                />
+                <Stack.Screen
+                  name="mesocycle/create"
+                  options={{ animation: 'slide_from_bottom', presentation: 'modal' }}
+                />
+                <Stack.Screen
+                  name="mesocycle/summary/[id]"
+                  options={{ animation: 'slide_from_right', presentation: 'card' }}
+                />
+                <Stack.Screen
+                  name="mesocycle/[id]"
+                  options={{ animation: 'slide_from_right', presentation: 'card' }}
+                />
+                <Stack.Screen
+                  name="routine/execute/[id]"
+                  options={{ animation: 'slide_from_right', presentation: 'fullScreenModal' }}
+                />
+                <Stack.Screen
+                  name="session/[id]"
+                  options={{ animation: 'slide_from_right', presentation: 'card' }}
+                />
+              </Stack>
             </ThemeProvider>
-          </ShopProvider>
-        </DataProvider>
-      </ShareProvider>
-      </KissProvider>
+          </SocialProvider>
+        </ShopProvider>
+      </DataProvider>
     </AuthProvider>
   );
 }

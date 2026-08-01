@@ -22,3 +22,9 @@ export const MUSCLE_GROUP_OPTIONS: { value: MuscleGroup; label: string }[] = [
 export const MUSCLE_GROUP_LABELS = Object.fromEntries(
   MUSCLE_GROUP_OPTIONS.map(({ value, label }) => [value, label]),
 ) as Record<MuscleGroup, string>;
+
+export const CANONICAL_MUSCLE_GROUP_IDS = MUSCLE_GROUP_OPTIONS.map(({ value }) => value) as readonly MuscleGroup[];
+
+export function isCanonicalMuscleGroup(value: unknown): value is MuscleGroup {
+  return typeof value === 'string' && CANONICAL_MUSCLE_GROUP_IDS.includes(value as MuscleGroup);
+}

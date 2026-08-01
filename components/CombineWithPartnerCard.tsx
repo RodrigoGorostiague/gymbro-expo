@@ -8,6 +8,7 @@ import { useAuth } from '../context/AuthContext';
 import { useShop } from '../context/ShopContext';
 import { useTheme } from '../context/ThemeContext';
 import { resolveActiveTheme } from '../utils/theme';
+import { LegacyAlias } from '../types';
 
 export function CombineWithPartnerCard() {
   const { user } = useAuth();
@@ -19,9 +20,9 @@ export function CombineWithPartnerCard() {
     partnerEquippedThemeId,
   } = useShop();
 
-  if (!user) return null;
+  if (user !== 'rodaja' && user !== 'brisas') return null;
 
-  const partner = PARTNER_PROFILE[user];
+  const partner = PARTNER_PROFILE[user] as LegacyAlias;
   const selfTheme = resolveActiveTheme(user, selfEquippedThemeId);
   const partnerTheme = resolveActiveTheme(partner, partnerEquippedThemeId);
   const previewRodaja = user === 'rodaja' ? selfTheme : partnerTheme;

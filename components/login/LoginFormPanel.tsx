@@ -24,6 +24,7 @@ interface LoginFormPanelProps {
   onPasswordChange: (value: string) => void;
   onSelectProfile: (profile: UserProfile) => void;
   onSubmit: () => void;
+  onRegister: () => void;
 }
 
 function ProfileChip({
@@ -88,6 +89,7 @@ export function LoginFormPanel({
   onPasswordChange,
   onSelectProfile,
   onSubmit,
+  onRegister,
 }: LoginFormPanelProps) {
   const panelEnter = useSharedValue(0);
   const accent = activeProfile === 'brisas' ? brisas : activeProfile === 'rodaja' ? rodaja : null;
@@ -122,27 +124,10 @@ export function LoginFormPanel({
           <BlurView intensity={55} tint="dark" style={styles.blur}>
             <View style={styles.glassContent}>
               <Text style={styles.portalLabel}>Portal de acceso</Text>
-              <Text style={styles.portalHint}>Elige tu mundo o escribe tu usuario</Text>
-
-              <View style={styles.chipsRow}>
-                <ProfileChip
-                  profile="rodaja"
-                  theme={rodaja}
-                  selected={activeProfile === 'rodaja'}
-                  onPress={() => onSelectProfile('rodaja')}
-                  delay={280}
-                />
-                <ProfileChip
-                  profile="brisas"
-                  theme={brisas}
-                  selected={activeProfile === 'brisas'}
-                  onPress={() => onSelectProfile('brisas')}
-                  delay={360}
-                />
-              </View>
+              <Text style={styles.portalHint}>Inicia sesión con tu correo electrónico</Text>
 
               <TextInput
-                placeholder="Usuario"
+                placeholder="Correo electrónico"
                 placeholderTextColor="rgba(255,255,255,0.4)"
                 value={username}
                 onChangeText={onUsernameChange}
@@ -168,6 +153,9 @@ export function LoginFormPanel({
                 >
                   <Text style={styles.submitText}>Entrar al gimnasio</Text>
                 </LinearGradient>
+              </HapticPressable>
+              <HapticPressable onPress={onRegister} style={styles.submitWrap}>
+                <Text style={styles.registerText}>Crear cuenta</Text>
               </HapticPressable>
             </View>
           </BlurView>
@@ -279,5 +267,11 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '800',
     letterSpacing: 0.3,
+  },
+  registerText: {
+    color: 'rgba(255,255,255,0.82)',
+    fontWeight: '700',
+    textAlign: 'center',
+    paddingVertical: 12,
   },
 });

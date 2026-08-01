@@ -1,46 +1,39 @@
 import React, { createContext, useContext, useEffect, useMemo, useRef, useState } from 'react';
-import { ActiveWorkoutDraft, Exercise, ExerciseCatalog, ExerciseVariant, Mesocycle, MuscleGroup, PlannedSessionRef, Routine, UserProfile, WorkoutAttempt, WorkoutSession } from '../types';
+import { ActiveWorkoutDraft, CatalogImportPlan, CatalogImportResult, CatalogLibrary, Exercise, ExerciseDefinition, ExerciseVariant, Mesocycle, MuscleGroup, PlannedSessionRef, Routine, UserProfile, WorkoutAttempt, WorkoutSession } from '../types';
+import { CatalogMuscleGroup, CatalogParticipationMode, filterCatalogExercises, loadCatalogExercises, loadCatalogMuscleGroups } from '../services/catalog';
+import { loadTrainingLibrary, saveTrainingLibrary, saveTrainingMesocycles, saveTrainingRoutines } from '../services/trainingLibrary';
 import {
-  addCatalogExercise,
-  assertRoutineMutationReady,
-  createCatalogVariant,
-  deleteCatalogExercise,
-  deleteCatalogVariant,
+  commitCatalogLibraryImport,
+  deleteCatalogLibraryDefinition,
   deleteAttempt,
   generateId,
-  loadAttempts,
   loadActiveWorkoutDraft,
-  loadCatalogWithRoutines,
-  loadHiddenSharedRoutineIds,
-  loadMesocycles,
-  resetLegacyMesocycleStorage,
+  loadCatalogLibrary,
   loadSessions,
   loadSessionQuarantine,
-  saveMesocycles,
-  saveRoutines,
-  saveHiddenSharedRoutineIds,
   saveSessions,
   saveCapturedAttempt,
   removeActiveWorkoutDraft,
   removeActiveWorkoutDraftIfMatches,
+  resetLegacyTrainingDataForNormalizedCatalog,
   saveActiveWorkoutDraft,
   saveActiveWorkoutDraftIfMatches,
   resolveSessionQuarantine,
-  renameCatalogVariant,
   updateAttempt,
-  updateCatalogExercise,
+  updateCatalogLibrary,
 } from '../utils/storage';
 import { reconcileActiveWorkoutTiming } from '../utils/activeWorkoutTiming';
 import { applySessionEdits, attemptToSession } from '../utils/workoutAttempts';
-import { updateSharedRoutine } from '../services/shareSync';
 import { useAuth } from './AuthContext';
-import { useShare } from './ShareContext';
 
 type PersistedWorkoutSession = WorkoutSession & { owner: UserProfile };
 
 interface DataContextValue {
   exercises: Exercise[];
+  definitions: ExerciseDefinition[];
   variants: ExerciseVariant[];
+  catalogMuscleGroups: CatalogMuscleGroup[];
+  filterCatalogExercises: (groupId: string, mode: CatalogParticipationMode) => Promise<Exercise[]>;
   routines: Routine[];
   mesocycles: Mesocycle[];
   sessions: WorkoutSession[];
@@ -54,6 +47,8 @@ interface DataContextValue {
   addExercise: (exercise: Omit<Exercise, 'id'>) => Promise<Exercise>;
   updateExercise: (exercise: Exercise) => Promise<void>;
   deleteExercise: (id: string) => Promise<void>;
+  deleteDefinition: (id: string, replacementId?: string) => Promise<void>;
+  importCatalogContent: (plan: CatalogImportPlan) => Promise<CatalogImportResult>;
   createVariant: (name: string) => Promise<ExerciseVariant>;
   renameVariant: (source: ExerciseVariant, name: string) => Promise<ExerciseVariant>;
   deleteVariant: (source: ExerciseVariant) => Promise<void>;
@@ -72,6 +67,7 @@ interface DataContextValue {
   deleteSession: (id: string) => Promise<void>;
   addAttempt: (attempt: WorkoutAttempt) => Promise<void>;
   editAttempt: (attempt: WorkoutAttempt) => Promise<void>;
+  ensureRecapPublicationKey: (sessionId: string) => Promise<string>;
   activeWorkoutDraft: ActiveWorkoutDraft | null;
   cancelActiveWorkout: () => Promise<void>;
   startActiveWorkout: (draft: ActiveWorkoutDraft) => Promise<void>;
@@ -80,6 +76,16 @@ interface DataContextValue {
 }
 
 const DataContext = createContext<DataContextValue | null>(null);
+
+const definitionAsExercise = (definition: ExerciseDefinition): Exercise => ({
+  id: definition.id,
+  name: definition.name,
+  muscleGroups: [...definition.muscleGroups],
+  loadMode: definition.loadMode,
+  loadUnit: definition.loadUnit,
+  variant: definition.variant,
+  defaultSets: definition.defaultSets.map((set) => ({ ...set })),
+});
 
 function sameActiveWorkoutDraft(
   current: ActiveWorkoutDraft | null,
@@ -90,12 +96,12 @@ function sameActiveWorkoutDraft(
 
 export function DataProvider({ children }: { children: React.ReactNode }) {
   const { user } = useAuth();
-  const { acceptedShares } = useShare();
   const [exercises, setExercises] = useState<Exercise[]>([]);
+  const [definitions, setDefinitions] = useState<ExerciseDefinition[]>([]);
   const [variants, setVariants] = useState<ExerciseVariant[]>([]);
+  const [catalogMuscleGroups, setCatalogMuscleGroups] = useState<CatalogMuscleGroup[]>([]);
   const [localRoutines, setLocalRoutines] = useState<Routine[]>([]);
   const [mesocycles, setMesocycles] = useState<Mesocycle[]>([]);
-  const [hiddenSharedRoutineIds, setHiddenSharedRoutineIds] = useState<string[]>([]);
   const [sessions, setSessions] = useState<PersistedWorkoutSession[]>([]);
   const [attempts, setAttempts] = useState<WorkoutAttempt[]>([]);
   const [activeWorkoutDraft, setActiveWorkoutDraft] = useState<ActiveWorkoutDraft | null>(null);
@@ -107,9 +113,11 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
   const routinesLoadedRef = useRef(false);
   const mesocyclesLoadedRef = useRef(false);
   const activeUserRef = useRef(user);
+  const catalogLibraryRef = useRef<CatalogLibrary | null>(null);
   activeUserRef.current = user;
   const mesocycleMutationQueueRef = useRef<Promise<void>>(Promise.resolve());
   const sessionMutationQueueRef = useRef<Promise<void>>(Promise.resolve());
+  const trainingLibraryMutationQueueRef = useRef<Promise<void>>(Promise.resolve());
   const [isLoading, setIsLoading] = useState(true);
   const [dataState, setDataState] = useState<'loading' | 'ready' | 'error'>('loading');
   const [dataError, setDataError] = useState<string | null>(null);
@@ -124,6 +132,9 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
       sessionsRef.current = [];
       setSessions([]);
       setAttempts([]);
+      setDefinitions([]);
+      setExercises([]);
+      setCatalogMuscleGroups([]);
       setActiveWorkoutDraft(null);
       setQuarantinedSessionCount(0);
       setIsLoading(false);
@@ -139,41 +150,44 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
     routinesLoadedRef.current = false;
     mesocyclesLoadedRef.current = false;
     const operation = sessionMutationQueueRef.current.then(async () => {
-      const [loadedRoutineData, loadedMesocycles, loadedSessions, loadedHiddenShareIds, loadedAttempts, quarantine, draft] =
+      await resetLegacyTrainingDataForNormalizedCatalog();
+      const [library, trainingLibrary, loadedSessions, quarantine, draft, loadedCatalogExercises, loadedCatalogMuscleGroups] =
         await Promise.all([
-          loadCatalogWithRoutines(),
-          resetLegacyMesocycleStorage(user).then(() => loadMesocycles(user)),
-          loadSessions(),
-          loadHiddenSharedRoutineIds(),
-          loadAttempts(user),
+          loadCatalogLibrary(user),
+          loadTrainingLibrary(),
+          loadSessions(user),
           loadSessionQuarantine(),
           loadActiveWorkoutDraft(user),
+          loadCatalogExercises(),
+          loadCatalogMuscleGroups(),
         ]);
-      const { catalog: loadedCatalog, catalogError, routines: loadedRoutines } = loadedRoutineData;
+      const training = trainingLibrary.routines.length === 0 && trainingLibrary.mesocycles.length === 0
+        && (library.routines.length > 0 || library.mesocycles.length > 0)
+        ? await saveTrainingLibrary({ routines: library.routines, mesocycles: library.mesocycles }).then(() => ({ routines: library.routines, mesocycles: library.mesocycles }))
+        : trainingLibrary;
       const migratedSessions = loadedSessions.filter(
         (session): session is PersistedWorkoutSession =>
-          'owner' in session && (session.owner === 'rodaja' || session.owner === 'brisas'),
+          'owner' in session && session.owner === user,
       );
       if (!active) return;
-      if (loadedCatalog) {
-        setExercises(loadedCatalog.exercises);
-        setVariants(loadedCatalog.variants);
-      }
-      setLocalRoutines(loadedRoutines);
+      catalogLibraryRef.current = library;
+      setDefinitions([]);
+      setExercises(loadedCatalogExercises);
+      setVariants([...new Set(loadedCatalogExercises.map((definition) => definition.variant))]);
+      setCatalogMuscleGroups(loadedCatalogMuscleGroups);
+      setLocalRoutines(training.routines);
       routinesLoadedRef.current = true;
-      mesocyclesRef.current = loadedMesocycles;
-      setMesocycles(loadedMesocycles);
+      mesocyclesRef.current = training.mesocycles;
+      setMesocycles(training.mesocycles);
       mesocyclesLoadedRef.current = true;
       const sortedSessions = migratedSessions.sort(
         (a, b) => Date.parse(b.completedAt) - Date.parse(a.completedAt),
       );
       sessionsRef.current = sortedSessions;
       setSessions(sortedSessions);
-      setAttempts(loadedAttempts);
+      setAttempts(library.attempts);
       setActiveWorkoutDraft(draft);
       setQuarantinedSessionCount(quarantine.length);
-      setHiddenSharedRoutineIds(loadedHiddenShareIds);
-      if (catalogError) throw catalogError;
       setIsLoading(false);
       setDataState('ready');
       setDataError(null);
@@ -243,41 +257,30 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
     return operation;
   };
 
-  // Merge accepted shares into routines array
-  const routines = useMemo(() => {
-    // Filter out previously-merged shared routines that are no longer accepted
-    const localOnly = localRoutines.filter(
-      (r) => !r.isShared || acceptedShares.some((s) => s.id === r.shareId),
-    );
-    // Add accepted shares as merged routines with isShared/shareId metadata
-    const merged: Routine[] = acceptedShares
-      .filter((s) => !hiddenSharedRoutineIds.includes(s.id))
-      .map((s) => ({
-        id: `shared-${s.id}`,
-        name: s.routine.name,
-        muscleGroups: s.routine.muscleGroups ?? [],
-        exercises: s.routine.exercises,
-        createdAt: new Date(s.createdAt).toISOString(),
-        isShared: true,
-        shareId: s.id,
-      }));
-    return [...localOnly, ...merged];
-  }, [localRoutines, acceptedShares, hiddenSharedRoutineIds]);
+  const routines = localRoutines;
+
+  const publishCatalogLibrary = (library: CatalogLibrary) => {
+    catalogLibraryRef.current = library;
+    setLocalRoutines(library.routines);
+    mesocyclesRef.current = library.mesocycles;
+    setMesocycles(library.mesocycles);
+    setAttempts(library.attempts);
+  };
+
+  const mutateCatalogLibrary = async (mutation: (library: CatalogLibrary) => CatalogLibrary) => {
+    const owner = activeUserRef.current;
+    if (!owner) throw new Error('Se requiere autenticación.');
+    const library = await updateCatalogLibrary(owner, mutation);
+    if (activeUserRef.current === owner) publishCatalogLibrary(library);
+    return library;
+  };
 
   const persistRoutines = (next: Routine[]) => {
-    assertRoutineMutationReady(routinesLoadedRef.current);
+    if (!routinesLoadedRef.current) throw new Error('Las rutinas aún no terminaron de cargar.');
     setLocalRoutines(next);
-    saveRoutines(next);
-  };
-
-  const publishExerciseCatalog = (catalog: ExerciseCatalog) => {
-    setExercises(catalog.exercises);
-    setVariants(catalog.variants);
-  };
-
-  const persistHiddenSharedRoutineIds = (next: string[]) => {
-    setHiddenSharedRoutineIds(next);
-    saveHiddenSharedRoutineIds(next);
+    const operation = trainingLibraryMutationQueueRef.current.then(() => saveTrainingRoutines(next));
+    trainingLibraryMutationQueueRef.current = operation.then(() => undefined, () => undefined);
+    void operation;
   };
 
   const enqueueMesocycleMutation = <T,>(
@@ -294,7 +297,9 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
       }
 
       const { next, result } = mutation(mesocyclesRef.current);
-      await saveMesocycles(owner, next);
+      const save = trainingLibraryMutationQueueRef.current.then(() => saveTrainingMesocycles(next));
+      trainingLibraryMutationQueueRef.current = save.then(() => undefined, () => undefined);
+      await save;
       if (activeUserRef.current === owner) {
         mesocyclesRef.current = next;
         setMesocycles(next);
@@ -307,42 +312,74 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
   };
 
   const addExercise = async (exercise: Omit<Exercise, 'id'>): Promise<Exercise> => {
-    const { catalog, result } = await addCatalogExercise(exercise);
-    publishExerciseCatalog(catalog);
-    return result;
+    const owner = activeUserRef.current;
+    if (!owner) throw new Error('Se requiere autenticación.');
+    const definition: ExerciseDefinition = {
+      ...exercise,
+      id: `custom:${owner}:${generateId()}`,
+      source: { kind: 'custom', owner, originId: generateId() },
+      loadMode: exercise.loadMode ?? 'external-load',
+      loadUnit: exercise.loadUnit ?? 'kg',
+    };
+    await mutateCatalogLibrary((library) => ({ ...library, definitions: [...library.definitions, definition] }));
+    return definitionAsExercise(definition);
   };
 
   const updateExercise = async (exercise: Exercise): Promise<void> => {
-    const { catalog } = await updateCatalogExercise(exercise);
-    publishExerciseCatalog(catalog);
+    await mutateCatalogLibrary((library) => {
+      const existing = library.definitions.find((definition) => definition.id === exercise.id);
+      if (!existing) throw new Error('El ejercicio ya no existe en el catálogo.');
+      if (existing.source.kind !== 'custom' || existing.source.owner !== library.owner) throw new Error('Las definiciones del sistema son inmutables. Edita la prescripción dentro de una rutina.');
+      return { ...library, definitions: library.definitions.map((definition) => definition.id === exercise.id ? {
+        ...existing,
+        name: exercise.name,
+        muscleGroups: exercise.muscleGroups,
+        loadMode: exercise.loadMode ?? existing.loadMode,
+        loadUnit: exercise.loadUnit ?? existing.loadUnit,
+        variant: exercise.variant,
+        defaultSets: exercise.defaultSets,
+      } : definition) };
+    });
   };
 
   const deleteExercise = async (id: string): Promise<void> => {
-    const { catalog } = await deleteCatalogExercise(id);
-    publishExerciseCatalog(catalog);
+    await deleteDefinition(id);
+  };
+
+  const deleteDefinition = async (id: string, replacementId?: string): Promise<void> => {
+    const owner = activeUserRef.current;
+    if (!owner) throw new Error('Se requiere autenticación.');
+    const library = await deleteCatalogLibraryDefinition(owner, id, replacementId);
+    if (activeUserRef.current === owner) publishCatalogLibrary(library);
+  };
+
+  const importCatalogContent = async (plan: CatalogImportPlan): Promise<CatalogImportResult> => {
+    const owner = activeUserRef.current;
+    if (!owner || plan.recipient !== owner) throw new Error('La importación debe pertenecer al perfil activo.');
+    const result = await commitCatalogLibraryImport(owner, plan);
+    if (activeUserRef.current === owner) publishCatalogLibrary(result.library);
+    return result;
   };
 
   const createVariant = async (name: string): Promise<ExerciseVariant> => {
-    const { catalog, result } = await createCatalogVariant(name);
-    publishExerciseCatalog(catalog);
-    return result;
+    throw new Error(`Las variantes son parte de definiciones inmutables. Crea un ejercicio personalizado con "${name}".`);
   };
 
   const renameVariant = async (
     source: ExerciseVariant,
     name: string,
   ): Promise<ExerciseVariant> => {
-    const { catalog, result } = await renameCatalogVariant(source, name);
-    publishExerciseCatalog(catalog);
-    return result;
+    throw new Error(`Las variantes son parte de definiciones inmutables; no se puede renombrar "${source}" a "${name}".`);
   };
 
   const deleteVariant = async (source: ExerciseVariant): Promise<void> => {
-    const { catalog } = await deleteCatalogVariant(source);
-    publishExerciseCatalog(catalog);
+    throw new Error(`Las variantes son parte de definiciones inmutables; no se puede eliminar "${source}".`);
   };
 
   const getExercise = (id: string) => exercises.find((exercise) => exercise.id === id);
+  const filterExercisesByMuscleGroup = (groupId: string, mode: CatalogParticipationMode) => (
+    filterCatalogExercises(groupId, mode)
+  );
 
   const addRoutine = (name: string, muscleGroups: MuscleGroup[]): Routine => {
     const routine: Routine = {
@@ -357,22 +394,10 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
   };
 
   const updateRoutine = (routine: Routine) => {
-    if (routine.isShared && routine.shareId) {
-      updateSharedRoutine(routine.shareId, routine);
-      return;
-    }
     persistRoutines(localRoutines.map((r) => (r.id === routine.id ? routine : r)));
   };
 
   const deleteRoutine = (id: string) => {
-    const routine = routines.find((r) => r.id === id);
-    if (routine?.isShared && routine.shareId) {
-      // Local-only removal: don't touch Firestore or partner's copy
-      if (!hiddenSharedRoutineIds.includes(routine.shareId)) {
-        persistHiddenSharedRoutineIds([...hiddenSharedRoutineIds, routine.shareId]);
-      }
-      return;
-    }
     persistRoutines(localRoutines.filter((r) => r.id !== id));
   };
 
@@ -434,9 +459,11 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
       result: T;
     },
   ): Promise<T> => {
+    const owner = activeUserRef.current;
+    if (!owner) return Promise.reject(new Error('Se requiere autenticación.'));
     const operation = sessionMutationQueueRef.current.then(async () => {
       const { next, result } = mutation(sessionsRef.current);
-      await saveSessions(next);
+      await saveSessions(next, owner);
       sessionsRef.current = next;
       setSessions(next);
       return result;
@@ -578,6 +605,27 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
     if (activeUserRef.current === owner) setAttempts(next);
   };
 
+  const ensureRecapPublicationKey = async (sessionId: string): Promise<string> => {
+    const attempt = attempts.find((item) => item.id === sessionId && item.owner === activeUserRef.current);
+    if (attempt) {
+      if (attempt.recapPublicationKey) return attempt.recapPublicationKey;
+      const recapPublicationKey = generateId();
+      const next = await updateAttempt(attempt.owner, { ...attempt, recapPublicationKey });
+      if (activeUserRef.current === attempt.owner) setAttempts(next);
+      return recapPublicationKey;
+    }
+    return enqueueSessionMutation((current) => {
+      const session = current.find((item) => item.id === sessionId && item.owner === activeUserRef.current);
+      if (!session) throw new Error('No se encontró la sesión de entrenamiento.');
+      if (session.recapPublicationKey) return { next: current, result: session.recapPublicationKey };
+      const recapPublicationKey = generateId();
+      return {
+        next: current.map((item) => item.id === sessionId ? { ...item, recapPublicationKey } : item),
+        result: recapPublicationKey,
+      };
+    });
+  };
+
   const activeAttempts = user ? attempts.filter((attempt) => attempt.owner === user) : [];
   const capturedIds = new Set(activeAttempts.map(({ id }) => id));
   const activeSessions = user
@@ -589,7 +637,10 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
     <DataContext.Provider
       value={{
         exercises,
+        definitions,
         variants,
+        catalogMuscleGroups,
+        filterCatalogExercises: filterExercisesByMuscleGroup,
         routines,
         mesocycles,
         sessions: activeSessions,
@@ -603,6 +654,8 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
         addExercise,
         updateExercise,
         deleteExercise,
+        deleteDefinition,
+        importCatalogContent,
         createVariant,
         renameVariant,
         deleteVariant,
@@ -621,6 +674,7 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
         deleteSession,
         addAttempt,
          editAttempt,
+         ensureRecapPublicationKey,
          activeWorkoutDraft,
          cancelActiveWorkout,
          startActiveWorkout,

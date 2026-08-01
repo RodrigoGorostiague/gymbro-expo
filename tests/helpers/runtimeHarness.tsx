@@ -61,6 +61,12 @@ function dataContextMock() {
   };
 }
 
+function authContextMock() {
+  return {
+    useAuth: () => ({ user: 'rodaja' }),
+  };
+}
+
 function appNavBarMock() {
   return {
   AppNavBar: ({ backLabel = '← Volver', onBack, trailing }: any) => React.createElement(
@@ -134,6 +140,8 @@ vi.mock('../../context/ThemeContext', themeContextMock);
 vi.mock('../../../context/ThemeContext', themeContextMock);
 vi.mock('../../context/DataContext', dataContextMock);
 vi.mock('../../../context/DataContext', dataContextMock);
+vi.mock('../../context/AuthContext', authContextMock);
+vi.mock('../../../context/AuthContext', authContextMock);
 vi.mock('../../components/AppNavBar', appNavBarMock);
 vi.mock('../../../components/AppNavBar', appNavBarMock);
 vi.mock('../../components/AppScreenHeader', appScreenHeaderMock);

@@ -10,10 +10,8 @@ import { matchesActiveWorkout } from '../utils/activeWorkoutReentry';
 import { __emitAppState } from './helpers/reactNativeStub';
 
 vi.mock('../context/AuthContext', () => ({ useAuth: () => ({ user: 'rodaja', welcomeMessage: null, setWelcomeMessage: vi.fn() }) }));
-vi.mock('../context/ShareContext', () => ({ useShare: () => ({ pendingShares: [], hasPendingShare: () => false }) }));
 vi.mock('../context/ShopContext', () => ({ useShop: () => ({ retryPendingRewards: vi.fn() }) }));
 vi.mock('../components/LogoutButton', () => ({ LogoutButton: () => null }));
-vi.mock('../components/ShareRoutineModal', () => ({ ShareRoutineModal: () => null }));
 
 const routineA = { id: 'routine-a', name: 'Upper', muscleGroups: ['pecho'], exercises: [], createdAt: '' };
 const routineB = { ...routineA, id: 'routine-b', name: 'Lower' };

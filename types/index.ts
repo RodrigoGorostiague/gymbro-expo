@@ -1,22 +1,9 @@
-export type UserProfile = 'rodaja' | 'brisas';
+export type UserId = string;
+export type LegacyAlias = 'rodaja' | 'brisas';
+// Firebase-only features still use these aliases until their own migration work unit.
+export type UserProfile = UserId;
 
-export type MuscleGroup =
-  | 'pecho'
-  | 'espalda'
-  | 'cuadriceps'
-  | 'femorales'
-  | 'gemelos'
-  | 'hombros'
-  | 'bíceps'
-  | 'tríceps'
-  | 'core'
-  | 'glúteos'
-  | 'trapecio'
-  | 'antebrazos'
-  | 'aductores'
-  | 'abductores'
-  | 'dorsales'
-  | 'fullBody';
+export type MuscleGroup = string;
 
 export type ExerciseVariant = string;
 
@@ -38,12 +25,63 @@ export interface Exercise {
   attribution?: MuscleAttribution;
   variant: ExerciseVariant;
   defaultSets: CatalogSet[];
+  catalog?: {
+    movementPattern: string | null;
+    equipment: string | null;
+  };
 }
 
 export interface ExerciseCatalog {
   version: 1;
   variants: ExerciseVariant[];
   exercises: Exercise[];
+}
+
+export type DefinitionSource =
+  | { kind: 'system' }
+  | { kind: 'custom'; owner: UserId; originId: string };
+
+export interface ExerciseDefinition {
+  id: string;
+  source: DefinitionSource;
+  name: string;
+  muscleGroups: MuscleGroup[];
+  loadMode: ExerciseLoadMode;
+  loadUnit: LoadUnit;
+  variant: ExerciseVariant;
+  defaultSets: CatalogSet[];
+}
+
+export interface ExerciseDefinitionSnapshot {
+  id: string;
+  name: string;
+  muscleGroups: MuscleGroup[];
+  loadMode: ExerciseLoadMode;
+  loadUnit: LoadUnit;
+  variant: ExerciseVariant;
+}
+
+export interface CatalogLibrary {
+  version: 2;
+  owner: UserId;
+  definitions: ExerciseDefinition[];
+  routines: Routine[];
+  mesocycles: Mesocycle[];
+  attempts: WorkoutAttempt[];
+}
+
+export interface CatalogImportPlan {
+  recipient: UserId;
+  definitions: ExerciseDefinition[];
+  routines: Routine[];
+  mesocycles: Mesocycle[];
+}
+
+export interface CatalogImportResult {
+  library: CatalogLibrary;
+  definitionReplacements: Record<string, string>;
+  routineReplacements: Record<string, string>;
+  mesocycleReplacements: Record<string, string>;
 }
 
 export interface RoutineSet extends CatalogSet {
@@ -55,6 +93,8 @@ export type ExerciseSet = RoutineSet;
 export interface RoutineExercise {
   id: string;
   catalogExerciseId?: string;
+  definitionId?: string;
+  definitionSnapshot?: ExerciseDefinitionSnapshot;
   name: string;
   muscleGroups: MuscleGroup[];
   loadMode?: ExerciseLoadMode;
@@ -157,6 +197,7 @@ export interface CompletedExercise {
   exerciseId: string;
   catalogExerciseId?: string;
   name: string;
+  muscleGroupIds?: MuscleGroup[];
   sets: CompletedSet[];
 }
 
@@ -168,12 +209,50 @@ export interface WorkoutSession {
   durationSeconds: number;
   restTimerSeconds: number;
   lineage?: WorkoutLineage;
+  recapPublicationKey?: string;
   exercises: CompletedExercise[];
+}
+
+export interface WorkoutRecapInput {
+  routineName: string;
+  completedAt: string;
+  durationSeconds: number;
+  exerciseCount: number;
+  metrics: Record<string, number>;
+  exercises: WorkoutRecapExercise[];
+  caption?: string;
+}
+
+export interface WorkoutRecapExercise {
+  name: string;
+  muscleGroupIds: MuscleGroup[];
+}
+
+export interface WorkoutRecap {
+  id: string;
+  authorAlias: string;
+  routineName: string;
+  completedAt: string;
+  durationSeconds: number;
+  exerciseCount: number;
+  muscleGroupIds: MuscleGroup[];
+  metrics: Record<string, number>;
+  caption: string | null;
+  createdAt: string;
+}
+
+export interface WorkoutRecapDetail extends WorkoutRecap {
+  exercises: WorkoutRecapExercise[];
+}
+
+export interface WorkoutRecapPage {
+  recaps: WorkoutRecap[];
+  nextCursor: string | null;
 }
 
 export interface ActiveWorkoutDraft {
   version: 1;
-  owner: UserProfile;
+  owner: UserId;
   attemptId: string;
   routineId: string;
   startedAtMs: number;
@@ -262,13 +341,14 @@ export interface WorkoutLineage {
 export interface WorkoutAttempt {
   readonly version: typeof WORKOUT_ATTEMPT_VERSION;
   readonly id: string;
-  readonly owner: UserProfile;
+  readonly owner: UserId;
   readonly routineId: string | null;
   readonly recordedRoutineName: string;
   readonly completedAt: string;
   readonly durationSeconds: number;
   readonly restTimerSeconds: number;
   readonly lineage?: WorkoutLineage;
+  readonly recapPublicationKey?: string;
   readonly exercises: readonly AttemptExerciseSnapshot[];
   readonly completion: AttemptCompletion;
   readonly reward: AttemptReward;

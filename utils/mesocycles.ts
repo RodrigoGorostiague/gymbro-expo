@@ -75,6 +75,28 @@ export function flattenMesocycleEntries(mesocycle: Mesocycle): MesocycleSequence
     })));
 }
 
+export function projectMesocycleRoutineIds(
+  mesocycles: readonly Mesocycle[],
+  routineReplacements: Readonly<Record<string, string>>,
+): Mesocycle[] {
+  return mesocycles.map((mesocycle) => ({
+    ...mesocycle,
+    weeks: mesocycle.weeks.map((week) => ({
+      ...week,
+      entries: week.entries.map((entry) => {
+        if (!isRoutine(entry)) return { ...entry };
+        const routineId = routineReplacements[entry.ref.routineId];
+        if (!routineId) throw new Error(`Imported mesocycle references unknown routine: ${entry.ref.routineId}`);
+        const { shareId: _shareId, ...localRef } = entry.ref;
+        return {
+          ...entry,
+          ref: { ...localRef, routineId, source: 'local' },
+        };
+      }),
+    })),
+  }));
+}
+
 export function deriveMesocycleDayGuidance(mesocycle: Mesocycle, today = new Date()): MesocycleDayGuidance {
   const start = parseLocalDate(mesocycle.startDate);
   const entries = flattenMesocycleEntries(mesocycle);

@@ -207,6 +207,7 @@ describe('workout attempt contracts', () => {
     expect(attempt.exercises[0]).toMatchObject({ exerciseId: 'catalog-exercise', recordedName: 'Press',
       attribution: { primary: 'pecho', secondary: ['tríceps'] } });
     expect(attempt.exercises[0].sets[1]).toMatchObject({ plan: { type: 'F' }, result: { performance: { mode: 'external-load', unit: 'kg', reps: 8, load: 20 } } });
+    expect(attemptToSession(attempt).exercises[0].muscleGroupIds).toEqual(['pecho', 'tríceps']);
     expect(getExerciseExposure(attempt.exercises[0].attribution!, attempt.exercises[0].sets)).toEqual({ pecho: 1, tríceps: 0.4 });
   });
 

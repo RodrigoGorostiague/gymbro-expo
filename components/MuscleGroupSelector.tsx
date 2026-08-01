@@ -1,8 +1,9 @@
-import React from 'react';
-import { StyleSheet, Text, View } from 'react-native';
-import { MUSCLE_GROUP_OPTIONS } from '../constants/muscleGroups';
+import React, { useState } from 'react';
+import { StyleSheet, Text, TextInput, View } from 'react-native';
+import { useData } from '../context/DataContext';
 import { useTheme } from '../context/ThemeContext';
 import { MuscleGroup } from '../types';
+import { isSelectableMuscleParent } from '../utils/catalogMuscleGroups';
 import { HapticPressable } from './HapticPressable';
 
 interface MuscleGroupSelectorProps {
@@ -12,17 +13,29 @@ interface MuscleGroupSelectorProps {
 
 export function MuscleGroupSelector({ value, onChange }: MuscleGroupSelectorProps) {
   const { theme } = useTheme();
+  const { catalogMuscleGroups = [] } = useData();
+  const [query, setQuery] = useState('');
+  const visibleGroups = catalogMuscleGroups.filter((group) => (
+    isSelectableMuscleParent(group) && group.displayName.toLocaleLowerCase('es').includes(query.trim().toLocaleLowerCase('es'))
+  ));
 
   return (
     <View style={styles.wrap}>
-      {MUSCLE_GROUP_OPTIONS.map((option) => {
-        const selected = value.includes(option.value);
+      <TextInput
+        value={query}
+        onChangeText={setQuery}
+        placeholder="Buscar grupo muscular"
+        placeholderTextColor={theme.textMuted}
+        style={[styles.search, { color: theme.text, borderColor: theme.glassBorder }]}
+      />
+      {visibleGroups.map((group) => {
+        const selected = value.includes(group.id);
         return (
           <HapticPressable
-            key={option.value}
+            key={group.id}
             onPress={() =>
               onChange(
-                selected ? value.filter((item) => item !== option.value) : [...value, option.value],
+                selected ? value.filter((item) => item !== group.id) : [...value, group.id],
               )
             }
             style={[
@@ -32,9 +45,9 @@ export function MuscleGroupSelector({ value, onChange }: MuscleGroupSelectorProp
                 borderColor: selected ? theme.primary : theme.glassBorder,
               },
             ]}
-          >
+            >
             <Text style={[styles.label, { color: selected ? theme.onPrimary : theme.text }]}>
-              {option.label}
+              {group.displayName}
             </Text>
           </HapticPressable>
         );
@@ -48,6 +61,13 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     flexWrap: 'wrap',
     gap: 10,
+  },
+  search: {
+    width: '100%',
+    borderWidth: 1,
+    borderRadius: 12,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
   },
   chip: {
     borderWidth: 1,

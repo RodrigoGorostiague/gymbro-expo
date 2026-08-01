@@ -1,9 +1,9 @@
 import { getShopTheme } from '../constants/shopThemes';
 import { THEMES } from '../constants/theme';
-import { AppTheme, UserProfile } from '../types';
+import { AppTheme, LegacyAlias } from '../types';
 
 export function resolveActiveTheme(
-  profile: UserProfile,
+  profile: LegacyAlias,
   equippedThemeId: string | null,
 ): AppTheme {
   if (!equippedThemeId) return THEMES[profile];
@@ -12,8 +12,8 @@ export function resolveActiveTheme(
 }
 
 export function resolveDualThemes(
-  equipped: Record<UserProfile, string | null>,
-): Record<UserProfile, AppTheme> {
+  equipped: Record<LegacyAlias, string | null>,
+): Record<LegacyAlias, AppTheme> {
   return {
     rodaja: resolveActiveTheme('rodaja', equipped.rodaja),
     brisas: resolveActiveTheme('brisas', equipped.brisas),
@@ -21,7 +21,7 @@ export function resolveDualThemes(
 }
 
 export function isDefaultProfileTheme(
-  profile: UserProfile,
+  profile: LegacyAlias,
   equippedThemeId: string | null,
 ): boolean {
   return equippedThemeId === null || equippedThemeId === `profile-${profile}`;

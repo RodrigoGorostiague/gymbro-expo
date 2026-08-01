@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { Alert, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Alert, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { router, useLocalSearchParams } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -20,6 +20,7 @@ import {
   MesocycleScheduleProjectionEntry,
 } from '../../utils/mesocycles';
 import { generateId } from '../../utils/storage';
+import { muscleGroupLabels } from '../../utils/catalogMuscleGroups';
 
 const routineRef = (routine: Routine) => ({
   routineId: routine.id,
@@ -31,7 +32,7 @@ const isRest = (entry: MesocycleEntry): entry is Extract<MesocycleEntry, { kind:
 
 export default function MesocycleDetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
-  const { getMesocycle, routines, attempts, updateMesocycle } = useData();
+  const { getMesocycle, routines, attempts, updateMesocycle, catalogMuscleGroups = [] } = useData();
   const { theme } = useTheme();
   const mesocycle = getMesocycle(id);
   const [draft, setDraft] = useState<Mesocycle | null>(mesocycle ? buildMesocycleDraft(mesocycle) : null);
@@ -90,6 +91,7 @@ export default function MesocycleDetailScreen() {
       theme={theme}
       open={openWeek === week.weekNumber}
       routines={available}
+      catalogMuscleGroups={catalogMuscleGroups}
       onOpen={() => setOpenWeek((current) => current === week.weekNumber ? null : week.weekNumber)}
       onAddRoutine={addRoutine}
       onAddRest={addRest}
@@ -100,19 +102,22 @@ export default function MesocycleDetailScreen() {
   </ScrollView></SafeAreaView></ThemeBackground>;
 }
 
-function WeekCard({ week, progress, scheduleByEntry, theme, open, routines, onOpen, onAddRoutine, onAddRest, onRemove, onCopy }: {
+function WeekCard({ week, progress, scheduleByEntry, theme, open, routines, catalogMuscleGroups, onOpen, onAddRoutine, onAddRest, onRemove, onCopy }: {
   week: Mesocycle['weeks'][number];
   progress: ReturnType<typeof deriveMesocycleAdherence>['weeks'][number];
   scheduleByEntry: Map<string, MesocycleScheduleProjectionEntry>;
-  theme: { text: string; textMuted: string; primary: string; glassBorder: string };
+  theme: { text: string; textMuted: string; primary: string; onPrimary: string; glassBorder: string; glass: string };
   open: boolean;
   routines: Routine[];
   onOpen: () => void;
   onAddRoutine: (weekNumber: number, routine: Routine) => void;
+  catalogMuscleGroups: { id: string; displayName: string; type: string; visibleInFilters: boolean }[];
   onAddRest: (weekNumber: number) => void;
   onRemove: (entryId: string) => void;
   onCopy: () => void;
 }) {
+  const [routineQuery, setRoutineQuery] = useState('');
+  const visibleRoutines = routines.filter((routine) => routine.name.toLocaleLowerCase('es').includes(routineQuery.trim().toLocaleLowerCase('es')));
   return <GlassCard style={styles.card}>
     <Text style={[styles.heading, { color: theme.text }]}>Semana {week.weekNumber}</Text>
     <Text style={{ color: theme.textMuted }}>Progreso: {progress.completedSessions}/{progress.plannedSessions} sesiones completadas</Text>
@@ -124,20 +129,25 @@ function WeekCard({ week, progress, scheduleByEntry, theme, open, routines, onOp
         <View style={styles.entryContent}>
           {date ? <Text style={[styles.dateLabel, { color: theme.primary }]}>{date.weekday} · {date.date}</Text> : null}
           <Text style={{ color: theme.text }}>{isRest(entry) ? `${index + 1}. Descanso` : `${index + 1}. ${entry.ref.routineName}`}</Text>
-          {isRest(entry) ? <Text style={{ color: theme.textMuted }}>Recuperación programada</Text> : unavailable ? <Text style={{ color: '#F5B041' }}>Rutina no disponible</Text> : <Text style={{ color: theme.textMuted }}>{projection?.kind === 'routine' ? `${projection.routine.muscleGroups.join(' · ')} · ${projection.routine.exerciseCount} ejercicios` : null}</Text>}
+          {isRest(entry) ? <Text style={{ color: theme.textMuted }}>Recuperación programada</Text> : unavailable ? <Text style={{ color: '#F5B041' }}>Rutina no disponible</Text> : <Text style={{ color: theme.textMuted }}>{projection?.kind === 'routine' ? `${muscleGroupLabels(catalogMuscleGroups, projection.routine.muscleGroups).join(' · ')} · ${projection.routine.exerciseCount} ejercicios` : null}</Text>}
         </View>
         <HapticPressable style={styles.removeAction} accessibilityRole="button" accessibilityLabel={`Quitar ${isRest(entry) ? 'día de descanso' : entry.ref.routineName} del plan`} accessibilityHint="Elimina esta entrada sin cambiar el orden de las demás." onPress={() => onRemove(entry.id)}><Ionicons name="trash-outline" size={18} color={theme.textMuted} /></HapticPressable>
       </View>;
     })}
     <View style={styles.actions}><GlassButton title="Agregar descanso" variant="secondary" disabled={week.entries.length >= 7} onPress={() => onAddRest(week.weekNumber)} /><GlassButton title={open ? 'Cerrar rutinas' : 'Agregar rutina'} variant="secondary" disabled={week.entries.length >= 7} onPress={onOpen} /></View>
-    {open ? routines.map((routine) => {
-      const selected = week.entries.some((entry) => !isRest(entry) && entry.ref.routineId === routine.id);
-      return <HapticPressable key={routine.id} accessibilityRole="button" accessibilityLabel={`Programar ${routine.name}`} accessibilityState={{ selected }} onPress={() => onAddRoutine(week.weekNumber, routine)} style={[styles.option, { borderColor: theme.glassBorder, backgroundColor: selected ? theme.primary : 'transparent' }]}><Text style={{ color: selected ? '#fff' : theme.primary }}>{routine.name}</Text></HapticPressable>;
-    }) : null}
+    {open ? <View style={styles.routinePicker}>
+      <Text style={[styles.pickerTitle, { color: theme.text }]}>Elegí una rutina</Text>
+      <TextInput value={routineQuery} onChangeText={setRoutineQuery} placeholder="Buscar rutina" placeholderTextColor={theme.textMuted} style={[styles.search, { color: theme.text, borderColor: theme.glassBorder }]} />
+      {visibleRoutines.length === 0 ? <Text style={{ color: theme.textMuted }}>No hay rutinas que coincidan.</Text> : visibleRoutines.map((routine) => {
+      const scheduledCount = week.entries.filter((entry) => !isRest(entry) && entry.ref.routineId === routine.id).length;
+      const selected = scheduledCount > 0;
+      const labels = muscleGroupLabels(catalogMuscleGroups, routine.muscleGroups);
+      return <HapticPressable key={routine.id} accessibilityRole="button" accessibilityLabel={selected ? `Agregar otra sesión de ${routine.name}` : `Programar ${routine.name}`} accessibilityState={{ selected }} onPress={() => onAddRoutine(week.weekNumber, routine)} style={[styles.option, { borderColor: selected ? theme.primary : theme.glassBorder, backgroundColor: selected ? theme.primary : theme.glass }]}><View style={{ flex: 1 }}><Text style={[styles.optionTitle, { color: selected ? theme.onPrimary : theme.text }]}>{routine.name}</Text><Text style={[styles.optionMeta, { color: selected ? theme.onPrimary : theme.textMuted }]}>{labels.join(' · ') || 'Sin grupos'} · {routine.exercises.length} ejercicios</Text></View>{selected ? <View style={[styles.occurrenceBadge, { backgroundColor: theme.onPrimary }]}><Text style={[styles.occurrenceText, { color: theme.primary }]}>{scheduledCount}</Text></View> : null}<Ionicons name="add-circle-outline" size={22} color={selected ? theme.onPrimary : theme.primary} /></HapticPressable>;
+    })}</View> : null}
     {week.weekNumber > 1 ? <GlassButton title="Copiar semana anterior" variant="secondary" onPress={onCopy} /> : null}
   </GlassCard>;
 }
 
 const styles = StyleSheet.create({
-  safe: { flex: 1, paddingHorizontal: 20, paddingTop: 8 }, scroll: { paddingBottom: 40 }, title: { fontSize: 26, fontWeight: '900', marginBottom: 8 }, card: { marginBottom: 14 }, heading: { fontSize: 18, fontWeight: '800' }, entry: { marginTop: 10, paddingTop: 10, borderTopWidth: 1, flexDirection: 'row', gap: 10 }, entryContent: { flex: 1, gap: 3 }, dateLabel: { fontSize: 12, fontWeight: '800', textTransform: 'capitalize' }, removeAction: { width: 36, height: 36, alignItems: 'center', justifyContent: 'center' }, actions: { gap: 8, marginTop: 12 }, option: { borderWidth: 1, borderRadius: 12, marginTop: 8, padding: 10 },
+  safe: { flex: 1, paddingHorizontal: 20, paddingTop: 8 }, scroll: { paddingBottom: 40 }, title: { fontSize: 26, fontWeight: '900', marginBottom: 8 }, card: { marginBottom: 14 }, heading: { fontSize: 18, fontWeight: '800' }, entry: { marginTop: 10, paddingTop: 10, borderTopWidth: 1, flexDirection: 'row', gap: 10 }, entryContent: { flex: 1, gap: 3 }, dateLabel: { fontSize: 12, fontWeight: '800', textTransform: 'capitalize' }, removeAction: { width: 36, height: 36, alignItems: 'center', justifyContent: 'center' }, actions: { gap: 8, marginTop: 12 }, routinePicker: { gap: 8, marginTop: 14 }, pickerTitle: { fontSize: 15, fontWeight: '800' }, search: { borderWidth: 1, borderRadius: 12, paddingHorizontal: 12, paddingVertical: 10 }, option: { borderWidth: 1, borderRadius: 14, padding: 12, flexDirection: 'row', alignItems: 'center', gap: 12 }, optionTitle: { fontSize: 15, fontWeight: '800' }, optionMeta: { fontSize: 12, marginTop: 3 }, occurrenceBadge: { minWidth: 22, height: 22, borderRadius: 11, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 6 }, occurrenceText: { fontSize: 12, fontWeight: '900' },
 });

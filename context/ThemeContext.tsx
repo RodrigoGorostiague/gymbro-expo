@@ -1,5 +1,5 @@
 import React, { createContext, useContext, useMemo } from 'react';
-import { AppTheme } from '../types';
+import { AppTheme, LegacyAlias } from '../types';
 import { getShopTheme } from '../constants/shopThemes';
 import { resolveActiveTheme, resolveDualThemes } from '../utils/theme';
 import { useAuth } from './AuthContext';
@@ -30,7 +30,7 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
     selfEquippedThemeId,
   } = useShop();
 
-  const profile = user ?? 'rodaja';
+  const profile: LegacyAlias = user === 'brisas' ? 'brisas' : 'rodaja';
   const activeId = previewThemeId ?? equippedThemeId;
   const theme = resolveActiveTheme(profile, activeId);
 

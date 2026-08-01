@@ -7,6 +7,7 @@ import Animated, {
   withSpring,
 } from 'react-native-reanimated';
 import { useAuth } from '../context/AuthContext';
+import { useSocial } from '../context/SocialContext';
 import { useTheme } from '../context/ThemeContext';
 
 interface AppScreenHeaderProps {
@@ -17,7 +18,8 @@ interface AppScreenHeaderProps {
 
 export function AppScreenHeader({ title, subtitle, trailing }: AppScreenHeaderProps) {
   const { theme } = useTheme();
-  const { user } = useAuth();
+  const { userEmail } = useAuth();
+  const { ownProfile } = useSocial();
   const enter = useSharedValue(0);
 
   useEffect(() => {
@@ -35,7 +37,7 @@ export function AppScreenHeader({ title, subtitle, trailing }: AppScreenHeaderPr
         <View style={styles.badgeRow}>
           <View style={[styles.badge, { backgroundColor: theme.glass, borderColor: theme.primary }]}>
             <View style={[styles.badgeDot, { backgroundColor: theme.primary }]} />
-            <Text style={[styles.badgeText, { color: theme.primary }]}>{user}</Text>
+            <Text style={[styles.badgeText, { color: theme.primary }]}>{ownProfile?.alias ?? userEmail ?? 'Atleta'}</Text>
           </View>
           <View style={[styles.badgeLine, { backgroundColor: theme.primary }]} />
         </View>
