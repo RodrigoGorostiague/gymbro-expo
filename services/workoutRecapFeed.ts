@@ -1,5 +1,7 @@
 import { CatalogImportPlan, Mesocycle, MesocycleEntry, Routine, WorkoutRecap, WorkoutRecapDetail, WorkoutRecapExercise, WorkoutRecapInput, WorkoutRecapPage, WorkoutRecapSharePayload, WorkoutSession } from '../types';
 import { supabase, supabaseConfigurationError } from './supabase';
+import { avatarIdOrDefault } from '../constants/avatars';
+import { canonicalMuscleGroups } from '../constants/muscleGroups';
 
 const PAGE_SIZE = 20;
 
@@ -13,6 +15,8 @@ function asRecap(row: unknown): WorkoutRecap {
   return {
     id: String(value.id),
     authorAlias: String(value.author_alias),
+    authorAvatarId: avatarIdOrDefault(value.author_avatar_id),
+    authorThemeId: typeof value.author_theme_id === 'string' ? value.author_theme_id : null,
     routineName: String(value.routine_name),
     completedAt: String(value.completed_at),
     durationSeconds: Number(value.duration_seconds),
@@ -31,26 +35,27 @@ function asSharePayload(value: unknown): WorkoutRecapSharePayload | null {
   if (!value || typeof value !== 'object') return null;
   const payload = value as WorkoutRecapSharePayload;
   const isRecord = (candidate: unknown): candidate is Record<string, unknown> => !!candidate && typeof candidate === 'object' && !Array.isArray(candidate);
-  const hasOnly = (candidate: Record<string, unknown>, keys: readonly string[]) => Object.keys(candidate).every((key) => keys.includes(key)) && keys.every((key) => key in candidate);
+  const hasOnly = (candidate: Record<string, unknown>, keys: readonly string[]) => Object.keys(candidate).every((key) => keys.includes(key));
+  const hasRequired = (candidate: Record<string, unknown>, keys: readonly string[]) => keys.every((key) => key in candidate);
   const validLabel = (candidate: unknown, max: number, required = true) => typeof candidate === 'string' && (required ? candidate.trim().length > 0 : true) && candidate.length <= max;
   const validMuscles = (candidate: unknown) => Array.isArray(candidate) && candidate.length >= 1 && candidate.length <= 32 && candidate.every((muscle) => validLabel(muscle, 120));
-  const validSet = (set: unknown) => isRecord(set) && hasOnly(set, ['tipo', 'weight', 'reps'])
+  const validSet = (set: unknown) => isRecord(set) && hasOnly(set, ['tipo', 'weight', 'reps']) && hasRequired(set, ['tipo', 'weight', 'reps'])
     && (set.tipo === 'C' || set.tipo === 'F' || (typeof set.tipo === 'number' && Number.isInteger(set.tipo) && set.tipo >= 0 && set.tipo <= 10))
     && typeof set.weight === 'number' && Number.isFinite(set.weight) && set.weight >= 0 && set.weight <= 10000
     && typeof set.reps === 'number' && Number.isInteger(set.reps) && set.reps >= 0 && set.reps <= 1000;
   const validRoutine = (routine: unknown): routine is NonNullable<WorkoutRecapSharePayload['routine']> => {
     if (!routine || typeof routine !== 'object') return false;
     const value = routine as Record<string, unknown>;
-    return hasOnly(value, ['name', 'muscleGroups', 'exercises']) && validLabel(value.name, 120) && validMuscles(value.muscleGroups) && Array.isArray(value.exercises) && value.exercises.length >= 1 && value.exercises.length <= 100
-      && value.exercises.every((exercise) => isRecord(exercise) && hasOnly(exercise, ['name', 'muscleGroups', 'loadMode', 'loadUnit', 'variant', 'sets']) && validLabel(exercise.name, 120) && validMuscles(exercise.muscleGroups) && (exercise.loadMode === 'external-load' || exercise.loadMode === 'bodyweight' || exercise.loadMode === 'assisted') && (exercise.loadUnit === 'kg' || exercise.loadUnit === 'lb') && validLabel(exercise.variant, 120) && Array.isArray(exercise.sets) && exercise.sets.length >= 1 && exercise.sets.length <= 100 && exercise.sets.every(validSet));
+    return hasOnly(value, ['name', 'muscleGroups', 'exercises']) && hasRequired(value, ['name', 'muscleGroups', 'exercises']) && validLabel(value.name, 120) && validMuscles(value.muscleGroups) && Array.isArray(value.exercises) && value.exercises.length >= 1 && value.exercises.length <= 100
+      && value.exercises.every((exercise) => isRecord(exercise) && hasOnly(exercise, ['name', 'muscleGroups', 'loadMode', 'loadUnit', 'variant', 'sets']) && hasRequired(exercise, ['name', 'muscleGroups', 'loadMode', 'loadUnit', 'variant', 'sets']) && validLabel(exercise.name, 120) && validMuscles(exercise.muscleGroups) && (exercise.loadMode === 'external-load' || exercise.loadMode === 'bodyweight' || exercise.loadMode === 'assisted') && (exercise.loadUnit === 'kg' || exercise.loadUnit === 'lb') && validLabel(exercise.variant, 120) && Array.isArray(exercise.sets) && exercise.sets.length >= 1 && exercise.sets.length <= 100 && exercise.sets.every(validSet));
   };
   const validMesocycle = (mesocycle: unknown) => {
-    if (!isRecord(mesocycle) || !hasOnly(mesocycle, ['name', 'goal', 'durationWeeks', 'weeks', 'routines']) || !validLabel(mesocycle.name, 120) || !validLabel(mesocycle.goal, 500, false) || typeof mesocycle.durationWeeks !== 'number' || !Number.isInteger(mesocycle.durationWeeks) || mesocycle.durationWeeks < 1 || mesocycle.durationWeeks > 52 || !Array.isArray(mesocycle.routines) || mesocycle.routines.length < 1 || mesocycle.routines.length > 100 || !mesocycle.routines.every(validRoutine) || !Array.isArray(mesocycle.weeks) || mesocycle.weeks.length < 1 || mesocycle.weeks.length > 52) return false;
+    if (!isRecord(mesocycle) || !hasOnly(mesocycle, ['name', 'goal', 'durationWeeks', 'weeks', 'routines']) || !hasRequired(mesocycle, ['name', 'goal', 'durationWeeks', 'weeks', 'routines']) || !validLabel(mesocycle.name, 120) || !validLabel(mesocycle.goal, 500, false) || typeof mesocycle.durationWeeks !== 'number' || !Number.isInteger(mesocycle.durationWeeks) || mesocycle.durationWeeks < 1 || mesocycle.durationWeeks > 52 || !Array.isArray(mesocycle.routines) || mesocycle.routines.length < 1 || mesocycle.routines.length > 100 || !mesocycle.routines.every(validRoutine) || !Array.isArray(mesocycle.weeks) || mesocycle.weeks.length < 1 || mesocycle.weeks.length > 52) return false;
     const routines = mesocycle.routines as unknown[];
-    return mesocycle.weeks.every((week) => Array.isArray(week) && week.length <= 7 && week.every((entry) => entry === null || (isRecord(entry) && hasOnly(entry, ['routineIndex', 'dayLabel']) && typeof entry.routineIndex === 'number' && Number.isInteger(entry.routineIndex) && entry.routineIndex >= 0 && entry.routineIndex < routines.length && (entry.dayLabel === undefined || validLabel(entry.dayLabel, 120, false)))));
+    return mesocycle.weeks.every((week) => Array.isArray(week) && week.length <= 7 && week.every((entry) => entry === null || (isRecord(entry) && hasOnly(entry, ['routineIndex', 'dayLabel']) && hasRequired(entry, ['routineIndex']) && typeof entry.routineIndex === 'number' && Number.isInteger(entry.routineIndex) && entry.routineIndex >= 0 && entry.routineIndex < routines.length && (entry.dayLabel === undefined || validLabel(entry.dayLabel, 120, false)))));
   };
-  const validPerformedSets = (performances: unknown) => Array.isArray(performances) && performances.length <= 100 && performances.every((performance) => isRecord(performance) && hasOnly(performance, ['exerciseIndex', 'sets']) && typeof performance.exerciseIndex === 'number' && Number.isInteger(performance.exerciseIndex) && performance.exerciseIndex >= 0 && performance.exerciseIndex <= 99 && Array.isArray(performance.sets) && performance.sets.length <= 100 && performance.sets.every((set) => isRecord(set) && hasOnly(set, ['weight', 'reps', 'completed']) && typeof set.weight === 'number' && Number.isFinite(set.weight) && set.weight >= 0 && set.weight <= 10000 && typeof set.reps === 'number' && Number.isInteger(set.reps) && set.reps >= 0 && set.reps <= 1000 && typeof set.completed === 'boolean'));
-  if (!hasOnly(payload as unknown as Record<string, unknown>, ['version', 'routine', 'mesocycle', 'performedSets']) || payload.version !== 1 || (payload.routine !== undefined && !validRoutine(payload.routine))) return null;
+  const validPerformedSets = (performances: unknown) => Array.isArray(performances) && performances.length <= 100 && performances.every((performance) => isRecord(performance) && hasOnly(performance, ['exerciseIndex', 'sets']) && hasRequired(performance, ['exerciseIndex', 'sets']) && typeof performance.exerciseIndex === 'number' && Number.isInteger(performance.exerciseIndex) && performance.exerciseIndex >= 0 && performance.exerciseIndex <= 99 && Array.isArray(performance.sets) && performance.sets.length <= 100 && performance.sets.every((set) => isRecord(set) && hasOnly(set, ['weight', 'reps', 'completed']) && hasRequired(set, ['weight', 'reps', 'completed']) && typeof set.weight === 'number' && Number.isFinite(set.weight) && set.weight >= 0 && set.weight <= 10000 && typeof set.reps === 'number' && Number.isInteger(set.reps) && set.reps >= 0 && set.reps <= 1000 && typeof set.completed === 'boolean'));
+  if (!hasOnly(payload as unknown as Record<string, unknown>, ['version', 'routine', 'mesocycle', 'performedSets']) || !hasRequired(payload as unknown as Record<string, unknown>, ['version']) || payload.version !== 1 || (payload.routine !== undefined && !validRoutine(payload.routine))) return null;
   if (payload.mesocycle !== undefined && (!payload.routine || !validMesocycle(payload.mesocycle))) return null;
   if (payload.performedSets !== undefined && !validPerformedSets(payload.performedSets)) return null;
   return payload;
@@ -59,9 +64,9 @@ function asSharePayload(value: unknown): WorkoutRecapSharePayload | null {
 function routinePayload(routine: Routine): NonNullable<WorkoutRecapSharePayload['routine']> {
   return {
     name: routine.name.trim(),
-    muscleGroups: [...routine.muscleGroups],
+    muscleGroups: canonicalMuscleGroups(routine.muscleGroups),
     exercises: routine.exercises.map((exercise) => ({
-      name: exercise.name.trim(), muscleGroups: [...exercise.muscleGroups],
+      name: exercise.name.trim(), muscleGroups: canonicalMuscleGroups(exercise.muscleGroups),
       loadMode: exercise.loadMode ?? exercise.definitionSnapshot?.loadMode ?? 'external-load',
       loadUnit: exercise.loadUnit ?? exercise.definitionSnapshot?.loadUnit ?? 'kg',
       variant: exercise.variant,
@@ -125,6 +130,14 @@ function asExercises(value: unknown): WorkoutRecapExercise[] {
       muscleGroupIds: Array.isArray(row.muscle_group_ids)
         ? row.muscle_group_ids.filter((id): id is string => typeof id === 'string')
         : [],
+      sets: Array.isArray(row.sets) ? row.sets.flatMap((set) => {
+        if (!set || typeof set !== 'object') return [];
+        const value = set as Record<string, unknown>;
+        if (typeof value.weight !== 'number' || !Number.isFinite(value.weight)
+          || typeof value.reps !== 'number' || !Number.isInteger(value.reps)
+          || typeof value.completed !== 'boolean') return [];
+        return [{ weight: value.weight, reps: value.reps, completed: value.completed }];
+      }) : [],
     }];
   });
 }
@@ -138,7 +151,11 @@ export function recapInputFromSession(session: WorkoutSession, caption?: string)
     if (!exercise.sets.some((set) => set.completed)) return [];
     const name = exercise.name.trim();
     if (!name) return [];
-    return [{ name, muscleGroupIds: [...new Set(exercise.muscleGroupIds ?? [])].sort() }];
+    return [{
+      name,
+      muscleGroupIds: [...new Set(exercise.muscleGroupIds ?? [])].sort(),
+      sets: exercise.sets.map(({ weight, reps, completed }) => ({ weight, reps, completed })),
+    }];
   });
   const volume = session.exercises.reduce(
     (total, exercise) => total + exercise.sets.reduce(
@@ -169,7 +186,11 @@ export async function createWorkoutRecap(input: WorkoutRecapInput, publicationKe
       duration_seconds: input.durationSeconds,
       exercise_count: input.exerciseCount,
       metrics: input.metrics,
-      exercise_details: { exercises: input.exercises.map((exercise) => ({ name: exercise.name, muscle_group_ids: exercise.muscleGroupIds })) },
+      exercise_details: { exercises: input.exercises.map((exercise) => ({
+        name: exercise.name,
+        muscle_group_ids: exercise.muscleGroupIds,
+        sets: exercise.sets,
+      })) },
       publication_key: publicationKey,
       ...(input.caption ? { caption: input.caption } : {}),
       ...(input.sharePayload ? { share_payload: input.sharePayload } : {}),

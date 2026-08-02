@@ -60,7 +60,7 @@ describe('social graph client boundary', () => {
 
     expect(normalizeAliasPrefix('  JÓSE  ')).toBe('jose');
     await expect(searchProfiles('  JÓSE  ', 'cursor-1')).resolves.toEqual({
-      profiles: [{ uid: 'member-1', alias: 'José', categories: { style: 'powerlifting' }, relationshipStatus: 'partner' }],
+      profiles: [{ uid: 'member-1', alias: 'José', avatarId: 'capybara-athlete', categories: { style: 'powerlifting' }, relationshipStatus: 'partner' }],
       nextCursor: 'cursor-2',
     });
     await getDiscoveryPage();
@@ -99,10 +99,10 @@ describe('social graph client boundary', () => {
       : undefined);
     client.auth.getUser.mockResolvedValue({ data: { user: { id: 'member-1' } }, error: null });
 
-    await expect(getOwnProfile()).resolves.toEqual({ uid: 'member-1', alias: 'Bro', categories: {}, categoryVisibility: {}, autoShareCompletedWorkouts: true, shareRoutineTemplate: true, shareMesocycleTemplate: true, sharePerformedSetDetails: true });
+    await expect(getOwnProfile()).resolves.toEqual({ uid: 'member-1', alias: 'Bro', avatarId: 'capybara-athlete', categories: {}, categoryVisibility: {}, autoShareCompletedWorkouts: true, shareRoutineTemplate: true, shareMesocycleTemplate: true, sharePerformedSetDetails: true });
     await saveOwnProfile({ alias: 'Bro', categories: {}, categoryVisibility: {}, autoShareCompletedWorkouts: false });
     expect(upsert).toHaveBeenCalledWith({
-      id: 'member-1', alias: 'Bro', categories: {}, category_visibility: {}, auto_share_completed_workouts: false, share_routine_template: true, share_mesocycle_template: true, share_performed_set_details: true,
+      id: 'member-1', alias: 'Bro', avatar_id: 'capybara-athlete', categories: {}, category_visibility: {}, auto_share_completed_workouts: false, share_routine_template: true, share_mesocycle_template: true, share_performed_set_details: true,
     });
   });
 
@@ -117,7 +117,7 @@ describe('social graph client boundary', () => {
       : undefined);
 
     await expect(getOwnProfile()).resolves.toEqual({
-      uid: 'member-1', alias: 'Bro', categories: { legacy: 'keep' }, categoryVisibility: { legacy: false },
+      uid: 'member-1', alias: 'Bro', avatarId: 'capybara-athlete', categories: { legacy: 'keep' }, categoryVisibility: { legacy: false },
       autoShareCompletedWorkouts: false, shareRoutineTemplate: true, shareMesocycleTemplate: true, sharePerformedSetDetails: false,
     });
   });

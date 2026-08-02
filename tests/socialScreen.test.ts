@@ -44,6 +44,14 @@ vi.mock('../context/ThemeContext', () => ({
   useTheme: () => ({ theme: { text: '#111', textMuted: '#666', primary: '#00f', success: '#0a0' } }),
 }));
 vi.mock('../components/AppScreenHeader', () => ({ AppScreenHeader: () => null }));
+vi.mock('../components/ProfileAvatar', async () => {
+  const ReactModule = await import('react');
+  return { ProfileAvatar: (props: Record<string, unknown>) => ReactModule.createElement('ProfileAvatar', props) };
+});
+vi.mock('expo-linear-gradient', async () => {
+  const ReactModule = await import('react');
+  return { LinearGradient: ({ children, ...props }: { children?: React.ReactNode } & Record<string, unknown>) => ReactModule.createElement('LinearGradient', props, children) };
+});
 vi.mock('../components/AppNavBar', () => ({ AppNavBar: () => null }));
 vi.mock('../components/HapticPressable', async () => {
   const ReactModule = await import('react');
@@ -67,6 +75,7 @@ vi.mock('../components/UI', async () => {
 import SocialScreen from '../app/social/index';
 import ProfileScreen from '../app/profile/index';
 import RequestsScreen from '../app/community/requests';
+import CommunityFeedScreen from '../app/community/feed';
 
 describe('Community feed', () => {
   beforeEach(() => {
@@ -86,7 +95,7 @@ describe('Community feed', () => {
     workoutData.sessions = [];
   });
 
-  test('shows manual recap controls when automatic sharing is disabled', async () => {
+  test('does not expose manual publishing when automatic sharing is disabled', async () => {
     social.ownProfile.autoShareCompletedWorkouts = false;
     workoutData.sessions = [{
       id: 'session-1', routineId: 'routine-1', routineName: 'Upper', completedAt: '2026-08-01T10:00:00Z',
@@ -96,8 +105,8 @@ describe('Community feed', () => {
 
     await act(async () => { tree = TestRenderer.create(React.createElement(SocialScreen)); });
 
-    expect(tree!.root.findAll((node) => String(node.type) === 'GlassButton' && node.props.title === 'Compartir: Upper')).toHaveLength(1);
-    expect(tree!.root.findAll((node) => String(node.type) === 'GlassButton' && node.props.title === 'Publicar resumen')).toHaveLength(1);
+    expect(tree!.root.findAll((node) => String(node.type) === 'GlassButton' && String(node.props.title).includes('Compartir:'))).toHaveLength(0);
+    expect(tree!.root.findAll((node) => String(node.type) === 'GlassButton' && node.props.title === 'Publicar resumen')).toHaveLength(0);
   });
 
   test('renders own recaps without a feature flag or accepted connections', async () => {
@@ -114,8 +123,25 @@ describe('Community feed', () => {
 
     expect(social.getWorkoutRecaps).toHaveBeenCalled();
     expect(tree!.root.findAll((node) => String(node.type) === 'Text').map((node) => node.children.join(''))).toEqual(expect.arrayContaining(['Feed', 'Upper']));
-    expect(tree!.root.findAll((node) => String(node.type) === 'GlassButton' && node.props.title === 'Eliminar')).toHaveLength(1);
-    expect(tree!.root.findAll((node) => String(node.type) === 'GlassButton' && node.props.title === 'Ver detalle')).toHaveLength(1);
+    expect(tree!.root.findAll((node) => String(node.type) === 'GlassButton' && node.props.title === 'Eliminar publicación')).toHaveLength(1);
+    expect(tree!.root.findAll((node) => String(node.type) === 'Text').map((node) => node.children.join(''))).toContain('Ver entrenamiento completo');
+  });
+
+  test('renders author avatar and the author theme mix on each recap', async () => {
+    social.getWorkoutRecaps.mockResolvedValue({
+      recaps: [{
+        id: 'recap-presentation', authorAlias: 'Brisas', authorAvatarId: 'capybara-mark', authorThemeId: 'profile-brisas', routineName: 'Upper', completedAt: '2026-08-01T10:00:00Z',
+        durationSeconds: 600, exerciseCount: 3, muscleGroupIds: [], metrics: {}, caption: null, createdAt: '2026-08-01T10:00:00Z', templateAvailable: false, mesocycleAvailable: false, isAuthor: false,
+      }],
+      nextCursor: null,
+    });
+    let tree: TestRenderer.ReactTestRenderer;
+
+    await act(async () => { tree = TestRenderer.create(React.createElement(CommunityFeedScreen)); });
+
+    expect(tree!.root.find((node) => String(node.type) === 'ProfileAvatar').props.avatarId).toBe('capybara-mark');
+    expect(tree!.root.find((node) => String(node.type) === 'LinearGradient').props.colors).toEqual(['#D63384', '#FF85C0', '#9B59B6']);
+    expect(tree!.root.findAll((node) => String(node.type) === 'Text').map((node) => node.children.join(''))).toContain('Brisas');
   });
 
   test('hides manual recap controls while automatic sharing succeeds', async () => {
@@ -131,7 +157,7 @@ describe('Community feed', () => {
     expect(tree!.root.findAll((node) => String(node.type) === 'GlassButton' && node.props.title === 'Publicar resumen')).toHaveLength(0);
   });
 
-  test('shows recovery controls only for failed automatic shares', async () => {
+  test('does not expose recovery controls for failed automatic shares', async () => {
     workoutData.sessions = [{
       id: 'session-1', routineId: 'routine-1', routineName: 'Upper', completedAt: '2026-08-01T10:00:00Z',
       durationSeconds: 600, restTimerSeconds: 0, exercises: [],
@@ -141,8 +167,8 @@ describe('Community feed', () => {
 
     await act(async () => { tree = TestRenderer.create(React.createElement(SocialScreen)); });
 
-    expect(tree!.root.findAll((node) => String(node.type) === 'GlassButton' && node.props.title === 'Compartir: Upper')).toHaveLength(1);
-    expect(tree!.root.findAll((node) => String(node.type) === 'GlassButton' && node.props.title === 'Publicar resumen')).toHaveLength(1);
+    expect(tree!.root.findAll((node) => String(node.type) === 'GlassButton' && String(node.props.title).includes('Compartir:'))).toHaveLength(0);
+    expect(tree!.root.findAll((node) => String(node.type) === 'GlassButton' && node.props.title === 'Publicar resumen')).toHaveLength(0);
   });
 
   test('keeps self identity and blocked-user access in Profile, outside the feed', async () => {
@@ -151,6 +177,16 @@ describe('Community feed', () => {
 
     expect(tree!.root.findAll((node) => String(node.type) === 'GlassButton' && node.props.title === 'Usuarios bloqueados')).toHaveLength(1);
     expect(tree!.root.findAll((node) => String(node.type) === 'Text').map((node) => node.children.join(''))).not.toContain('Entrenamientos compartidos');
+  });
+
+  test('selects Capigirl as the next persisted profile avatar', async () => {
+    let tree: TestRenderer.ReactTestRenderer;
+    await act(async () => { tree = TestRenderer.create(React.createElement(ProfileScreen)); });
+    await act(async () => { tree!.root.find((node) => String(node.type) === 'HapticPressable' && node.props.accessibilityLabel === 'Editar avatar').props.onPress(); });
+    await act(async () => { tree!.root.find((node) => String(node.type) === 'HapticPressable' && node.props.accessibilityLabel === 'Capigirl atleta').props.onPress(); });
+    await act(async () => { tree!.root.find((node) => String(node.type) === 'GlassButton' && node.props.title === 'Guardar perfil').props.onPress(); });
+
+    expect(social.saveProfile).toHaveBeenCalledWith(expect.objectContaining({ avatarId: 'capigirl' }));
   });
 
   test('renders every profile switch with safe defaults for a legacy profile missing sharing fields', async () => {
@@ -236,6 +272,7 @@ describe('Community feed', () => {
 
     expect(social.saveProfile).toHaveBeenCalledWith({
       alias: 'Blocker',
+      avatarId: 'capybara-athlete',
       categories: {},
       categoryVisibility: {},
       autoShareCompletedWorkouts: true,

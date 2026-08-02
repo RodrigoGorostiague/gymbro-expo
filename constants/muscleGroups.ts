@@ -28,3 +28,21 @@ export const CANONICAL_MUSCLE_GROUP_IDS = MUSCLE_GROUP_OPTIONS.map(({ value }) =
 export function isCanonicalMuscleGroup(value: unknown): value is MuscleGroup {
   return typeof value === 'string' && CANONICAL_MUSCLE_GROUP_IDS.includes(value as MuscleGroup);
 }
+
+function normalizedMuscleGroupName(value: string): string {
+  return value.normalize('NFD').replace(/\p{Diacritic}/gu, '').trim().replace(/\s+/gu, ' ').toLocaleLowerCase('en-US');
+}
+
+const MUSCLE_GROUP_BY_NORMALIZED_NAME = new Map(
+  MUSCLE_GROUP_OPTIONS.flatMap(({ value, label }) => [
+    [normalizedMuscleGroupName(value), value],
+    [normalizedMuscleGroupName(label), value],
+  ]),
+);
+
+export function canonicalMuscleGroups(values: readonly unknown[]): MuscleGroup[] {
+  const groups = values.flatMap((value) => typeof value === 'string'
+    ? [MUSCLE_GROUP_BY_NORMALIZED_NAME.get(normalizedMuscleGroupName(value))]
+    : []).filter((value): value is MuscleGroup => value !== undefined);
+  return [...new Set(groups.length ? groups : ['fullBody'])];
+}

@@ -8,6 +8,7 @@ import { GlassButton, GlassInput } from '../../components/UI';
 import { useSocial } from '../../context/SocialContext';
 import { useTheme } from '../../context/ThemeContext';
 import { PublicProfile } from '../../services/socialGraph';
+import { ProfileAvatar } from '../../components/ProfileAvatar';
 
 export default function DiscoverScreen() {
   const { theme } = useTheme(); const { discover, search, realtimeRevision } = useSocial();
@@ -21,7 +22,7 @@ export default function DiscoverScreen() {
   useFocusEffect(useCallback(() => { void load(); }, [load]));
   useEffect(() => { if (realtimeRevision > 0) void load(); }, [load, realtimeRevision]);
   return <ThemeBackground><SafeAreaView style={styles.safe}><ScrollView contentContainerStyle={styles.scroll} keyboardShouldPersistTaps="handled"><AppNavBar onBack={() => router.back()} /><Text accessibilityRole="header" style={[styles.title, { color: theme.text }]}>Explorar atletas</Text><Text style={{ color: theme.textMuted }}>Buscá por alias o descubrí nuevas conexiones.</Text><GlassInput testID="alias-search" placeholder="Buscar por alias" value={query} onChangeText={setQuery} autoCapitalize="none" style={styles.input} />
-    {profiles.length ? profiles.map((profile) => <GlassCard key={profile.uid} style={styles.card}><View style={styles.copy}><Text style={[styles.alias, { color: theme.text }]}>{profile.alias}</Text><Text style={{ color: theme.textMuted }}>{Object.values(profile.categories).join(' · ') || 'Perfil público'}</Text></View><GlassButton title="Ver" variant="secondary" onPress={() => router.push({ pathname: '/social/[uid]', params: { uid: profile.uid } })} /></GlassCard>) : !loading ? <GlassCard><Text style={{ color: theme.textMuted }}>{query.trim() ? 'No encontramos atletas con ese alias.' : 'Todavía no hay atletas para descubrir.'}</Text></GlassCard> : null}
+    {profiles.length ? profiles.map((profile) => <GlassCard key={profile.uid} style={styles.card}><ProfileAvatar avatarId={profile.avatarId} borderColor={theme.primary} /><View style={styles.copy}><Text style={[styles.alias, { color: theme.text }]}>{profile.alias}</Text><Text style={{ color: theme.textMuted }}>{Object.values(profile.categories).join(' · ') || 'Perfil público'}</Text></View><GlassButton title="Ver" variant="secondary" onPress={() => router.push({ pathname: '/social/[uid]', params: { uid: profile.uid } })} /></GlassCard>) : !loading ? <GlassCard><Text style={{ color: theme.textMuted }}>{query.trim() ? 'No encontramos atletas con ese alias.' : 'Todavía no hay atletas para descubrir.'}</Text></GlassCard> : null}
     <GlassButton title={loading ? 'Cargando…' : cursor ? 'Ver más' : query.trim() ? 'Buscar' : 'Actualizar'} disabled={loading} variant="secondary" onPress={() => void load(cursor, !!cursor)} />
   </ScrollView></SafeAreaView></ThemeBackground>;
 }

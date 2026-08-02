@@ -22,13 +22,13 @@ const mesocycle: WorkoutSession = {
 describe('automatic workout recap sharing', () => {
   beforeEach(() => vi.clearAllMocks());
 
-  test('publishes the same reduced recap for standalone and mesocycle completions', async () => {
+  test('publishes performed sets for standalone and mesocycle completions', async () => {
     client.rpc.mockResolvedValue({ data: 'recap-id', error: null });
 
     await expect(publishAutomaticWorkoutRecaps([standalone, mesocycle], true)).resolves.toEqual([]);
     expect(client.rpc).toHaveBeenCalledTimes(2);
     expect(client.rpc).toHaveBeenNthCalledWith(1, 'create_workout_recap', {
-      input: { routine_name: 'Upper', completed_at: '2026-08-01T10:00:00Z', duration_seconds: 1800, exercise_count: 1, metrics: { volume: 640 }, exercise_details: { exercises: [{ name: 'Bench', muscle_group_ids: ['pecho'] }] }, publication_key: 'opaque-standalone-key' },
+      input: { routine_name: 'Upper', completed_at: '2026-08-01T10:00:00Z', duration_seconds: 1800, exercise_count: 1, metrics: { volume: 640 }, exercise_details: { exercises: [{ name: 'Bench', muscle_group_ids: ['pecho'], sets: [{ weight: 80, reps: 8, completed: true }] }] }, publication_key: 'opaque-standalone-key' },
     });
     expect(JSON.stringify(recapInputFromSession(mesocycle))).not.toContain('local-mesocycle-id');
     expect(JSON.stringify(recapInputFromSession(mesocycle))).not.toContain('local-plan-id');

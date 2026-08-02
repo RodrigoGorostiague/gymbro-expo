@@ -11,7 +11,8 @@ const client = vi.hoisted(() => ({
 
 vi.mock('../services/supabase', () => ({ supabase: client, supabaseConfigurationError: null }));
 
-import { createWorkoutRecap, getWorkoutRecapDetail, getWorkoutRecapPage, recapImportPlan, recapInputFromSession, subscribeToWorkoutRecapChanges } from '../services/workoutRecapFeed';
+import { createWorkoutRecap, getWorkoutRecapDetail, getWorkoutRecapPage, recapImportPlan, recapInputFromSession, recapSharePayload, subscribeToWorkoutRecapChanges } from '../services/workoutRecapFeed';
+import { createCatalogLibrary, planRecipientImport } from '../utils/catalogLibrary';
 
 const session: WorkoutSession = {
   id: 'local-session', routineId: 'local-routine', routineName: 'Upper', completedAt: '2026-08-01T10:00:00Z', durationSeconds: 3600, restTimerSeconds: 0,
@@ -19,9 +20,9 @@ const session: WorkoutSession = {
 };
 
 describe('workout recap feed boundary', () => {
-  test('maps completed sessions to an allowlisted immutable summary only', () => {
+  test('maps completed sessions to immutable exercise and set results without local identifiers', () => {
     expect(recapInputFromSession(session, '  Nice work  ')).toEqual({
-      routineName: 'Upper', completedAt: '2026-08-01T10:00:00Z', durationSeconds: 3600, exerciseCount: 1, metrics: { volume: 500 }, exercises: [{ name: 'Bench', muscleGroupIds: ['pecho', 'tríceps'] }], caption: 'Nice work',
+      routineName: 'Upper', completedAt: '2026-08-01T10:00:00Z', durationSeconds: 3600, exerciseCount: 1, metrics: { volume: 500 }, exercises: [{ name: 'Bench', muscleGroupIds: ['pecho', 'tríceps'], sets: [{ weight: 100, reps: 5, completed: true }] }], caption: 'Nice work',
     });
     expect(JSON.stringify(recapInputFromSession(session))).not.toContain('local-session');
     expect(JSON.stringify(recapInputFromSession(session))).not.toContain('local-set');
@@ -29,22 +30,22 @@ describe('workout recap feed boundary', () => {
 
   test('uses protected RPCs and maps only their feed projection', async () => {
     client.rpc.mockResolvedValueOnce({ data: 'recap-1', error: null }).mockResolvedValueOnce({
-      data: { recaps: [{ id: 'recap-1', author_alias: 'Bro', routine_name: 'Upper', completed_at: '2026-08-01T10:00:00Z', duration_seconds: 3600, exercise_count: 1, muscle_group_ids: ['pecho'], metrics: { volume: 500 }, caption: null, created_at: '2026-08-01T10:01:00Z', is_author: true }], next_cursor: 'next' }, error: null,
+      data: { recaps: [{ id: 'recap-1', author_alias: 'Bro', author_avatar_id: 'capybara-mark', author_theme_id: 'profile-brisas', routine_name: 'Upper', completed_at: '2026-08-01T10:00:00Z', duration_seconds: 3600, exercise_count: 1, muscle_group_ids: ['pecho'], metrics: { volume: 500 }, caption: null, created_at: '2026-08-01T10:01:00Z', is_author: true }], next_cursor: 'next' }, error: null,
     });
     await createWorkoutRecap(recapInputFromSession(session), 'publication-key');
-    await expect(getWorkoutRecapPage()).resolves.toEqual({ recaps: [{ id: 'recap-1', authorAlias: 'Bro', routineName: 'Upper', completedAt: '2026-08-01T10:00:00Z', durationSeconds: 3600, exerciseCount: 1, muscleGroupIds: ['pecho'], metrics: { volume: 500 }, caption: null, createdAt: '2026-08-01T10:01:00Z', templateAvailable: false, mesocycleAvailable: false, isAuthor: true }], nextCursor: 'next' });
-    expect(client.rpc).toHaveBeenNthCalledWith(1, 'create_workout_recap', { input: { routine_name: 'Upper', completed_at: '2026-08-01T10:00:00Z', duration_seconds: 3600, exercise_count: 1, metrics: { volume: 500 }, exercise_details: { exercises: [{ name: 'Bench', muscle_group_ids: ['pecho', 'tríceps'] }] }, publication_key: 'publication-key' } });
+    await expect(getWorkoutRecapPage()).resolves.toEqual({ recaps: [{ id: 'recap-1', authorAlias: 'Bro', authorAvatarId: 'capybara-mark', authorThemeId: 'profile-brisas', routineName: 'Upper', completedAt: '2026-08-01T10:00:00Z', durationSeconds: 3600, exerciseCount: 1, muscleGroupIds: ['pecho'], metrics: { volume: 500 }, caption: null, createdAt: '2026-08-01T10:01:00Z', templateAvailable: false, mesocycleAvailable: false, isAuthor: true }], nextCursor: 'next' });
+    expect(client.rpc).toHaveBeenNthCalledWith(1, 'create_workout_recap', { input: { routine_name: 'Upper', completed_at: '2026-08-01T10:00:00Z', duration_seconds: 3600, exercise_count: 1, metrics: { volume: 500 }, exercise_details: { exercises: [{ name: 'Bench', muscle_group_ids: ['pecho', 'tríceps'], sets: [{ weight: 100, reps: 5, completed: true }] }] }, publication_key: 'publication-key' } });
     expect(client.rpc).toHaveBeenNthCalledWith(2, 'list_workout_recaps', { cursor: null, page_size: 20 });
   });
 
   test('maps the protected detail projection and safely handles older recaps without details', async () => {
     client.rpc.mockResolvedValueOnce({
-      data: { id: 'recap-1', author_alias: 'Bro', routine_name: 'Upper', completed_at: '2026-08-01T10:00:00Z', duration_seconds: 3600, exercise_count: 1, muscle_group_ids: ['pecho'], metrics: {}, caption: null, created_at: '2026-08-01T10:01:00Z', exercises: [{ name: 'Bench', muscle_group_ids: ['pecho'] }] }, error: null,
+      data: { id: 'recap-1', author_alias: 'Bro', routine_name: 'Upper', completed_at: '2026-08-01T10:00:00Z', duration_seconds: 3600, exercise_count: 1, muscle_group_ids: ['pecho'], metrics: {}, caption: null, created_at: '2026-08-01T10:01:00Z', exercises: [{ name: 'Bench', muscle_group_ids: ['pecho'], sets: [{ weight: 80, reps: 8, completed: true }] }] }, error: null,
     }).mockResolvedValueOnce({
       data: { id: 'old-recap', author_alias: 'Bro', routine_name: 'Upper', completed_at: '2026-08-01T10:00:00Z', duration_seconds: 3600, exercise_count: 1, metrics: {}, caption: null, created_at: '2026-08-01T10:01:00Z' }, error: null,
     });
 
-    await expect(getWorkoutRecapDetail('recap-1')).resolves.toMatchObject({ exercises: [{ name: 'Bench', muscleGroupIds: ['pecho'] }] });
+    await expect(getWorkoutRecapDetail('recap-1')).resolves.toMatchObject({ exercises: [{ name: 'Bench', muscleGroupIds: ['pecho'], sets: [{ weight: 80, reps: 8, completed: true }] }] });
     await expect(getWorkoutRecapDetail('old-recap')).resolves.toMatchObject({ muscleGroupIds: [], exercises: [] });
     expect(client.rpc).toHaveBeenLastCalledWith('get_workout_recap_detail', { recap_id: 'old-recap' });
   });
@@ -55,6 +56,32 @@ describe('workout recap feed boundary', () => {
     expect(plan.routines[0].id).toBe('recap:recap-1:routine:0');
     expect(plan.definitions[0].source).toEqual({ kind: 'custom', owner: 'recipient-1', originId: 'recap:recap-1:definition:0:0' });
     expect(JSON.stringify(plan)).not.toContain('local-session');
+  });
+
+  test('accepts a mesocycle payload without optional labels or performed-set payload and imports its complete graph', async () => {
+    const routine = { name: 'Upper', muscleGroups: ['pecho'], exercises: [{ name: 'Bench', muscleGroups: ['pecho'], loadMode: 'external-load' as const, loadUnit: 'kg' as const, variant: 'barbell', sets: [{ tipo: 'C' as const, weight: 80, reps: 8 }] }] };
+    const payload = { version: 1 as const, routine, mesocycle: { name: 'Strength block', goal: 'Build strength', durationWeeks: 2, routines: [routine], weeks: [[{ routineIndex: 0 }], [null, { routineIndex: 0 }]] } };
+    client.rpc.mockResolvedValueOnce({ data: { id: 'recap-1', author_alias: 'Bro', routine_name: 'Upper', completed_at: '2026-08-01T10:00:00Z', duration_seconds: 1, exercise_count: 1, muscle_group_ids: ['pecho'], metrics: {}, caption: null, created_at: '2026-08-01T10:01:00Z', share_payload: payload }, error: null });
+
+    const recap = await getWorkoutRecapDetail('recap-1');
+    expect(recap?.sharePayload).toEqual(payload);
+    const plan = recapImportPlan('recap-1', 'recipient-1', recap!.sharePayload!, true);
+    expect(plan.routines).toHaveLength(1);
+    expect(plan.mesocycles).toMatchObject([{ name: 'Strength block', status: 'draft', durationWeeks: 2 }]);
+    expect(plan.mesocycles[0]).not.toHaveProperty('startDate');
+    expect(plan.mesocycles[0].weeks[1].entries).toHaveLength(2);
+  });
+
+  test('normalizes legacy muscle labels before atomically importing a mesocycle', () => {
+    const routine = { id: 'routine-1', name: 'Upper', muscleGroups: ['Pecho', 'Espalda'], createdAt: '', exercises: [{ id: 'exercise-1', name: 'Bench', muscleGroups: ['Pecho'], loadMode: 'external-load' as const, loadUnit: 'kg' as const, variant: 'barbell', sets: [{ id: 'set-1', tipo: 'C' as const, weight: 80, reps: 8 }] }] };
+    const mesocycle = { id: 'mesocycle-1', name: 'Block', goal: '', status: 'active' as const, durationWeeks: 1, createdAt: '', weeks: [{ id: 'week-1', weekNumber: 1, entries: [{ id: 'entry-1', order: 1, ref: { routineId: routine.id, routineName: routine.name, source: 'local' as const } }] }] };
+    const payload = recapSharePayload({ ...session, routineId: routine.id, lineage: { mesocycleId: mesocycle.id, weekNumber: 1, plannedSessionId: 'entry-1' } }, routine, mesocycle, [routine], { shareRoutineTemplate: true, shareMesocycleTemplate: true, sharePerformedSetDetails: false });
+
+    expect(payload?.mesocycle?.routines[0].muscleGroups).toEqual(['pecho', 'espalda']);
+    expect(payload?.mesocycle?.routines[0].exercises[0].muscleGroups).toEqual(['pecho']);
+    const result = planRecipientImport(createCatalogLibrary('recipient-1'), recapImportPlan('recap-1', 'recipient-1', payload!, true));
+    expect(result.library.routines).toHaveLength(1);
+    expect(result.library.mesocycles).toHaveLength(1);
   });
 
   test('drops malformed server template payloads instead of rendering or importing them', async () => {

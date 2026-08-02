@@ -38,6 +38,7 @@ export function SocialProvider({ children }: { children: React.ReactNode }) {
   const [realtimeRevision, setRealtimeRevision] = useState(0);
   const [failedAutoRecapSessionIds, setFailedAutoRecapSessionIds] = useState<ReadonlySet<string>>(new Set());
   const autoPublishingKeys = useRef(new Set<string>());
+  const [recapRetryRevision, setRecapRetryRevision] = useState(0);
   const refreshOwnProfile = useCallback(async () => setOwnProfile(await getOwnProfile()), []);
   const clearFailedAutoRecapSession = useCallback((sessionId: string) => setFailedAutoRecapSessionIds((current) => {
     if (!current.has(sessionId)) return current;
@@ -84,9 +85,14 @@ export function SocialProvider({ children }: { children: React.ReactNode }) {
         if (failedSessionIds.length) next.add(session.id);
         else next.delete(session.id);
         return next;
-      }));
+      })).finally(() => autoPublishingKeys.current.delete(publicationKey));
     }
-  }, [attempts, createWorkoutRecap, mesocycles, ownProfile, routines]);
+  }, [attempts, createWorkoutRecap, mesocycles, ownProfile, recapRetryRevision, routines]);
+  useEffect(() => {
+    if (!ownProfile?.autoShareCompletedWorkouts || failedAutoRecapSessionIds.size === 0) return undefined;
+    const retry = setTimeout(() => setRecapRetryRevision((revision) => revision + 1), 30_000);
+    return () => clearTimeout(retry);
+  }, [failedAutoRecapSessionIds, ownProfile?.autoShareCompletedWorkouts]);
   const value = useMemo(() => ({ ownProfile, refreshOwnProfile, saveProfile, discover: getDiscoveryPage, search: searchProfiles, circle: getCirclePage, requests: getRequestPage, blockedUsers: getBlockedUsersPage, getProfile: getPublicProfile, getSummary: getGraphSummary, command: runGraphCommand, getWorkoutRecaps: getWorkoutRecapPage, getWorkoutRecapDetail, createWorkoutRecap, deleteWorkoutRecap, failedAutoRecapSessionIds, clearFailedAutoRecapSession, realtimeRevision }), [ownProfile, realtimeRevision, refreshOwnProfile, saveProfile, failedAutoRecapSessionIds, clearFailedAutoRecapSession]);
   return <SocialContext.Provider value={value}>{children}</SocialContext.Provider>;
 }
