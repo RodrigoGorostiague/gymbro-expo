@@ -1,11 +1,12 @@
 import { supabase, supabaseConfigurationError } from './supabase';
 import { FunctionsHttpError } from '@supabase/supabase-js';
+import { AvatarId, avatarIdOrDefault } from '../constants/avatars';
 
 export type ProfileCategories = Record<string, string>;
 export type ProfileVisibility = Record<string, boolean>;
 export type RelationshipStatus = 'discover' | 'bro' | 'partner' | 'incoming_request' | 'outgoing_request';
 export type RelationshipKind = 'bro' | 'partner';
-export type PublicProfile = { uid: string; alias: string; categories: ProfileCategories; relationshipStatus?: RelationshipStatus; requestedKind?: RelationshipKind };
+export type PublicProfile = { uid: string; alias: string; avatarId: AvatarId; categories: ProfileCategories; relationshipStatus?: RelationshipStatus; requestedKind?: RelationshipKind };
 export type OwnProfile = PublicProfile & {
   categoryVisibility: ProfileVisibility;
   autoShareCompletedWorkouts: boolean;
@@ -13,7 +14,7 @@ export type OwnProfile = PublicProfile & {
   shareMesocycleTemplate: boolean;
   sharePerformedSetDetails: boolean;
 };
-export type OwnProfileSave = Omit<OwnProfile, 'uid' | 'shareRoutineTemplate' | 'shareMesocycleTemplate' | 'sharePerformedSetDetails'> & Partial<Pick<OwnProfile, 'shareRoutineTemplate' | 'shareMesocycleTemplate' | 'sharePerformedSetDetails'>>;
+export type OwnProfileSave = Omit<OwnProfile, 'uid' | 'avatarId' | 'shareRoutineTemplate' | 'shareMesocycleTemplate' | 'sharePerformedSetDetails'> & Partial<Pick<OwnProfile, 'avatarId' | 'shareRoutineTemplate' | 'shareMesocycleTemplate' | 'sharePerformedSetDetails'>>;
 export type GraphSummary = {
   targetId: string;
   relationshipKind?: RelationshipKind | null;
@@ -67,6 +68,7 @@ function asPage(data: unknown): { profiles: PublicProfile[]; nextCursor: string 
       return {
         uid: String(value.id ?? value.uid),
         alias: String(value.alias),
+        avatarId: avatarIdOrDefault(value.avatar_id ?? value.avatarId),
         categories: (value.categories ?? {}) as ProfileCategories,
         ...(typeof relationshipStatus === 'string' ? { relationshipStatus: relationshipStatus as RelationshipStatus } : {}),
         ...(requestedKind === 'bro' || requestedKind === 'partner' ? { requestedKind } : {}),
@@ -103,10 +105,10 @@ export function getBlockedUsersPage(cursor: string | null = null) {
 }
 
 export async function getOwnProfile(): Promise<OwnProfile | null> {
-  const { data, error } = await requireClient().from('profiles').select('id, alias, categories, category_visibility, auto_share_completed_workouts, share_routine_template, share_mesocycle_template, share_performed_set_details').maybeSingle();
+  const { data, error } = await requireClient().from('profiles').select('id, alias, avatar_id, categories, category_visibility, auto_share_completed_workouts, share_routine_template, share_mesocycle_template, share_performed_set_details').maybeSingle();
   if (error) throw new Error(error.message);
   if (!data) return null;
-  return { uid: data.id, alias: data.alias, categories: stringRecord(data.categories), categoryVisibility: booleanRecord(data.category_visibility), autoShareCompletedWorkouts: booleanOrDefault(data.auto_share_completed_workouts), shareRoutineTemplate: booleanOrDefault(data.share_routine_template), shareMesocycleTemplate: booleanOrDefault(data.share_mesocycle_template), sharePerformedSetDetails: booleanOrDefault(data.share_performed_set_details) };
+  return { uid: data.id, alias: data.alias, avatarId: avatarIdOrDefault(data.avatar_id), categories: stringRecord(data.categories), categoryVisibility: booleanRecord(data.category_visibility), autoShareCompletedWorkouts: booleanOrDefault(data.auto_share_completed_workouts), shareRoutineTemplate: booleanOrDefault(data.share_routine_template), shareMesocycleTemplate: booleanOrDefault(data.share_mesocycle_template), sharePerformedSetDetails: booleanOrDefault(data.share_performed_set_details) };
 }
 
 export async function saveOwnProfile(profile: OwnProfileSave): Promise<void> {
@@ -115,6 +117,7 @@ export async function saveOwnProfile(profile: OwnProfileSave): Promise<void> {
   const { error } = await requireClient().from('profiles').upsert({
     id: auth.user.id,
     alias: profile.alias.trim(),
+    avatar_id: avatarIdOrDefault(profile.avatarId),
     categories: profile.categories,
     category_visibility: profile.categoryVisibility,
     auto_share_completed_workouts: profile.autoShareCompletedWorkouts,
@@ -125,10 +128,19 @@ export async function saveOwnProfile(profile: OwnProfileSave): Promise<void> {
   if (error) throw new Error(error.message);
 }
 
-export async function getPublicProfile(uid: string): Promise<PublicProfile | null> {
-  const { data, error } = await requireClient().from('public_profiles').select('id, alias, categories').eq('id', uid).maybeSingle();
+export async function syncOwnPresentationTheme(themeId: string | null): Promise<void> {
+  const { data: auth, error: authError } = await requireClient().auth.getUser();
+  if (authError || !auth.user) return;
+  const { error } = await requireClient().from('profiles')
+    .update({ presentation_theme_id: themeId })
+    .eq('id', auth.user.id);
   if (error) throw new Error(error.message);
-  return data ? { uid: data.id, alias: data.alias, categories: data.categories ?? {} } : null;
+}
+
+export async function getPublicProfile(uid: string): Promise<PublicProfile | null> {
+  const { data, error } = await requireClient().from('public_profiles').select('id, alias, avatar_id, categories').eq('id', uid).maybeSingle();
+  if (error) throw new Error(error.message);
+  return data ? { uid: data.id, alias: data.alias, avatarId: avatarIdOrDefault(data.avatar_id), categories: stringRecord(data.categories) } : null;
 }
 
 export async function getGraphSummary(targetId: string): Promise<GraphSummary> {

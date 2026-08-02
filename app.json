@@ -30,6 +30,7 @@
       [
         "expo-notifications",
         {
+          "icon": "./assets/notification-icon.png",
           "color": "#FF69B4",
           "defaultChannel": "partner_messages",
           "sounds": []

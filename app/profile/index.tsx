@@ -7,6 +7,9 @@ import { GlassCard, ThemeBackground } from '../../components/GlassCard';
 import { GlassButton, GlassInput } from '../../components/UI';
 import { useSocial } from '../../context/SocialContext';
 import { useTheme } from '../../context/ThemeContext';
+import { AVATARS, AvatarId, avatarIdOrDefault, DEFAULT_AVATAR_ID } from '../../constants/avatars';
+import { ProfileAvatar } from '../../components/ProfileAvatar';
+import { HapticPressable } from '../../components/HapticPressable';
 
 const categoryKeys = ['trainingStyle', 'about'] as const;
 
@@ -63,6 +66,8 @@ export default function ProfileScreen() {
   const [shareRoutine, setShareRoutine] = useState(true);
   const [shareMesocycle, setShareMesocycle] = useState(true);
   const [shareSets, setShareSets] = useState(true);
+  const [avatarId, setAvatarId] = useState<AvatarId>(DEFAULT_AVATAR_ID);
+  const [isAvatarPickerOpen, setAvatarPickerOpen] = useState(false);
   const [saving, setSaving] = useState(false);
   const profile = isRecord(ownProfile) ? ownProfile : null;
 
@@ -70,6 +75,7 @@ export default function ProfileScreen() {
     if (!profile) return;
     const nextCategories = stringRecord(profile.categories);
     setAlias(stringOrEmpty(profile.alias));
+    setAvatarId(avatarIdOrDefault(profile.avatarId));
     setCategories(nextCategories);
     setTrainingStyle(nextCategories.trainingStyle ?? '');
     setAbout(nextCategories.about ?? '');
@@ -102,6 +108,7 @@ export default function ProfileScreen() {
     try {
       await saveProfile({
         alias,
+        avatarId,
         categories: nextCategories,
         categoryVisibility: visibility,
         autoShareCompletedWorkouts: autoShare,
@@ -122,6 +129,20 @@ export default function ProfileScreen() {
       <SafeAreaView style={styles.safe}>
         <ScrollView contentContainerStyle={styles.scroll} keyboardShouldPersistTaps="handled">
           <AppScreenHeader title="Perfil" subtitle="Tu identidad y privacidad" />
+          <GlassCard>
+            <View style={styles.identityRow}>
+              <ProfileAvatar avatarId={avatarId} size={88} borderColor={theme.primary} />
+              <View style={styles.identityCopy}>
+                <Text accessibilityRole="header" style={[styles.identityTitle, { color: theme.text }]}>{profile ? 'Tu avatar' : 'Avatar inicial'}</Text>
+                <Text style={{ color: theme.textMuted }}>{AVATARS[avatarId].label}</Text>
+                <HapticPressable accessibilityRole="button" accessibilityLabel="Editar avatar" onPress={() => setAvatarPickerOpen((open) => !open)} style={[styles.editAvatar, { borderColor: theme.primary }]}>
+                  <Text style={[styles.editAvatarText, { color: theme.primary }]}>{isAvatarPickerOpen ? 'Cerrar selector' : 'Editar avatar'}</Text>
+                </HapticPressable>
+              </View>
+            </View>
+            {isAvatarPickerOpen ? <View accessibilityRole="radiogroup" style={styles.avatarOptions}>{(Object.keys(AVATARS) as AvatarId[]).map((candidate) => <HapticPressable key={candidate} accessibilityRole="radio" accessibilityLabel={AVATARS[candidate].label} accessibilityState={{ selected: avatarId === candidate }} onPress={() => { setAvatarId(candidate); setAvatarPickerOpen(false); }} style={[styles.avatarOption, { borderColor: avatarId === candidate ? theme.primary : theme.glassBorder, backgroundColor: avatarId === candidate ? theme.glass : 'transparent' }]}><ProfileAvatar avatarId={candidate} size={54} borderColor={avatarId === candidate ? theme.primary : theme.glassBorder} /><Text style={[styles.avatarOptionLabel, { color: theme.text }]}>{AVATARS[candidate].label}</Text></HapticPressable>)}</View> : null}
+            <Text style={[styles.identityHint, { color: theme.textMuted }]}>Elegí un avatar y guardá el perfil para aplicarlo en Comunidad.</Text>
+          </GlassCard>
           <GlassCard>
             <Text accessibilityRole="header" style={[styles.title, { color: theme.text }]}>Perfil público</Text>
             <GlassInput placeholder="Alias público" value={alias} onChangeText={setAlias} autoCapitalize="none" />
@@ -161,6 +182,15 @@ const styles = StyleSheet.create({
   scroll: { padding: 20, gap: 12, paddingBottom: 36 },
   title: { fontSize: 18, fontWeight: '800', marginBottom: 10 },
   input: { marginTop: 10 },
+  identityRow: { flexDirection: 'row', alignItems: 'center', gap: 16 },
+  identityCopy: { flex: 1, gap: 3 },
+  identityTitle: { fontSize: 18, fontWeight: '800' },
+  identityHint: { fontSize: 12, lineHeight: 17 },
+  editAvatar: { alignSelf: 'flex-start', borderWidth: 1, borderRadius: 999, marginTop: 6, paddingHorizontal: 10, paddingVertical: 6 },
+  editAvatarText: { fontSize: 12, fontWeight: '800' },
+  avatarOptions: { flexDirection: 'row', flexWrap: 'wrap', gap: 10, marginTop: 16 },
+  avatarOption: { alignItems: 'center', borderWidth: 1.5, borderRadius: 14, gap: 6, padding: 8, width: 92 },
+  avatarOptionLabel: { fontSize: 11, fontWeight: '700', textAlign: 'center' },
   setting: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 16, marginVertical: 8 },
   settingCopy: { flex: 1 },
 });

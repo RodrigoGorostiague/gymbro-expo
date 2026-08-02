@@ -9,6 +9,7 @@ import Animated, {
 import { useAuth } from '../context/AuthContext';
 import { useSocial } from '../context/SocialContext';
 import { useTheme } from '../context/ThemeContext';
+import { ProfileAvatar } from './ProfileAvatar';
 
 interface AppScreenHeaderProps {
   title: string;
@@ -36,7 +37,7 @@ export function AppScreenHeader({ title, subtitle, trailing }: AppScreenHeaderPr
       <View style={styles.main}>
         <View style={styles.badgeRow}>
           <View style={[styles.badge, { backgroundColor: theme.glass, borderColor: theme.primary }]}>
-            <View style={[styles.badgeDot, { backgroundColor: theme.primary }]} />
+            <ProfileAvatar avatarId={ownProfile?.avatarId} size={26} borderColor={theme.primary} />
             <Text style={[styles.badgeText, { color: theme.primary }]}>{ownProfile?.alias ?? userEmail ?? 'Atleta'}</Text>
           </View>
           <View style={[styles.badgeLine, { backgroundColor: theme.primary }]} />
@@ -76,11 +77,6 @@ const styles = StyleSheet.create({
     paddingVertical: 4,
     borderRadius: 16,
     borderWidth: 1,
-  },
-  badgeDot: {
-    width: 7,
-    height: 7,
-    borderRadius: 4,
   },
   badgeText: {
     fontSize: 11,

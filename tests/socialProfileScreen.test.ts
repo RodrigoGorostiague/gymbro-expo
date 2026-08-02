@@ -25,6 +25,7 @@ vi.mock('react-native-safe-area-context', async () => {
 vi.mock('../context/SocialContext', () => ({ useSocial: () => social }));
 vi.mock('../context/ThemeContext', () => ({ useTheme: () => ({ theme: { text: '#111', textMuted: '#666', success: '#0a0' } }) }));
 vi.mock('../components/AppNavBar', () => ({ AppNavBar: () => null }));
+vi.mock('../components/ProfileAvatar', () => ({ ProfileAvatar: () => null }));
 vi.mock('../components/GlassCard', async () => {
   const ReactModule = await import('react');
   return { GlassCard: ({ children }: { children: React.ReactNode }) => ReactModule.createElement('GlassCard', null, children), ThemeBackground: ({ children }: { children: React.ReactNode }) => ReactModule.createElement('ThemeBackground', null, children) };

@@ -1,5 +1,5 @@
 import React, { useEffect } from 'react';
-import { StyleSheet, Text, View } from 'react-native';
+import { Image, StyleSheet, Text, View } from 'react-native';
 import Animated, {
   Easing,
   interpolate,
@@ -12,6 +12,8 @@ import Animated, {
   withTiming,
 } from 'react-native-reanimated';
 import { AppTheme, UserProfile } from '../../types';
+import { DEFAULT_AVATAR_ID } from '../../constants/avatars';
+import { AVATAR_ASSETS } from '../avatarAssets';
 
 interface DualLoginHeaderProps {
   rodaja: AppTheme;
@@ -142,6 +144,9 @@ export function DualLoginHeader({ rodaja, brisas, activeProfile }: DualLoginHead
         <Text style={[styles.logoHalf, { color: rodaja.primary }]}>B</Text>
         <Text style={[styles.logoHalf, { color: brisas.primary }]}>ro</Text>
       </Text>
+      <View style={styles.mascot}>
+        <Image source={AVATAR_ASSETS[DEFAULT_AVATAR_ID]} resizeMode="cover" style={styles.mascotImage} accessibilityLabel="Capibara atleta de GymBro" />
+      </View>
       <Text style={styles.tagline}>Dos mundos · Una app · Mismo gimnasio</Text>
     </Animated.View>
   );
@@ -151,6 +156,15 @@ const styles = StyleSheet.create({
   wrap: {
     alignItems: 'center',
     marginBottom: 28,
+  },
+  mascot: {
+    alignItems: 'center',
+    marginTop: 8,
+  },
+  mascotImage: {
+    width: 92,
+    height: 92,
+    borderRadius: 46,
   },
   worldsRow: {
     flexDirection: 'row',
