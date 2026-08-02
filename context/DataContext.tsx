@@ -1,5 +1,5 @@
 import React, { createContext, useContext, useEffect, useMemo, useRef, useState } from 'react';
-import { ActiveWorkoutDraft, CatalogImportPlan, CatalogImportResult, CatalogLibrary, Exercise, ExerciseDefinition, ExerciseVariant, Mesocycle, MuscleGroup, PlannedSessionRef, Routine, UserProfile, WorkoutAttempt, WorkoutSession } from '../types';
+import { ActiveWorkoutDraft, CatalogImportPlan, CatalogImportResult, CatalogLibrary, Exercise, ExerciseDefinition, ExerciseVariant, Mesocycle, MuscleGroup, PlannedSessionRef, RewardReceipt, Routine, UserProfile, WorkoutAttempt, WorkoutSession } from '../types';
 import { CatalogMuscleGroup, CatalogParticipationMode, filterCatalogExercises, loadCatalogExercises, loadCatalogMuscleGroups } from '../services/catalog';
 import { loadTrainingLibrary, saveTrainingLibrary, saveTrainingMesocycles, saveTrainingRoutines } from '../services/trainingLibrary';
 import {
@@ -10,7 +10,7 @@ import {
 import { reconcileActiveWorkoutTiming } from '../utils/activeWorkoutTiming';
 import { applySessionEdits, attemptToSession } from '../utils/workoutAttempts';
 import { deleteCustomDefinition, planRecipientImport } from '../utils/catalogLibrary';
-import { importLegacyCustomDefinitions, loadTrainingState, saveTrainingState, TrainingState } from '../services/trainingState';
+import { finalizeTrainingAttempt, importLegacyCustomDefinitions, loadTrainingState, saveTrainingState, TrainingState } from '../services/trainingState';
 import { useAuth } from './AuthContext';
 
 type PersistedWorkoutSession = WorkoutSession & { owner: UserProfile };
@@ -52,7 +52,7 @@ interface DataContextValue {
   addSession: (session: Omit<WorkoutSession, 'id'>) => Promise<WorkoutSession>;
   updateSession: (id: string, session: WorkoutSession) => Promise<void>;
   deleteSession: (id: string) => Promise<void>;
-  addAttempt: (attempt: WorkoutAttempt) => Promise<void>;
+  addAttempt: (attempt: WorkoutAttempt) => Promise<RewardReceipt>;
   editAttempt: (attempt: WorkoutAttempt) => Promise<void>;
   ensureRecapPublicationKey: (sessionId: string) => Promise<string>;
   activeWorkoutDraft: ActiveWorkoutDraft | null;
@@ -595,19 +595,19 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
     });
   };
 
-  const addAttempt = async (attempt: WorkoutAttempt): Promise<void> => {
+  const addAttempt = async (attempt: WorkoutAttempt): Promise<RewardReceipt> => {
     const owner = activeUserRef.current;
     if (!owner || attempt.owner !== owner) throw new Error('El propietario del intento debe coincidir con el perfil activo.');
     const existing = attempts.find((item) => item.id === attempt.id);
     if (existing && JSON.stringify(existing) !== JSON.stringify(attempt)) throw new Error('La identidad del intento ya pertenece a otros datos capturados.');
-    const persisted = {
-      ...attempt,
-      reward: { setGems: 0, completionGems: 0, fullCompletionBonus: 0, totalGems: 0, qualifiesForCompletion: false },
-      rewardApplication: { id: `${attempt.owner}:${attempt.id}:v${attempt.version}`, state: 'applied' as const },
-    };
-    const next = existing ? attempts : [persisted, ...attempts];
-    await saveTrainingState({ attempts: next });
-    if (activeUserRef.current === owner) setAttempts(next);
+    const finalized = await finalizeTrainingAttempt(attempt);
+    const next = existing ? attempts : [finalized.attempt, ...attempts];
+    if (activeUserRef.current === owner) {
+      setAttempts(next);
+      setActiveWorkoutDraft(null);
+      trainingStateRef.current = trainingStateRef.current && { ...trainingStateRef.current, attempts: next, activeWorkoutDraft: null };
+    }
+    return finalized.receipt;
   };
 
   const editAttempt = async (attempt: WorkoutAttempt): Promise<void> => {

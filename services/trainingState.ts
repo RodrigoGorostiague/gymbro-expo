@@ -1,4 +1,4 @@
-import { ActiveWorkoutDraft, ExerciseDefinition, WorkoutAttempt, WorkoutSession } from '../types';
+import { ActiveWorkoutDraft, ExerciseDefinition, RewardReceipt, WorkoutAttempt, WorkoutSession } from '../types';
 import { supabase, supabaseConfigurationError } from './supabase';
 
 export type TrainingState = {
@@ -10,9 +10,10 @@ export type TrainingState = {
 
 type TrainingStateInput = Partial<TrainingState>;
 
-const DEFERRED_REWARD = {
-  setGems: 0, completionGems: 0, fullCompletionBonus: 0, totalGems: 0, qualifiesForCompletion: false,
-} as const;
+export type TrainingFinalizationErrorMessage = {
+  title: string;
+  body: string;
+};
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return !!value && typeof value === 'object' && !Array.isArray(value);
@@ -20,6 +21,53 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function isNonEmptyString(value: unknown): value is string {
   return typeof value === 'string' && value.trim().length > 0;
+}
+
+function errorText(error: unknown): string {
+  if (typeof error === 'string') return error.toLowerCase();
+  if (!isRecord(error)) return '';
+  return [error.code, error.message, error.details, error.hint]
+    .filter((value): value is string => typeof value === 'string')
+    .join(' ')
+    .toLowerCase();
+}
+
+export function classifyTrainingFinalizationError(error: unknown): TrainingFinalizationErrorMessage {
+  const message = errorText(error);
+  if (message.includes('invalid training attempt input')) {
+    return {
+      title: 'Revisá la rutina',
+      body: 'La rutina debe tener ejercicios y series válidos. Revisala e intentá finalizar nuevamente.',
+    };
+  }
+  if (message.includes('invalid planned session lineage')) {
+    return {
+      title: 'Sesión desactualizada',
+      body: 'La sesión del mesociclo ya no es válida. Actualizá o reabrí el mesociclo antes de finalizar.',
+    };
+  }
+  if (/auth|jwt|token|unauthoriz|forbidden|permission|\b401\b|\b403\b/.test(message)) {
+    return {
+      title: 'Sesión requerida',
+      body: 'Volvé a iniciar sesión e intentá finalizar el entrenamiento nuevamente.',
+    };
+  }
+  if (/configur|supabase.*(?:url|key)|(?:url|key).*supabase/.test(message)) {
+    return {
+      title: 'Servicio no disponible',
+      body: 'La configuración del servicio no está disponible. Intentá nuevamente más tarde.',
+    };
+  }
+  if (/network|fetch|offline|connection|conexión|conection|timeout|timed out/.test(message)) {
+    return {
+      title: 'No se pudo conectar',
+      body: 'Verificá tu conexión e intentá finalizar el entrenamiento nuevamente.',
+    };
+  }
+  return {
+    title: 'No se pudo guardar el entrenamiento',
+    body: 'No pudimos finalizar el entrenamiento. Intentá nuevamente.',
+  };
 }
 
 function isDefinition(value: unknown): value is ExerciseDefinition {
@@ -88,20 +136,31 @@ export async function saveTrainingState(input: TrainingStateInput): Promise<void
   if (input.attempts && !input.attempts.every(isAttempt)) throw new Error('Los intentos de entrenamiento no son válidos.');
   if (input.sessions && !input.sessions.every(isSession)) throw new Error('Las sesiones de entrenamiento no son válidas.');
   if (input.activeWorkoutDraft !== undefined && input.activeWorkoutDraft !== null && !isDraft(input.activeWorkoutDraft)) throw new Error('El borrador activo no es válido.');
-  // Rewards remain deferred until a server-owned ledger exists. Never send client-calculated values.
-  const attempts = input.attempts?.map((attempt) => ({
-    ...attempt,
-    reward: DEFERRED_REWARD,
-    rewardApplication: { id: `${attempt.owner}:${attempt.id}:v${attempt.version}`, state: 'applied' as const },
-  }));
   const { error } = await requireClient().rpc('save_training_state', {
     definitions_input: input.definitions ?? null,
-    attempts_input: attempts ?? null,
+    attempts_input: input.attempts ?? null,
     sessions_input: input.sessions ?? null,
     active_workout_draft_input: input.activeWorkoutDraft === undefined ? null : input.activeWorkoutDraft,
     active_workout_draft_supplied: input.activeWorkoutDraft !== undefined,
   });
   if (error) throw new Error(`No se pudo guardar el entrenamiento: ${error.message}`);
+}
+
+function isReceipt(value: unknown): value is RewardReceipt {
+  return isRecord(value) && Number.isInteger(value.balance) && (value.balance as number) >= 0
+    && Array.isArray(value.entries) && isRecord(value.weekly)
+    && (value.mesocycle === undefined || isRecord(value.mesocycle));
+}
+
+export async function finalizeTrainingAttempt(attempt: WorkoutAttempt): Promise<{ attempt: WorkoutAttempt; receipt: RewardReceipt }> {
+  if (!isAttempt(attempt)) throw new Error('El intento de entrenamiento no es válido.');
+  const { data, error } = await requireClient().rpc('finalize_training_attempt', { attempt_input: attempt });
+  // Preserve RPC metadata so the UI can classify safe messages and diagnostics retain the cause.
+  if (error) throw error;
+  if (!isRecord(data) || !isAttempt(data.attempt) || !isReceipt(data.receipt)) {
+    throw new Error('La confirmación de recompensas tiene un formato inválido. Inténtalo nuevamente.');
+  }
+  return { attempt: data.attempt, receipt: data.receipt };
 }
 
 export async function importLegacyCustomDefinitions(definitions: ExerciseDefinition[]): Promise<void> {

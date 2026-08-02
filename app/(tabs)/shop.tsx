@@ -12,7 +12,6 @@ import { SelectablePulse } from '../../components/SelectablePulse';
 import { ThemeDecorations } from '../../components/ThemeDecorations';
 import { GlassButton } from '../../components/UI';
 import {
-  GEM_REWARDS,
   getShopTheme,
   getThemesByCategory,
   isProfileThemeId,
@@ -172,9 +171,9 @@ export default function ShopScreen() {
     Alert.alert(
       'Cómo ganar gemas',
       [
-        `Completa una serie durante una rutina: +${GEM_REWARDS.setComplete} gema`,
-        `Finaliza una rutina completa: +${GEM_REWARDS.routineComplete} gemas`,
-        `Supera las rutinas de la semana anterior: +${GEM_REWARDS.weeklyGoalImprovement} gemas (una vez por semana)`,
+        'Cada serie válida suma +1 gema (máximo 12 por rutina).',
+        'Con 70-99% de adherencia: +4. Con 100%: +10 y +6 de perfección.',
+        'Al alcanzar tu meta semanal: +25; hasta dos rutinas extra dan +10. Los mesociclos planificados también tienen bonos.',
       ].join('\n\n'),
       [{ text: 'Entendido' }],
     );
@@ -201,7 +200,7 @@ export default function ShopScreen() {
 
     Alert.alert('Comprar tema', `¿Comprar "${item.name}" por ${item.price} gemas?`, [
       { text: 'Cancelar', style: 'cancel' },
-      { text: 'Comprar', onPress: () => purchaseTheme(themeId) },
+      { text: 'Comprar', onPress: () => { void purchaseTheme(themeId); } },
     ]);
   };
 

@@ -8,7 +8,7 @@ vi.mock('../services/supabase', () => ({
   supabaseConfigurationError: null,
 }));
 
-import { importLegacyCustomDefinitions, loadTrainingState, saveTrainingState } from '../services/trainingState';
+import { classifyTrainingFinalizationError, finalizeTrainingAttempt, importLegacyCustomDefinitions, loadTrainingState, saveTrainingState } from '../services/trainingState';
 
 const definition: ExerciseDefinition = {
   id: 'custom:owner:press', source: { kind: 'custom', owner: 'owner', originId: 'press' }, name: 'Press',
@@ -45,18 +45,36 @@ describe('training state RPC boundary', () => {
     expect(rpc).toHaveBeenCalledWith('import_legacy_custom_definitions', { definitions_input: [definition] });
   });
 
-  test('zeros client-controlled reward values before sending attempts to the server', async () => {
-    rpc.mockResolvedValueOnce({ error: null });
-    await saveTrainingState({ attempts: [{
-      version: 1, id: 'attempt', owner: 'owner', routineId: null, recordedRoutineName: 'Routine',
-      completedAt: '2026-08-01T00:00:00.000Z', durationSeconds: 0, restTimerSeconds: 0,
-      exercises: [], completion: {}, reward: { totalGems: 999999 }, rewardApplication: { id: 'forged', state: 'pending' },
-    } as any] });
-    expect(rpc).toHaveBeenCalledWith('save_training_state', expect.objectContaining({
-      attempts_input: [expect.objectContaining({
-        reward: { setGems: 0, completionGems: 0, fullCompletionBonus: 0, totalGems: 0, qualifiesForCompletion: false },
-        rewardApplication: { id: 'owner:attempt:v1', state: 'applied' },
-      })],
-    }));
+  test('uses the finalization RPC rather than a client reward calculation', async () => {
+    const attempt = {
+      version: 1, id: 'attempt', owner: 'owner', routineId: null, recordedRoutineName: 'Routine', completedAt: '2026-08-01T00:00:00.000Z', durationSeconds: 0, restTimerSeconds: 0,
+      exercises: [], completion: {}, reward: {}, rewardApplication: { id: 'forged', state: 'pending' },
+    } as any;
+    rpc.mockResolvedValueOnce({ data: { attempt, receipt: { balance: 12, entries: [], weekly: {} } }, error: null });
+    await expect(finalizeTrainingAttempt(attempt)).resolves.toMatchObject({ receipt: { balance: 12 } });
+    expect(rpc).toHaveBeenCalledWith('finalize_training_attempt', { attempt_input: attempt });
+  });
+
+  test('preserves finalization RPC metadata for safe classification and diagnostics', async () => {
+    const attempt = {
+      version: 1, id: 'attempt', owner: 'owner', routineId: null, recordedRoutineName: 'Routine', completedAt: '2026-08-01T00:00:00.000Z', durationSeconds: 0, restTimerSeconds: 0,
+      exercises: [], completion: {}, reward: {}, rewardApplication: { id: 'forged', state: 'pending' },
+    } as any;
+    const error = { code: 'P0001', message: 'invalid training attempt input', details: 'server-only', hint: 'server-only' };
+    rpc.mockResolvedValueOnce({ data: null, error });
+    await expect(finalizeTrainingAttempt(attempt)).rejects.toBe(error);
+  });
+});
+
+describe('training finalization error classification', () => {
+  test.each([
+    [{ message: 'invalid training attempt input' }, 'Revisá la rutina', 'La rutina debe tener ejercicios y series válidos. Revisala e intentá finalizar nuevamente.'],
+    [{ details: 'invalid planned session lineage' }, 'Sesión desactualizada', 'La sesión del mesociclo ya no es válida. Actualizá o reabrí el mesociclo antes de finalizar.'],
+    [{ code: '401', message: 'JWT expired' }, 'Sesión requerida', 'Volvé a iniciar sesión e intentá finalizar el entrenamiento nuevamente.'],
+    [new Error('Falta la configuración pública de Supabase'), 'Servicio no disponible', 'La configuración del servicio no está disponible. Intentá nuevamente más tarde.'],
+    [new TypeError('Network request failed'), 'No se pudo conectar', 'Verificá tu conexión e intentá finalizar el entrenamiento nuevamente.'],
+    [new Error('unexpected failure'), 'No se pudo guardar el entrenamiento', 'No pudimos finalizar el entrenamiento. Intentá nuevamente.'],
+  ])('returns a safe message for %o', (error, title, body) => {
+    expect(classifyTrainingFinalizationError(error)).toEqual({ title, body });
   });
 });

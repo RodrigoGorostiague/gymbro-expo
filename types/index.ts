@@ -235,11 +235,14 @@ export interface WorkoutRecapInput {
 export interface WorkoutRecapExercise {
   name: string;
   muscleGroupIds: MuscleGroup[];
+  sets: Array<{ weight: number; reps: number; completed: boolean }>;
 }
 
 export interface WorkoutRecap {
   id: string;
   authorAlias: string;
+  authorAvatarId: string;
+  authorThemeId: string | null;
   routineName: string;
   completedAt: string;
   durationSeconds: number;
@@ -361,6 +364,19 @@ export interface AttemptReward {
 export interface AttemptFinalization {
   readonly completion: AttemptCompletion;
   readonly reward: AttemptReward;
+}
+
+export interface RewardReceiptEntry {
+  readonly kind: string;
+  readonly amount: number;
+  readonly breakdown: Record<string, unknown>;
+}
+
+export interface RewardReceipt {
+  readonly balance: number;
+  readonly entries: readonly RewardReceiptEntry[];
+  readonly weekly: { readonly target?: number; readonly completed?: number };
+  readonly mesocycle?: { readonly next?: string };
 }
 
 export interface RewardApplication {

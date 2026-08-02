@@ -22,9 +22,14 @@ import { useTheme } from '../../../context/ThemeContext';
 import { CompletedExercise, CompletedSet, Routine, SetType, WorkoutAttempt } from '../../../types';
 import { vibrateRestTimerComplete } from '../../../utils/haptics';
 import { generateId } from '../../../utils/storage';
+import { classifyTrainingFinalizationError } from '../../../services/trainingState';
 import { createWorkoutAttempt } from '../../../utils/workoutAttempts';
+import { receiptTotal } from '../../../services/rewardWallet';
+import * as Haptics from 'expo-haptics';
+import { RewardReceipt } from '../../../types';
 import { matchesActiveWorkout } from '../../../utils/activeWorkoutReentry';
 import { reconcileActiveWorkoutTiming } from '../../../utils/activeWorkoutTiming';
+import { validateMesocycleExecutionLineage } from '../../../utils/mesocycleExecutionLineage';
 
 function readSingleParam(value: string | string[] | undefined): string | undefined {
   if (typeof value === 'string') {
@@ -43,10 +48,10 @@ function parseLineage(params: {
   const mesocycleId = readSingleParam(params.mesocycleId);
   const plannedSessionId = readSingleParam(params.plannedSessionId);
   const rawWeekNumber = readSingleParam(params.weekNumber);
-  const weekNumber = rawWeekNumber ? Number.parseInt(rawWeekNumber, 10) : Number.NaN;
+  const weekNumber = rawWeekNumber ? Number(rawWeekNumber) : Number.NaN;
 
   if (!mesocycleId && !plannedSessionId && !rawWeekNumber) return undefined;
-  if (!mesocycleId || !plannedSessionId || !Number.isInteger(weekNumber) || weekNumber <= 0) return undefined;
+  if (!mesocycleId || !plannedSessionId || !Number.isInteger(weekNumber) || weekNumber <= 0) return null;
 
   return { mesocycleId, weekNumber, plannedSessionId };
 }
@@ -97,10 +102,12 @@ export default function ExecuteRoutineScreen() {
   }>();
   const id = readSingleParam(params.id) ?? '';
   const { user } = useAuth();
-  const { getRoutine, addAttempt, activeWorkoutDraft, startActiveWorkout, updateActiveWorkout, cancelActiveWorkout, refreshActiveWorkoutTiming = async () => undefined } = useData();
+  const { getRoutine, addAttempt, mesocycles, activeWorkoutDraft, startActiveWorkout, updateActiveWorkout, cancelActiveWorkout, refreshActiveWorkoutTiming = async () => undefined } = useData();
   const { theme } = useTheme();
   const routine = getRoutine(id);
-  const lineage = parseLineage(params);
+  const parsedLineage = parseLineage(params);
+  const lineageValidation = validateMesocycleExecutionLineage(mesocycles, id, parsedLineage, readSingleParam(params.mesocycleId));
+  const lineage = lineageValidation.valid ? lineageValidation.lineage : undefined;
 
   const [phase, setPhase] = useState<'setup' | 'active' | 'done'>('setup');
   const [restSeconds, setRestSeconds] = useState('90');
@@ -111,6 +118,7 @@ export default function ExecuteRoutineScreen() {
   const [setValues, setSetValues] = useState<Record<SetKey, SetRuntimeValues>>({});
   const [isFinishing, setIsFinishing] = useState(false);
   const [earnedGems, setEarnedGems] = useState(0);
+  const [rewardReceipt, setRewardReceipt] = useState<RewardReceipt | null>(null);
 
   const elapsedRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const restRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -231,7 +239,7 @@ export default function ExecuteRoutineScreen() {
   }, [activeWorkoutDraft, restTimerConfig, handleRestComplete, refreshActiveWorkoutTiming, updateActiveWorkout]);
 
   const startWorkout = async () => {
-    if (!routine || !user) return;
+    if (!routine || !user || !lineageValidation.valid) return;
     const values = buildSetValues(routine);
     const attemptId = generateId();
     await startActiveWorkout({ version: 1, owner: user, attemptId, routineId: routine.id, lineage, startedAtMs: Date.now(), restTimerSeconds: restTimerConfig, completedSets: {}, setValues: values });
@@ -316,14 +324,17 @@ export default function ExecuteRoutineScreen() {
           [`${exercise.exerciseId}:${set.setId}`, { performed: set.completed, reps: set.reps, load: set.weight }]))),
       });
       attemptRef.current = attempt;
-      await addAttempt(attempt);
-      await cancelActiveWorkout();
-      setEarnedGems(0);
+      const receipt = await addAttempt(attempt);
+      setRewardReceipt(receipt);
+      setEarnedGems(receiptTotal(receipt));
+      void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => undefined);
       setPhase('done');
-    } catch {
+    } catch (error) {
+      console.error('Training finalization failed', error);
+      const failure = classifyTrainingFinalizationError(error);
       Alert.alert(
-        'No se pudo guardar el entrenamiento',
-        'El entrenamiento no se completó. Revisa el almacenamiento e inténtalo de nuevo.',
+        failure.title,
+        failure.body,
       );
     } finally {
       finishInFlightRef.current = false;
@@ -339,6 +350,13 @@ export default function ExecuteRoutineScreen() {
   };
 
   if (!routine) return null;
+
+  if (!lineageValidation.valid) {
+    const message = lineageValidation.reason === 'inactive-mesocycle'
+      ? 'Este mesociclo ya no está activo. Actualizá o reabrí el mesociclo antes de entrenar esta sesión.'
+      : 'La sesión programada ya no está disponible. Actualizá o reabrí el mesociclo antes de entrenar.';
+    return <ThemeBackground><SafeAreaView style={[styles.safe, styles.center]}><GlassCard style={styles.doneCard}><Text style={[styles.doneTitle, { color: theme.text }]}>Sesión desactualizada</Text><Text style={[styles.doneMeta, { color: theme.textMuted }]}>{message}</Text><View style={styles.spacer} /><GlassButton title={lineageValidation.mesocycleId ? 'Volver al mesociclo' : 'Volver a rutinas'} onPress={() => lineageValidation.mesocycleId ? router.replace(`/mesocycle/summary/${lineageValidation.mesocycleId}`) : router.replace('/(tabs)/routines')} /></GlassCard></SafeAreaView></ThemeBackground>;
+  }
 
   if (phase === 'setup') {
     return (
@@ -381,6 +399,22 @@ export default function ExecuteRoutineScreen() {
             <Text style={[styles.doneGems, { color: theme.primary }]}>
               +{earnedGems} gemas
             </Text>
+            {rewardReceipt && (
+              <View style={styles.receipt}>
+                {rewardReceipt.entries.map((entry, index) => (
+                  <Text key={`${entry.kind}-${index}`} style={[styles.receiptLine, { color: theme.textMuted }]}>
+                    {entry.kind.replaceAll('_', ' ')}: +{entry.amount}
+                  </Text>
+                ))}
+                <Text style={[styles.receiptBalance, { color: theme.text }]}>Saldo: {rewardReceipt.balance} gemas</Text>
+                {rewardReceipt.weekly.target !== undefined && (
+                  <Text style={[styles.receiptLine, { color: theme.textMuted }]}>Semana: {rewardReceipt.weekly.completed ?? 0}/{rewardReceipt.weekly.target} rutinas</Text>
+                )}
+                {rewardReceipt.mesocycle?.next && (
+                  <Text style={[styles.receiptLine, { color: theme.textMuted }]}>{rewardReceipt.mesocycle.next}</Text>
+                )}
+              </View>
+            )}
             <View style={styles.spacer} />
             <GlassButton
               title="Volver a rutinas"
@@ -633,4 +667,7 @@ const styles = StyleSheet.create({
   doneTitle: { fontSize: 22, fontWeight: '800' },
   doneMeta: { marginTop: 8, fontSize: 16 },
   doneGems: { marginTop: 6, fontSize: 15, fontWeight: '700' },
+  receipt: { alignSelf: 'stretch', marginTop: 14, gap: 4 },
+  receiptLine: { fontSize: 13, textTransform: 'capitalize' },
+  receiptBalance: { marginTop: 4, fontSize: 14, fontWeight: '700' },
 });

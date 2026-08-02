@@ -9,18 +9,17 @@ import {
 } from '../constants/shopThemes';
 import { PARTNER_PROFILE } from '../constants/kiss';
 import { subscribeToEquippedThemes, syncEquippedTheme } from '../services/themeSync';
-import { ShopState, UserProfile } from '../types';
-import { loadShop, mutateShop } from '../utils/storage';
+import { UserProfile } from '../types';
+import { loadRewardWallet, purchaseRewardTheme, RewardWallet, updateRewardWalletPreferences } from '../services/rewardWallet';
 import { useAuth } from './AuthContext';
 import { useData } from './DataContext';
+import { syncOwnPresentationTheme } from '../services/socialGraph';
 
-const DEFAULT_SHOP: ShopState = {
-  gems: 0,
-  rewardReceiptIds: [],
-  purchasedThemeIds: ['white', 'black', 'profile-rodaja', 'profile-brisas'],
+const DEFAULT_SHOP: RewardWallet = {
+  balance: 0,
+  purchasedThemeIds: [],
   equippedThemeId: null,
   combineWithPartner: false,
-  weeklyGoal: { bonusWeekKey: null, lastWeekWorkouts: 0 },
 };
 
 interface ShopContextValue {
@@ -32,7 +31,7 @@ interface ShopContextValue {
   combineWithPartner: boolean;
   previewThemeId: string | null;
   isLoading: boolean;
-  purchaseTheme: (themeId: string) => boolean;
+  purchaseTheme: (themeId: string) => Promise<boolean>;
   equipTheme: (themeId: string) => void;
   unequipTheme: () => void;
   setCombineWithPartner: (value: boolean) => void;
@@ -44,28 +43,15 @@ const PREVIEW_DURATION_MS = 5000;
 
 const ShopContext = createContext<ShopContextValue | null>(null);
 
-export async function loadRecoveredShop(profile: UserProfile): Promise<ShopState> {
-  return loadShop(profile);
-}
-
-export function applyThemePurchase(current: Readonly<ShopState>, themeId: string, price: number): ShopState {
-  if (current.purchasedThemeIds.includes(themeId) || current.gems < price) return current;
-  return {
-    ...current,
-    gems: current.gems - price,
-    purchasedThemeIds: [...current.purchasedThemeIds, themeId],
-    equippedThemeId: themeId,
-  };
-}
-
 export function ShopProvider({ children }: { children: React.ReactNode }) {
   const { user } = useAuth();
   const { attempts } = useData();
-  const [shop, setShop] = useState<ShopState>(DEFAULT_SHOP);
+  const [shop, setShop] = useState<RewardWallet>(DEFAULT_SHOP);
   const [partnerEquippedThemeId, setPartnerEquippedThemeId] = useState<string | null>(null);
   const [previewThemeId, setPreviewThemeId] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const previewTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const walletRequestRef = useRef(0);
 
   const partner: UserProfile | null = user ? PARTNER_PROFILE[user] : null;
 
@@ -91,25 +77,32 @@ export function ShopProvider({ children }: { children: React.ReactNode }) {
 
   useEffect(() => {
     if (!user) {
+      walletRequestRef.current += 1;
       setShop(DEFAULT_SHOP);
       setPartnerEquippedThemeId(null);
       setIsLoading(false);
       return;
     }
 
+    const request = walletRequestRef.current + 1;
+    walletRequestRef.current = request;
+    let active = true;
     setIsLoading(true);
-    void loadShop(user).then((loaded) => {
+    void loadRewardWallet().then((loaded) => {
+      if (!active || walletRequestRef.current !== request) return;
       setShop(loaded);
       syncEquippedTheme(user, loaded.equippedThemeId);
-    }).finally(() => setIsLoading(false));
-  }, [user]);
+      void syncOwnPresentationTheme(loaded.equippedThemeId).catch(() => undefined);
+    }).finally(() => {
+      if (active && walletRequestRef.current === request) setIsLoading(false);
+    });
+    return () => {
+      active = false;
+    };
+  }, [user, attempts]);
 
   useEffect(() => {
     if (!partner) return;
-
-    loadShop(partner).then((loaded) => {
-      setPartnerEquippedThemeId(loaded.equippedThemeId);
-    });
 
     const unsub = subscribeToEquippedThemes((remote) => {
       if (remote[partner] !== undefined) {
@@ -120,35 +113,33 @@ export function ShopProvider({ children }: { children: React.ReactNode }) {
     return unsub;
   }, [partner]);
 
-  const persist = useCallback(
-    (mutation: (current: Readonly<ShopState>) => ShopState) => {
-      if (!user) return Promise.resolve();
-      return mutateShop(user, mutation).then((next) => {
-        setShop(next);
-        syncEquippedTheme(user, next.equippedThemeId);
-      });
-    },
-    [user],
-  );
+  const persistPreferences = useCallback((equippedThemeId: string | null, combineWithPartner: boolean) => {
+    if (!user) return Promise.resolve();
+    return updateRewardWalletPreferences(equippedThemeId, combineWithPartner).then((next) => {
+      setShop(next);
+      syncEquippedTheme(user, next.equippedThemeId);
+      void syncOwnPresentationTheme(next.equippedThemeId).catch(() => undefined);
+    });
+  }, [user]);
 
   const equipTheme = useCallback(
     (themeId: string) => {
       if (!shop.purchasedThemeIds.includes(themeId) && !isProfileThemeId(themeId)) return;
       endPreview(false);
-      persist((current) => ({ ...current, equippedThemeId: themeId }));
+      void persistPreferences(themeId, shop.combineWithPartner);
     },
-    [shop, persist, endPreview],
+    [shop, persistPreferences, endPreview],
   );
 
   const unequipTheme = useCallback(() => {
-    persist((current) => ({ ...current, equippedThemeId: null }));
-  }, [persist]);
+    void persistPreferences(null, shop.combineWithPartner);
+  }, [persistPreferences, shop.combineWithPartner]);
 
   const setCombineWithPartner = useCallback(
     (value: boolean) => {
-      persist((current) => ({ ...current, combineWithPartner: value }));
+      void persistPreferences(shop.equippedThemeId, value);
     },
-    [shop, persist],
+    [shop, persistPreferences],
   );
 
   const startPreview = useCallback(
@@ -169,7 +160,7 @@ export function ShopProvider({ children }: { children: React.ReactNode }) {
   }, [endPreview]);
 
   const purchaseTheme = useCallback(
-    (themeId: string): boolean => {
+    async (themeId: string): Promise<boolean> => {
       const themeItem = getShopTheme(themeId);
       if (!themeItem) return false;
 
@@ -178,23 +169,26 @@ export function ShopProvider({ children }: { children: React.ReactNode }) {
         return true;
       }
 
-      if (shop.gems < themeItem.price) {
-        Alert.alert('Gemas insuficientes', `Necesitas ${themeItem.price} gemas para "${themeItem.name}".`);
+      try {
+        const next = await purchaseRewardTheme(themeId);
+        setShop(next);
+        syncEquippedTheme(user!, next.equippedThemeId);
+        void syncOwnPresentationTheme(next.equippedThemeId).catch(() => undefined);
+        endPreview(false);
+        Alert.alert('Compra exitosa', `Desbloqueaste el tema "${themeItem.name}".`);
+        return true;
+      } catch (error) {
+        Alert.alert('No se pudo comprar', error instanceof Error ? error.message : 'Inténtalo nuevamente.');
         return false;
       }
-
-      persist((current) => applyThemePurchase(current, themeId, themeItem.price));
-      endPreview(false);
-      Alert.alert('Compra exitosa', `Desbloqueaste el tema "${themeItem.name}".`);
-      return true;
     },
-    [shop, persist, equipTheme, endPreview],
+    [shop, equipTheme, endPreview, user],
   );
 
   return (
     <ShopContext.Provider
       value={{
-        gems: shop.gems,
+        gems: shop.balance,
         purchasedThemeIds: shop.purchasedThemeIds,
         equippedThemeId: shop.equippedThemeId,
         selfEquippedThemeId: shop.equippedThemeId,
