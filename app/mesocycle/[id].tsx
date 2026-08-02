@@ -10,7 +10,7 @@ import { HapticPressable } from '../../components/HapticPressable';
 import { GlassButton, GlassInput } from '../../components/UI';
 import { useData } from '../../context/DataContext';
 import { useTheme } from '../../context/ThemeContext';
-import { Mesocycle, MesocycleEntry, Routine } from '../../types';
+import { Mesocycle, MesocycleEntry, MesocycleStatus, Routine } from '../../types';
 import {
   buildMesocycleDraft,
   clonePlannedWeekEntries,
@@ -29,6 +29,12 @@ const routineRef = (routine: Routine) => ({
   shareId: routine.shareId,
 });
 const isRest = (entry: MesocycleEntry): entry is Extract<MesocycleEntry, { kind: 'rest' }> => 'kind' in entry && entry.kind === 'rest';
+const STATUS_OPTIONS: { value: MesocycleStatus; label: string; guidance: string }[] = [
+  { value: 'draft', label: 'Borrador', guidance: 'Las sesiones planificadas todavía no se pueden ejecutar.' },
+  { value: 'active', label: 'Activo', guidance: 'Habilita las sesiones vinculadas y las recompensas.' },
+  { value: 'completed', label: 'Completado', guidance: 'Se conserva el historial, pero no se pueden iniciar sesiones planificadas.' },
+  { value: 'archived', label: 'Archivado', guidance: 'Se conserva el historial, pero no se pueden iniciar sesiones planificadas.' },
+];
 
 export default function MesocycleDetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
@@ -83,6 +89,23 @@ export default function MesocycleDetailScreen() {
     <Text style={[styles.title, { color: theme.text }]}>{draft.name}</Text>
     <GlassInput value={draft.name} onChangeText={(name) => change((value) => ({ ...value, name }))} />
     <DateTimeField value={derivedStartDate ?? startDate} onChange={setStartDate} mode="date" testID="mesocycle-edit-start-date-picker" />
+    <GlassCard style={styles.card}>
+      <Text style={[styles.heading, { color: theme.text }]}>Estado del ciclo</Text>
+      <View style={styles.statusOptions}>
+        {STATUS_OPTIONS.map((option) => {
+          const selected = option.value === draft.status;
+          return <HapticPressable
+            key={option.value}
+            accessibilityRole="button"
+            accessibilityLabel={`Estado: ${option.label}`}
+            accessibilityState={{ selected }}
+            onPress={() => change((value) => ({ ...value, status: option.value }))}
+            style={[styles.optionChip, { borderColor: theme.glassBorder, backgroundColor: selected ? theme.primary : theme.glass }]}
+          ><Text style={{ color: selected ? theme.onPrimary : theme.text, fontWeight: '700' }}>{option.label}</Text></HapticPressable>;
+        })}
+      </View>
+      <Text style={[styles.statusGuidance, { color: theme.textMuted }]}>{STATUS_OPTIONS.find((option) => option.value === draft.status)!.guidance}</Text>
+    </GlassCard>
     {draft.weeks.map((week) => <WeekCard
       key={week.id}
       week={week}
@@ -149,5 +172,5 @@ function WeekCard({ week, progress, scheduleByEntry, theme, open, routines, cata
 }
 
 const styles = StyleSheet.create({
-  safe: { flex: 1, paddingHorizontal: 20, paddingTop: 8 }, scroll: { paddingBottom: 40 }, title: { fontSize: 26, fontWeight: '900', marginBottom: 8 }, card: { marginBottom: 14 }, heading: { fontSize: 18, fontWeight: '800' }, entry: { marginTop: 10, paddingTop: 10, borderTopWidth: 1, flexDirection: 'row', gap: 10 }, entryContent: { flex: 1, gap: 3 }, dateLabel: { fontSize: 12, fontWeight: '800', textTransform: 'capitalize' }, removeAction: { width: 36, height: 36, alignItems: 'center', justifyContent: 'center' }, actions: { gap: 8, marginTop: 12 }, routinePicker: { gap: 8, marginTop: 14 }, pickerTitle: { fontSize: 15, fontWeight: '800' }, search: { borderWidth: 1, borderRadius: 12, paddingHorizontal: 12, paddingVertical: 10 }, option: { borderWidth: 1, borderRadius: 14, padding: 12, flexDirection: 'row', alignItems: 'center', gap: 12 }, optionTitle: { fontSize: 15, fontWeight: '800' }, optionMeta: { fontSize: 12, marginTop: 3 }, occurrenceBadge: { minWidth: 22, height: 22, borderRadius: 11, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 6 }, occurrenceText: { fontSize: 12, fontWeight: '900' },
+  safe: { flex: 1, paddingHorizontal: 20, paddingTop: 8 }, scroll: { paddingBottom: 40 }, title: { fontSize: 26, fontWeight: '900', marginBottom: 8 }, card: { marginBottom: 14 }, heading: { fontSize: 18, fontWeight: '800' }, statusOptions: { flexDirection: 'row', flexWrap: 'wrap', gap: 10, marginTop: 10 }, optionChip: { borderWidth: 1, borderRadius: 999, paddingHorizontal: 14, paddingVertical: 10 }, statusGuidance: { fontSize: 13, lineHeight: 18, marginTop: 10 }, entry: { marginTop: 10, paddingTop: 10, borderTopWidth: 1, flexDirection: 'row', gap: 10 }, entryContent: { flex: 1, gap: 3 }, dateLabel: { fontSize: 12, fontWeight: '800', textTransform: 'capitalize' }, removeAction: { width: 36, height: 36, alignItems: 'center', justifyContent: 'center' }, actions: { gap: 8, marginTop: 12 }, routinePicker: { gap: 8, marginTop: 14 }, pickerTitle: { fontSize: 15, fontWeight: '800' }, search: { borderWidth: 1, borderRadius: 12, paddingHorizontal: 12, paddingVertical: 10 }, option: { borderWidth: 1, borderRadius: 14, padding: 12, flexDirection: 'row', alignItems: 'center', gap: 12 }, optionTitle: { fontSize: 15, fontWeight: '800' }, optionMeta: { fontSize: 12, marginTop: 3 }, occurrenceBadge: { minWidth: 22, height: 22, borderRadius: 11, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 6 }, occurrenceText: { fontSize: 12, fontWeight: '900' },
 });

@@ -39,6 +39,31 @@ describe('mesocycle creation', () => {
 });
 
 describe('mesocycle edit schedule selection', () => {
+  test('keeps a selected lifecycle status in the draft until planning is saved', async () => {
+    const updateMesocycle = vi.fn(async (_value: any) => undefined);
+    const draft = { ...subject, status: 'draft' as const };
+    setMockData({ getMesocycle: vi.fn(() => draft), routines: [routine], attempts: [], updateMesocycle });
+    const screen = render(React.createElement(MesocycleDetailScreen));
+
+    expect(findText(screen.root, 'Las sesiones planificadas todavía no se pueden ejecutar.')).toBeTruthy();
+    press(screen.root.find((node) => node.props.accessibilityLabel === 'Estado: Activo'));
+    expect(updateMesocycle).not.toHaveBeenCalled();
+    expect(findText(screen.root, 'Habilita las sesiones vinculadas y las recompensas.')).toBeTruthy();
+    expect(screen.root.find((node) => node.props.accessibilityLabel === 'Estado: Activo').props.accessibilityState).toEqual({ selected: true });
+    ['Borrador', 'Activo', 'Completado', 'Archivado'].forEach((label) => {
+      expect(screen.root.find((node) => node.props.accessibilityLabel === `Estado: ${label}`)).toBeTruthy();
+    });
+    press(screen.root.find((node) => node.props.accessibilityLabel === 'Estado: Completado'));
+    expect(findText(screen.root, 'Se conserva el historial, pero no se pueden iniciar sesiones planificadas.')).toBeTruthy();
+    press(screen.root.find((node) => node.props.accessibilityLabel === 'Estado: Archivado'));
+    expect(findText(screen.root, 'Se conserva el historial, pero no se pueden iniciar sesiones planificadas.')).toBeTruthy();
+    press(screen.root.find((node) => node.props.accessibilityLabel === 'Estado: Activo'));
+
+    press(findButton(screen.root, 'Guardar planificación'));
+
+    await vi.waitFor(() => expect(updateMesocycle).toHaveBeenCalledWith(expect.objectContaining({ status: 'active' })));
+  });
+
   test('persists a selected routine with a derived first-entry date', async () => {
     const updateMesocycle = vi.fn(async (_value: any) => undefined);
     const empty = { ...subject, startDate: undefined, weeks: [{ ...subject.weeks[0], entries: [] }] };
