@@ -15,7 +15,6 @@ import {
 } from '../services/kissSync';
 import {
   getExpoPushToken,
-  isExpoGo,
   setupNotifications,
   showPartnerNotification,
   supportsRemotePush,
@@ -49,10 +48,10 @@ export function KissProvider({ children }: { children: React.ReactNode }) {
     let unsubscribe: (() => void) | undefined;
 
     (async () => {
-      await setupNotifications();
+      const notificationsReady = await setupNotifications();
       if (!isFirebaseConfigured()) return;
 
-      if (supportsRemotePush()) {
+      if (supportsRemotePush() && notificationsReady) {
         const token = await getExpoPushToken();
         if (token) {
           await savePushToken(user, token);
@@ -89,7 +88,7 @@ export function KissProvider({ children }: { children: React.ReactNode }) {
 
         await sendPartnerEvent(user, { message, title });
 
-        if (supportsRemotePush()) {
+        if (supportsRemotePush() && await setupNotifications()) {
           const partnerToken = await getPartnerPushToken(user);
           if (partnerToken) {
             try {
@@ -100,11 +99,7 @@ export function KissProvider({ children }: { children: React.ReactNode }) {
           }
         }
 
-        const expoGoHint = isExpoGo
-          ? '\n\nEn Expo Go las notificaciones en segundo plano no funcionan. Si la otra persona tiene la aplicación abierta, lo verá al instante.'
-          : '';
-
-        Alert.alert(`${sentLabel} ${emoji}`, `Enviado a ${partner}.${expoGoHint}`);
+        Alert.alert(`${sentLabel} ${emoji}`, `Enviado a ${partner}.`);
       } catch {
         Alert.alert('Error', 'No se pudo enviar el mensaje. Revisa la conexión.');
       } finally {

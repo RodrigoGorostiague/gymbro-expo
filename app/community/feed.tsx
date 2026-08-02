@@ -18,7 +18,7 @@ import { muscleGroupLabels } from '../../utils/catalogMuscleGroups';
 import { listJointWorkoutPosts } from '../../services/jointWorkouts';
 
 const destinations = [
-  ['Explorar', '/community/discover'], ['Mi círculo', '/community/circle'], ['Entrenar juntos', '/community/joint-workout'], ['Solicitudes', '/community/requests'], ['Planes recibidos', '/community/plan-inbox'],
+  ['Explorar', '/community/discover'], ['Mi círculo', '/community/circle'], ['Entrenar juntos', '/community/joint-workout'], ['Solicitudes', '/community/requests'], ['Planes recibidos', '/community/plan-inbox'], ['Notificaciones', '/community/notifications'],
 ] as const;
 
 export default function CommunityFeedScreen() {

@@ -25,6 +25,7 @@ import { useTheme } from '../../../context/ThemeContext';
 import { useSocial } from '../../../context/SocialContext';
 import { CompletedExercise, CompletedSet, Routine, SetType, WorkoutAttempt } from '../../../types';
 import { vibrateRestTimerComplete } from '../../../utils/haptics';
+import { cancelRestNotification, scheduleRestNotification } from '../../../utils/notifications';
 import { generateId } from '../../../utils/storage';
 import { classifyTrainingFinalizationError } from '../../../services/trainingState';
 import { createWorkoutAttempt } from '../../../utils/workoutAttempts';
@@ -146,6 +147,7 @@ export default function ExecuteRoutineScreen() {
   const attemptRef = useRef<WorkoutAttempt | null>(null);
   const attemptIdRef = useRef<string | null>(null);
   const restEndsAtMsRef = useRef<number | null>(null);
+  const restNotificationIdRef = useRef<string | null>(null);
   const restCompletionAlertedRef = useRef(false);
   const reconcileElapsedRef = useRef<() => void>(() => undefined);
   const handleRestCompleteRef = useRef<() => void>(() => undefined);
@@ -231,6 +233,10 @@ export default function ExecuteRoutineScreen() {
     if (restCompletionAlertedRef.current) return;
     restCompletionAlertedRef.current = true;
     restEndsAtMsRef.current = null;
+    if (restNotificationIdRef.current) {
+      void cancelRestNotification(restNotificationIdRef.current);
+      restNotificationIdRef.current = null;
+    }
     setIsResting(false);
     setRestRemaining(0);
     vibrateRestTimerComplete();
@@ -244,11 +250,15 @@ export default function ExecuteRoutineScreen() {
 
   const startRestTimer = useCallback(() => {
     if (restRef.current) clearInterval(restRef.current);
+    if (restNotificationIdRef.current) void cancelRestNotification(restNotificationIdRef.current);
     const restEndsAtMs = Date.now() + restTimerConfig * 1000;
     restEndsAtMsRef.current = restEndsAtMs;
     restCompletionAlertedRef.current = false;
     setRestRemaining(restTimerConfig);
     setIsResting(true);
+    void scheduleRestNotification({ title: 'Descanso terminado', body: 'Continúa con la próxima serie.', seconds: restTimerConfig }).then((notificationId) => {
+      restNotificationIdRef.current = notificationId;
+    });
     if (activeWorkoutDraft) void updateActiveWorkout({ ...activeWorkoutDraft, restEndsAtMs });
     restRef.current = setInterval(() => {
       const remaining = Math.max(0, Math.ceil((restEndsAtMs - Date.now()) / 1000));
@@ -388,6 +398,10 @@ export default function ExecuteRoutineScreen() {
 
     if (elapsedRef.current) clearInterval(elapsedRef.current);
     if (restRef.current) clearInterval(restRef.current);
+    if (restNotificationIdRef.current) {
+      void cancelRestNotification(restNotificationIdRef.current);
+      restNotificationIdRef.current = null;
+    }
 
     const exercises: CompletedExercise[] = routine.exercises.map((exercise) => ({
       exerciseId: exercise.id,

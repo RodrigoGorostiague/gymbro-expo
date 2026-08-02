@@ -7,6 +7,7 @@ import { DataProvider } from '../context/DataContext';
 import { ShopProvider } from '../context/ShopContext';
 import { ThemeProvider, useTheme } from '../context/ThemeContext';
 import { SocialProvider } from '../context/SocialContext';
+import { NotificationRuntime } from '../components/NotificationRuntime';
 
 function RootStatusBar() {
   const { theme } = useTheme();
@@ -21,6 +22,7 @@ export default function RootLayout() {
           <SocialProvider>
             <ThemeProvider>
               <RootStatusBar />
+              <NotificationRuntime />
               <Stack screenOptions={{ headerShown: false, animation: 'fade' }}>
                 <Stack.Screen name="index" />
                 <Stack.Screen name="auth/update-password" options={{ animation: 'slide_from_bottom', presentation: 'modal' }} />
@@ -29,6 +31,7 @@ export default function RootLayout() {
                 <Stack.Screen name="community/circle" options={{ animation: 'slide_from_right', presentation: 'card' }} />
                 <Stack.Screen name="community/requests" options={{ animation: 'slide_from_right', presentation: 'card' }} />
                 <Stack.Screen name="community/plan-inbox" options={{ animation: 'slide_from_right', presentation: 'card' }} />
+                <Stack.Screen name="community/notifications" options={{ animation: 'slide_from_right', presentation: 'card' }} />
                 <Stack.Screen name="community/share-plan" options={{ animation: 'slide_from_bottom', presentation: 'modal' }} />
                 <Stack.Screen name="community/joint-workout" options={{ animation: 'slide_from_right', presentation: 'card' }} />
                 <Stack.Screen name="community/joint/[id]" options={{ animation: 'slide_from_right', presentation: 'card' }} />
