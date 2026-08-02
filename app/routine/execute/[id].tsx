@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   Alert,
   AppState,
+  Pressable,
   ScrollView,
   StyleSheet,
   Text,
@@ -14,12 +15,14 @@ import { AppScreenHeader } from '../../../components/AppScreenHeader';
 import { ExclusiveSetCelebration } from '../../../components/ExclusiveSetCelebration';
 import { GlassCard, ThemeBackground } from '../../../components/GlassCard';
 import { HapticPressable } from '../../../components/HapticPressable';
+import { ProfileAvatar } from '../../../components/ProfileAvatar';
 import { GlassButton, GlassInput } from '../../../components/UI';
 import { getRandomSetEncouragementMessage } from '../../../constants/encouragement';
 import { useAuth } from '../../../context/AuthContext';
 import { useData } from '../../../context/DataContext';
 import { useShop } from '../../../context/ShopContext';
 import { useTheme } from '../../../context/ThemeContext';
+import { useSocial } from '../../../context/SocialContext';
 import { CompletedExercise, CompletedSet, Routine, SetType, WorkoutAttempt } from '../../../types';
 import { vibrateRestTimerComplete } from '../../../utils/haptics';
 import { generateId } from '../../../utils/storage';
@@ -31,6 +34,10 @@ import { RewardReceipt } from '../../../types';
 import { matchesActiveWorkout } from '../../../utils/activeWorkoutReentry';
 import { reconcileActiveWorkoutTiming } from '../../../utils/activeWorkoutTiming';
 import { validateMesocycleExecutionLineage } from '../../../utils/mesocycleExecutionLineage';
+import { addJointWorkoutParticipant, completedJointWorkoutInput, createJointWorkout, finishJointWorkout, JointAction, JointParticipant, listJointWorkoutActions, listJointWorkouts, sendJointWorkoutAction } from '../../../services/jointWorkouts';
+import { PublicProfile } from '../../../services/socialGraph';
+import { getShopTheme } from '../../../constants/shopThemes';
+import { LinearGradient } from 'expo-linear-gradient';
 
 function readSingleParam(value: string | string[] | undefined): string | undefined {
   if (typeof value === 'string') {
@@ -100,15 +107,18 @@ export default function ExecuteRoutineScreen() {
     mesocycleId?: string | string[];
     weekNumber?: string | string[];
     plannedSessionId?: string | string[];
+    jointWorkoutId?: string | string[];
   }>();
   const id = readSingleParam(params.id) ?? '';
   const { user } = useAuth();
+  const { circle } = useSocial();
   const { getRoutine, addAttempt, mesocycles, activeWorkoutDraft, startActiveWorkout, updateActiveWorkout, cancelActiveWorkout, refreshActiveWorkoutTiming = async () => undefined } = useData();
   const { theme } = useTheme();
   const routine = getRoutine(id);
   const parsedLineage = parseLineage(params);
   const lineageValidation = validateMesocycleExecutionLineage(mesocycles, id, parsedLineage, readSingleParam(params.mesocycleId));
   const lineage = lineageValidation.valid ? lineageValidation.lineage : undefined;
+  const initialJointWorkoutId = readSingleParam(params.jointWorkoutId);
 
   const [phase, setPhase] = useState<'setup' | 'active' | 'done'>('setup');
   const [restSeconds, setRestSeconds] = useState('90');
@@ -121,6 +131,12 @@ export default function ExecuteRoutineScreen() {
   const [earnedGems, setEarnedGems] = useState(0);
   const [rewardReceipt, setRewardReceipt] = useState<RewardReceipt | null>(null);
   const [celebrationNonce, setCelebrationNonce] = useState(0);
+  const [jointWorkoutId, setJointWorkoutId] = useState<string | null>(initialJointWorkoutId ?? null);
+  const [jointTargets, setJointTargets] = useState<JointParticipant[]>([]);
+  const [jointInviteCandidates, setJointInviteCandidates] = useState<PublicProfile[]>([]);
+  const [selectedJointInviteIds, setSelectedJointInviteIds] = useState<string[]>([]);
+  const [jointActions, setJointActions] = useState<JointAction[]>([]);
+  const [isJointBusy, setJointBusy] = useState(false);
 
   const elapsedRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const restRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -206,6 +222,11 @@ export default function ExecuteRoutineScreen() {
     if (phase === 'active' && attemptIdRef.current && !activeWorkoutDraft) setPhase('setup');
   }, [activeWorkoutDraft, phase]);
 
+  useEffect(() => {
+    if (phase !== 'active' || !jointWorkoutId) return;
+    void loadJointState().catch(() => undefined);
+  }, [jointWorkoutId, phase]);
+
   const handleRestComplete = useCallback(() => {
     if (restCompletionAlertedRef.current) return;
     restCompletionAlertedRef.current = true;
@@ -253,6 +274,77 @@ export default function ExecuteRoutineScreen() {
     startTimeRef.current = Date.now();
   };
 
+  const loadJointState = async (workoutId = jointWorkoutId) => {
+    if (!workoutId) return;
+    const [sessions, actions] = await Promise.all([listJointWorkouts(), listJointWorkoutActions(workoutId)]);
+    const current = sessions.find((session) => session.id === workoutId);
+    setJointTargets(current?.participants.filter((participant) => !participant.isSelf && participant.status !== 'declined') ?? []);
+    setJointActions(actions);
+  };
+
+  const toggleJointInviteCandidate = (profileId: string) => {
+    if (isJointBusy) return;
+    setSelectedJointInviteIds((current) => current.includes(profileId)
+      ? current.filter((id) => id !== profileId)
+      : current.length < (jointWorkoutId ? Math.max(0, 3 - jointTargets.length) : 3)
+        ? [...current, profileId]
+        : current);
+  };
+
+  const inviteSelectedToJointWorkout = async () => {
+    if (!routine || phase !== 'active' || !selectedJointInviteIds.length) return;
+    const selected = jointInviteCandidates.filter((profile) => selectedJointInviteIds.includes(profile.uid));
+    if (!selected.length) return;
+    setJointBusy(true);
+    const successfulIds = new Set<string>();
+    let activeWorkoutId = jointWorkoutId;
+    try {
+      for (const profile of selected) {
+        try {
+          if (activeWorkoutId) {
+            await addJointWorkoutParticipant(activeWorkoutId, profile.uid);
+          } else {
+            activeWorkoutId = await createJointWorkout(profile.uid, routine);
+            setJointWorkoutId(activeWorkoutId);
+            router.setParams({ jointWorkoutId: activeWorkoutId });
+          }
+          successfulIds.add(profile.uid);
+        } catch {
+          // Keep failed recipients selected so the user can retry them together.
+        }
+      }
+      setSelectedJointInviteIds((current) => current.filter((id) => !successfulIds.has(id)));
+      setJointInviteCandidates((current) => current.filter((profile) => !successfulIds.has(profile.uid)));
+      if (activeWorkoutId) await loadJointState(activeWorkoutId);
+      const failedCount = selected.length - successfulIds.size;
+      if (!failedCount) Alert.alert('Invitaciones enviadas', `${successfulIds.size} ${successfulIds.size === 1 ? 'persona fue invitada' : 'personas fueron invitadas'} a entrenar con vos.`);
+      else Alert.alert(successfulIds.size ? 'Invitaciones parciales' : 'No se pudo invitar', successfulIds.size
+        ? `Se enviaron ${successfulIds.size} de ${selected.length} invitaciones. Las restantes siguen seleccionadas para reintentar.`
+        : 'No se pudo enviar ninguna invitación. Intentá nuevamente.');
+    } finally { setJointBusy(false); }
+  };
+
+  const openJointInvite = async () => {
+    if (phase !== 'active') return;
+    setJointBusy(true);
+    try {
+      const page = await circle();
+      const existing = new Set(jointTargets.map((participant) => participant.id));
+      setJointInviteCandidates(page.profiles.filter((profile) => !existing.has(profile.uid)));
+      setSelectedJointInviteIds([]);
+    } catch (error) {
+      Alert.alert('No se pudieron cargar tus conexiones', error instanceof Error ? error.message : 'Intentá nuevamente.');
+    } finally { setJointBusy(false); }
+  };
+
+  const sendJointAction = async (recipientId: string, action: 'push' | 'nice_set' | 'finish_strong' | 'partner_proud') => {
+    if (!jointWorkoutId) return;
+    setJointBusy(true);
+    try { await sendJointWorkoutAction(jointWorkoutId, recipientId, action); await loadJointState(); }
+    catch (error) { Alert.alert('No se pudo enviar', error instanceof Error ? error.message : 'Intentá nuevamente.'); }
+    finally { setJointBusy(false); }
+  };
+
   const updateSetValue = (setKey: SetKey, field: keyof SetRuntimeValues, value: string) => {
     if (completedSets[setKey]) return;
     setSetValues((prev) => {
@@ -289,7 +381,7 @@ export default function ExecuteRoutineScreen() {
     }
   };
 
-  const finishWorkout = async () => {
+  const finishWorkout = async (jointVisibility?: 'public' | 'circle' | 'private') => {
     if (!routine || finishInFlightRef.current) return;
     finishInFlightRef.current = true;
     setIsFinishing(true);
@@ -328,6 +420,7 @@ export default function ExecuteRoutineScreen() {
       });
       attemptRef.current = attempt;
       const receipt = await addAttempt(attempt);
+      if (jointWorkoutId) await finishJointWorkout(jointWorkoutId, jointVisibility ?? 'circle', completedJointWorkoutInput(routine, elapsed, exercises));
       setRewardReceipt(receipt);
       setEarnedGems(receiptTotal(receipt));
       void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => undefined);
@@ -346,9 +439,18 @@ export default function ExecuteRoutineScreen() {
   };
 
   const handleFinishConfirm = () => {
+    if (jointWorkoutId) {
+      Alert.alert('Finalizar entrenamiento conjunto', 'Elegí quién puede ver tu rutina dentro de la publicación conjunta.', [
+        { text: 'Seguir', style: 'cancel' },
+        { text: 'Público', onPress: () => void finishWorkout('public') },
+        { text: 'Mi círculo', onPress: () => void finishWorkout('circle') },
+        { text: 'Privado', onPress: () => void finishWorkout('private') },
+      ]);
+      return;
+    }
     Alert.alert('Finalizar entrenamiento', '¿Terminaste el entrenamiento?', [
       { text: 'Seguir', style: 'cancel' },
-      { text: 'Finalizar', onPress: finishWorkout },
+      { text: 'Finalizar', onPress: () => void finishWorkout() },
     ]);
   };
 
@@ -431,6 +533,8 @@ export default function ExecuteRoutineScreen() {
 
   const totalSets = routine.exercises.reduce((acc, e) => acc + e.sets.length, 0);
   const doneSets = Object.values(completedSets).filter(Boolean).length;
+  const jointInviteLimit = jointWorkoutId ? Math.max(0, 3 - jointTargets.length) : 3;
+  const selectedJointInviteCount = selectedJointInviteIds.length;
 
   return (
     <ThemeBackground>
@@ -458,6 +562,25 @@ export default function ExecuteRoutineScreen() {
         <Text style={[styles.progress, { color: theme.textMuted }]}>
           Series completadas: {doneSets}/{totalSets}
         </Text>
+        <GlassCard style={styles.jointCard}>
+          <Text style={[styles.jointTitle, { color: theme.text }]}>Entrenamiento conjunto</Text>
+          {!jointWorkoutId ? <>
+            <Text style={{ color: theme.textMuted }}>Invitá a un Bro o Partner mientras esta rutina está activa.</Text>
+            <GlassButton title="Invitar a entrenar juntos" variant="secondary" loading={isJointBusy} disabled={isJointBusy} onPress={() => void openJointInvite()} />
+          </> : <>
+            <Text style={{ color: theme.textMuted }}>Sesión conjunta activa. Las acciones se envían sólo a conexiones actuales.</Text>
+            <GlassButton title="Actualizar grupo" variant="secondary" disabled={isJointBusy} onPress={() => void loadJointState()} />
+            <GlassButton title="Agregar Bro o Partner" variant="secondary" disabled={isJointBusy || jointTargets.length >= 3} onPress={() => void openJointInvite()} />
+            {jointTargets.map((target) => <View key={target.id} style={styles.jointTarget}><Text style={{ color: theme.text }}>{target.alias} · {target.status}</Text><View style={styles.jointActions}><GlassButton title="¡Dale!" variant="secondary" disabled={isJointBusy} onPress={() => void sendJointAction(target.id, 'push')} /><GlassButton title="Buena serie" variant="secondary" disabled={isJointBusy} onPress={() => void sendJointAction(target.id, 'nice_set')} />{target.relationshipKind === 'partner' ? <GlassButton title="Orgulloso de vos" variant="secondary" disabled={isJointBusy} onPress={() => void sendJointAction(target.id, 'partner_proud')} /> : null}</View></View>)}
+            {jointActions.slice(0, 2).map((action) => <Text key={action.id} style={{ color: theme.textMuted }}>Acción: {action.action.replace('_', ' ')}</Text>)}
+          </>}
+          {jointInviteCandidates.length && jointInviteLimit > 0 ? <View style={styles.jointInviteList}><Text style={{ color: theme.textMuted }}>Elegí hasta {jointInviteLimit} {jointInviteLimit === 1 ? 'persona' : 'personas'} para invitar juntas.</Text>{jointInviteCandidates.map((profile) => {
+            const recipientTheme = getShopTheme(profile.presentationThemeId ?? '') ?? getShopTheme('profile-rodaja')!;
+            const selected = selectedJointInviteIds.includes(profile.uid);
+            const selectionFull = !selected && selectedJointInviteCount >= jointInviteLimit;
+            return <Pressable key={profile.uid} accessibilityRole="checkbox" accessibilityLabel={`Invitar a ${profile.alias}`} accessibilityState={{ selected, disabled: isJointBusy || selectionFull }} disabled={isJointBusy || selectionFull} onPress={() => toggleJointInviteCandidate(profile.uid)}><GlassCard style={[styles.jointInviteMember, selected && styles.jointInviteMemberSelected]}><LinearGradient colors={[recipientTheme.primary, recipientTheme.accent, recipientTheme.secondary]} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={styles.jointInviteBanner}><ProfileAvatar avatarId={profile.avatarId} size={48} borderColor="rgba(255,255,255,0.7)" /><View style={styles.jointInviteCopy}><Text style={styles.jointInviteAlias}>{profile.alias}</Text><Text style={styles.jointInviteRelationship}>{profile.relationshipStatus === 'partner' ? 'Partner' : 'Bro'}</Text></View>{selected ? <View style={styles.jointInviteSelectedBadge}><Text style={styles.jointInviteSelectedBadgeText}>Seleccionado</Text></View> : null}</LinearGradient><View style={styles.jointInviteChips}>{Object.entries(profile.categories).map(([key, value]) => <View key={key} accessibilityLabel={`${key}: ${value}`} style={styles.jointInviteChip}><Text style={styles.jointInviteChipText}>{value}</Text></View>)}</View></GlassCard></Pressable>;
+          })}<View style={styles.jointInviteAction}><Text style={[styles.jointInviteCount, { color: theme.textMuted }]}>{selectedJointInviteCount} {selectedJointInviteCount === 1 ? 'persona seleccionada' : 'personas seleccionadas'}</Text><GlassButton title={`Invitar a ${selectedJointInviteCount} ${selectedJointInviteCount === 1 ? 'persona' : 'personas'}`} loading={isJointBusy} disabled={isJointBusy || !selectedJointInviteCount} onPress={() => void inviteSelectedToJointWorkout()} /></View></View> : null}
+        </GlassCard>
 
         <ScrollView contentContainerStyle={styles.scroll} showsVerticalScrollIndicator={false}>
           {routine.exercises.map((exercise, exIndex) => (
@@ -665,6 +788,24 @@ const styles = StyleSheet.create({
     left: 16,
     right: 16,
   },
+  jointCard: { gap: 10, marginBottom: 12 },
+  jointTitle: { fontSize: 16, fontWeight: '800' },
+  jointInviteList: { gap: 10 },
+  jointInviteMember: { gap: 12, paddingVertical: 18 },
+  jointInviteMemberSelected: { borderColor: '#FFFFFF', borderWidth: 2 },
+  jointInviteBanner: { alignItems: 'center', borderRadius: 15, flexDirection: 'row', gap: 11, padding: 12 },
+  jointInviteCopy: { flex: 1, gap: 2 },
+  jointInviteAlias: { color: '#FFFFFF', fontSize: 18, fontWeight: '900', letterSpacing: 0.1 },
+  jointInviteRelationship: { color: 'rgba(255,255,255,0.82)', fontSize: 12, fontWeight: '700' },
+  jointInviteSelectedBadge: { backgroundColor: 'rgba(255,255,255,0.24)', borderColor: 'rgba(255,255,255,0.7)', borderRadius: 999, borderWidth: 1, paddingHorizontal: 8, paddingVertical: 4 },
+  jointInviteSelectedBadgeText: { color: '#FFFFFF', fontSize: 10, fontWeight: '900' },
+  jointInviteChips: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
+  jointInviteChip: { backgroundColor: 'rgba(0,0,0,0.18)', borderRadius: 999, paddingHorizontal: 10, paddingVertical: 6 },
+  jointInviteChipText: { color: '#FFFFFF', fontSize: 12, fontWeight: '800' },
+  jointInviteAction: { gap: 8, paddingTop: 2 },
+  jointInviteCount: { fontSize: 13, fontWeight: '700', textAlign: 'center' },
+  jointTarget: { gap: 6 },
+  jointActions: { flexDirection: 'row', gap: 8 },
   center: { justifyContent: 'center', padding: 20 },
   doneCard: { alignItems: 'center', padding: 32 },
   doneEmoji: { fontSize: 48, marginBottom: 12 },
