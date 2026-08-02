@@ -17,7 +17,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { muscleGroupLabels } from '../../utils/catalogMuscleGroups';
 
 const destinations = [
-  ['Explorar', '/community/discover'], ['Mi círculo', '/community/circle'], ['Solicitudes', '/community/requests'],
+  ['Explorar', '/community/discover'], ['Mi círculo', '/community/circle'], ['Solicitudes', '/community/requests'], ['Planes recibidos', '/community/plan-inbox'],
 ] as const;
 
 export default function CommunityFeedScreen() {

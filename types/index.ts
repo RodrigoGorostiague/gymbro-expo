@@ -1,3 +1,5 @@
+import type { AvatarId } from '../constants/avatars';
+
 export type UserId = string;
 export type LegacyAlias = 'rodaja' | 'brisas';
 // Firebase-only features still use these aliases until their own migration work unit.
@@ -108,6 +110,8 @@ export interface RoutineExercise {
   loadMode?: ExerciseLoadMode;
   loadUnit?: LoadUnit;
   attribution?: MuscleAttribution;
+  /** Catalog dimensions copied into completed attempts for stable analytics. */
+  catalog?: Exercise['catalog'];
   variant: ExerciseVariant;
   sets: RoutineSet[];
 }
@@ -159,6 +163,26 @@ export interface Mesocycle {
   durationWeeks: number;
   startDate?: string;
   createdAt: string;
+}
+
+export interface ProfilePlanLibrary {
+  routines: Routine[];
+  mesocycles: Mesocycle[];
+}
+
+export interface PrivatePlanShareRequest {
+  id: string;
+  senderAlias: string;
+  senderAvatarId: AvatarId;
+  senderThemeId: string | null;
+  contentKind: 'routine' | 'mesocycle';
+  snapshot: ProfilePlanLibrary & { mesocycle?: Mesocycle };
+  createdAt: string;
+}
+
+export interface PrivatePlanShareImport {
+  routineIds: string[];
+  mesocycleId: string | null;
 }
 
 export type ShareStatus = 'pending' | 'accepted' | 'rejected';
@@ -342,7 +366,25 @@ export interface AttemptExerciseSnapshot {
   readonly exerciseId: string | null;
   readonly recordedName: string;
   readonly attribution: MuscleAttribution | null;
+  /** Frozen catalog dimensions. Older attempts intentionally omit these. */
+  readonly catalog?: {
+    readonly movementPattern: string | null;
+    readonly muscleParticipations: readonly CatalogMuscleParticipation[];
+  };
   readonly sets: readonly AttemptSetSnapshot[];
+}
+
+export type AnthropometricMetricType = 'body_weight';
+
+export interface BodyMetric {
+  readonly id: string;
+  readonly owner: UserId;
+  readonly metricType: AnthropometricMetricType;
+  readonly value: number;
+  readonly unit: 'kg';
+  readonly measuredAt: string;
+  readonly source: 'manual';
+  readonly notes?: string;
 }
 
 export interface AttemptCompletion {
@@ -422,10 +464,13 @@ export interface AppTheme {
   blurTint: 'light' | 'dark';
   tabBarBackground: string;
   decoration?: ThemeDecoration;
+  interaction?: ThemeInteraction;
 }
 
 export type ThemeDecoration = 'star' | 'moon' | 'sun' | 'leaf' | 'snowflake';
 export type ShopThemeCategory = 'profile' | 'basic' | 'violet' | 'special';
+export type ShopThemeRarity = 'common' | 'rare' | 'exclusive';
+export type ThemeInteraction = 'set-celebration';
 
 export interface WeeklyGoalState {
   bonusWeekKey: string | null;

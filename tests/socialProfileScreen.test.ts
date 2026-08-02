@@ -7,6 +7,7 @@ globalThis.IS_REACT_ACT_ENVIRONMENT = true;
 const social = vi.hoisted(() => ({
   getProfile: vi.fn().mockResolvedValue({ uid: 'member-2', alias: 'Alex', categories: {} }),
   getSummary: vi.fn(),
+  getProfilePlanLibrary: vi.fn().mockResolvedValue({ routines: [], mesocycles: [] }),
   command: vi.fn().mockResolvedValue({ targetId: 'member-2' }),
   realtimeRevision: 0,
 }));
@@ -85,5 +86,18 @@ describe('relationship transition actions', () => {
     await act(async () => { buttons(tree!).find((button) => button.props.title === 'Solicitar upgrade a Partner')!.props.onPress(); });
 
     expect(alert).toHaveBeenCalledWith('Acción no disponible', 'Esta transición de relación no está disponible.');
+  });
+
+  test('shows shared planning only for an accepted connection', async () => {
+    social.getSummary.mockResolvedValue({ targetId: 'member-2', relationshipKind: 'bro' });
+    social.getProfilePlanLibrary.mockResolvedValue({
+      routines: [{ id: 'routine-1', name: 'Upper', exercises: [], muscleGroups: [], createdAt: '2026-08-02T00:00:00.000Z' }],
+      mesocycles: [{ id: 'mesocycle-1', name: 'Strength block', goal: 'Strength', durationWeeks: 4, weeks: [], status: 'draft', createdAt: '2026-08-02T00:00:00.000Z' }],
+    });
+    let tree: TestRenderer.ReactTestRenderer;
+    await act(async () => { tree = TestRenderer.create(React.createElement(PublicProfileScreen)); });
+
+    expect(social.getProfilePlanLibrary).toHaveBeenCalledWith('member-2');
+    expect(tree!.root.findAll((node) => String(node.type) === 'Text').map((node) => node.children.join(''))).toEqual(expect.arrayContaining(['Planificación', 'Upper', 'Strength block']));
   });
 });

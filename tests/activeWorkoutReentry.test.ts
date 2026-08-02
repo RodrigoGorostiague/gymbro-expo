@@ -9,6 +9,7 @@ import ExecuteRoutineScreen from '../app/routine/execute/[id]';
 import { matchesActiveWorkout } from '../utils/activeWorkoutReentry';
 import { __emitAppState } from './helpers/reactNativeStub';
 
+vi.mock('react-native-url-polyfill/auto', () => ({}));
 vi.mock('../context/AuthContext', () => ({ useAuth: () => ({ user: 'rodaja', welcomeMessage: null, setWelcomeMessage: vi.fn() }) }));
 vi.mock('../context/ShopContext', () => ({ useShop: () => ({ retryPendingRewards: vi.fn() }) }));
 vi.mock('../components/LogoutButton', () => ({ LogoutButton: () => null }));
@@ -70,7 +71,7 @@ describe('active workout re-entry', () => {
 
   test('keeps setup visible when the execute route lineage does not match the draft', () => {
     setMockParams({ id: routineA.id, mesocycleId: lineage.mesocycleId, weekNumber: '1', plannedSessionId: lineage.plannedSessionId });
-    setMockData({ getRoutine: vi.fn(() => routineA), activeWorkoutDraft: { ...draft, lineage: { ...lineage, plannedSessionId: 'other' } }, addAttempt: vi.fn(), startActiveWorkout: vi.fn(), updateActiveWorkout: vi.fn(), cancelActiveWorkout: vi.fn() });
+    setMockData({ getRoutine: vi.fn(() => routineA), mesocycles: [mesocycle], activeWorkoutDraft: { ...draft, lineage: { ...lineage, plannedSessionId: 'other' } }, addAttempt: vi.fn(), startActiveWorkout: vi.fn(), updateActiveWorkout: vi.fn(), cancelActiveWorkout: vi.fn() });
     const screen = render(React.createElement(ExecuteRoutineScreen));
     expect(findButton(screen.root, 'Iniciar entrenamiento')).toBeTruthy();
   });

@@ -15,17 +15,19 @@ import { MuscleGroup } from '../../types';
 import { muscleGroupLabel } from '../../utils/catalogMuscleGroups';
 import {
   buildHistoricalOptions,
+  aggregateMuscleStatistics,
   SignalComparison,
   selectCoreProgressSignals,
   selectExercisePerformance,
   selectRoutineDetails,
+  selectTrainingStatistics,
   selectWeightedExposure,
 } from '../../utils/analytics';
 
-type Scope = 'overview' | 'muscle' | 'exercise' | 'routine';
+type Scope = 'overview' | 'muscle' | 'pattern' | 'exercise' | 'routine';
 const SCOPES: { value: Scope; label: string }[] = [
   { value: 'overview', label: 'Resumen' }, { value: 'muscle', label: 'Músculos' },
-  { value: 'exercise', label: 'Ejercicios' }, { value: 'routine', label: 'Rutinas' },
+  { value: 'pattern', label: 'Patrones' }, { value: 'exercise', label: 'Ejercicios' }, { value: 'routine', label: 'Rutinas' },
 ];
 
 export default function ProgressScreen() {
@@ -40,11 +42,19 @@ export default function ProgressScreen() {
   const options = useMemo(() => buildHistoricalOptions(attempts, owner, exercises.map((e) => e.id), routines.map((r) => r.id)), [attempts, owner, exercises, routines]);
   const core = useMemo(() => selectCoreProgressSignals(attempts, owner), [attempts, owner]);
   const activity = core;
+  const statistics = useMemo(() => selectTrainingStatistics(attempts, owner, core.periods.current.start, core.periods.current.end), [attempts, owner, core.periods]);
   const exposure = useMemo(() => selectWeightedExposure(attempts, owner), [attempts, owner]);
   const observedMuscles = useMemo(() => Object.keys({ ...exposure.current, ...exposure.previous })
     .filter((id) => catalogMuscleGroups.some((group) => group.id === id))
     .sort((left, right) => muscleGroupLabel(catalogMuscleGroups, left).localeCompare(muscleGroupLabel(catalogMuscleGroups, right), 'es')),
   [catalogMuscleGroups, exposure]);
+  const selectedMuscleStatistics = useMemo(() => {
+    if (!muscle) return null;
+    const selected = catalogMuscleGroups.find((group) => group.id === muscle);
+    const ids = !selected ? [muscle] : catalogMuscleGroups.filter((group) => group.id === selected.id
+      || group.path.startsWith(`${selected.path}/`) || group.path.startsWith(`${selected.path} > `) || group.path.startsWith(`${selected.path}.`)).map((group) => group.id);
+    return aggregateMuscleStatistics(statistics.muscles, ids);
+  }, [catalogMuscleGroups, muscle, statistics.muscles]);
   const performance = useMemo(() => selectExercisePerformance(attempts, owner, scope === 'exercise' ? filterId : null), [attempts, owner, scope, filterId]);
   const routine = useMemo(() => selectRoutineDetails(attempts, owner, scope === 'routine' ? filterId : null), [attempts, owner, scope, filterId]);
   return (
@@ -63,6 +73,11 @@ export default function ProgressScreen() {
             <Text style={[styles.body, { color: theme.textMuted }]}>{dataState === 'ready' ? `Comparado con ${formatPeriod(core.periods.previous.start, core.periods.previous.end)}. Las señales se muestran por separado.` : 'No mostraremos afirmaciones hasta terminar de cargar tus datos.'}</Text>
           </GlassCard>
 
+          <HapticPressable accessibilityRole="button" accessibilityLabel="Registrar peso corporal" onPress={() => router.push('/profile/measurements')} style={[styles.weightAction, { borderColor: theme.primary, backgroundColor: theme.glass }]}>
+            <Text style={[styles.weightActionTitle, { color: theme.text }]}>Peso corporal</Text>
+            <Text style={{ color: theme.textMuted }}>Registrá una medición para habilitar fuerza relativa.</Text>
+          </HapticPressable>
+
           {quarantinedSessionCount > 0 ? <GlassCard style={styles.hero}><Text accessibilityRole="header" style={[styles.chartTitle, { color: theme.text }]}>Resolver historial de entrenamientos anterior</Text><Text style={[styles.body, { color: theme.textMuted }]}>{quarantinedSessionCount} sesiones de entrenamiento sin propietario permanecen excluidas de las métricas. Elija una vez entre asignarlas todas a {owner} o eliminarlas permanentemente.</Text><View style={styles.scopeRow}><HapticPressable accessibilityRole="button" accessibilityHint={`Asigna todas las sesiones anteriores a ${owner}`} onPress={() => void resolveQuarantine('assign')} style={[styles.action, { backgroundColor: theme.primary }]}><Text style={{ color: theme.onPrimary, fontWeight: '800' }}>Asignar a {owner}</Text></HapticPressable><HapticPressable accessibilityRole="button" accessibilityHint="Abre una confirmación de eliminación irreversible" onPress={() => Alert.alert('¿Eliminar las sesiones anteriores?', 'Esto elimina permanentemente todas las sesiones de entrenamiento en cuarentena que no tienen propietario.', [{ text: 'Cancelar', style: 'cancel' }, { text: 'Eliminar permanentemente', style: 'destructive', onPress: () => void resolveQuarantine('delete') }])} style={[styles.action, { backgroundColor: theme.glass, borderColor: theme.glassBorder, borderWidth: 1 }]}><Text style={{ color: theme.text, fontWeight: '800' }}>Eliminar permanentemente</Text></HapticPressable></View></GlassCard> : null}
 
           <View accessibilityRole="tablist" style={styles.scopeRow}>{SCOPES.map((item) => <HapticPressable key={item.value} accessibilityRole="tab" accessibilityState={{ selected: scope === item.value }} accessibilityLabel={`${item.label}, sección`} onPress={() => { setScope(item.value); setFilterId(null); setSearch(''); }} style={[styles.scope, { borderColor: theme.glassBorder, backgroundColor: scope === item.value ? theme.primary : theme.glass }]}><Text style={{ color: scope === item.value ? theme.onPrimary : theme.text, fontWeight: '700' }}>{item.label}</Text></HapticPressable>)}</View>
@@ -70,8 +85,9 @@ export default function ProgressScreen() {
           {dataState === 'loading' ? <GlassCard><View accessibilityLabel="Cargando panel de progreso" style={styles.skeleton}><View style={[styles.skeletonLine, { backgroundColor: theme.glassBorder }]} /><View style={[styles.skeletonLine, { backgroundColor: theme.glassBorder }]} /></View></GlassCard>
           : dataState === 'error' ? <GlassCard><Text accessibilityRole="alert" style={[styles.chartTitle, { color: theme.text }]}>No se pudo cargar tu progreso</Text><Text style={[styles.body, { color: theme.textMuted }]}>{dataError ?? 'Tus datos guardados no cambiaron.'}</Text><HapticPressable accessibilityRole="button" accessibilityHint="Vuelve a cargar los datos guardados" onPress={retryData} style={[styles.action, { backgroundColor: theme.primary }]}><Text style={{ color: theme.onPrimary, fontWeight: '800' }}>Reintentar</Text></HapticPressable></GlassCard>
           : <GlassCard style={styles.chartCard}>
-            {scope === 'overview' ? <View><Text style={[styles.chartTitle, { color: theme.text }]}>Resumen · {formatPeriod(core.periods.current.start, core.periods.current.end)}</Text><View style={styles.statsGrid}>{[['Sesiones', activity.comparisons.attempts, activity.current.attempts], ['Series válidas', core.comparisons.validSets, core.current.validSets], ['Adherencia', core.comparisons.adherence, core.current.adherence === null ? '—' : `${Math.round(core.current.adherence * 100)}%`], ['Duración', activity.comparisons.durationSeconds, `${Math.round(activity.current.durationSeconds / 60)} min`]].map(([label, comparison, value]) => <View key={label as string} style={[styles.metric, { borderColor: theme.glassBorder }]}><Text style={[styles.statValue, { color: theme.text }]}>{value as React.ReactNode}</Text><Text style={[styles.statLabel, { color: theme.textMuted }]}>{label as string} · {describeComparison(comparison as typeof core.comparisons.attempts)}</Text></View>)}</View></View> : null}
-            {scope === 'muscle' ? <View><Text style={[styles.chartTitle, { color: theme.text }]}>Exposición muscular ponderada</Text><Text style={[styles.body, { color: theme.textMuted }]}>Músculos registrados en tus entrenamientos. La exposición no representa crecimiento muscular.</Text>{observedMuscles.length === 0 ? <Text style={[styles.detail, { color: theme.textMuted }]}>Completa una rutina para ver exposición muscular.</Text> : <><View style={styles.wrap}>{observedMuscles.map((id) => <FilterChip key={id} label={muscleGroupLabel(catalogMuscleGroups, id)} selected={muscle === id} onPress={() => setMuscle(id)} />)}</View>{muscle ? <Text style={[styles.detail, { color: theme.text }]}>{muscleGroupLabel(catalogMuscleGroups, muscle)}: {(exposure.current[muscle] ?? 0).toFixed(1)} actuales · {(exposure.previous[muscle] ?? 0).toFixed(1)} anteriores</Text> : <Text style={[styles.detail, { color: theme.textMuted }]}>Elegí un músculo para comparar períodos.</Text>}</>}</View> : null}
+            {scope === 'overview' ? <View><Text style={[styles.chartTitle, { color: theme.text }]}>Resumen · {formatPeriod(core.periods.current.start, core.periods.current.end)}</Text><View style={styles.statsGrid}>{[['Sesiones', activity.comparisons.attempts, activity.current.attempts], ['Series efectivas', core.comparisons.validSets, statistics.effectiveSets], ['Adherencia', core.comparisons.adherence, core.current.adherence === null ? '—' : `${Math.round(core.current.adherence * 100)}%`], ['Volumen', undefined, `${Math.round(Object.values(statistics.volumeByUnit).reduce((total, value) => total + value, 0))} kg·rep`], ['Repeticiones', undefined, statistics.repetitions], ['Récords', undefined, statistics.records]].map(([label, comparison, value]) => <View key={label as string} style={[styles.metric, { borderColor: theme.glassBorder }]}><Text style={[styles.statValue, { color: theme.text }]}>{value as React.ReactNode}</Text><Text style={[styles.statLabel, { color: theme.textMuted }]}>{label as string}{comparison ? ` · ${describeComparison(comparison as typeof core.comparisons.attempts)}` : ''}</Text></View>)}</View></View> : null}
+            {scope === 'muscle' ? <View><Text style={[styles.chartTitle, { color: theme.text }]}>Exposición muscular ponderada</Text><Text style={[styles.body, { color: theme.textMuted }]}>Músculos registrados en tus entrenamientos. La exposición no representa crecimiento muscular.</Text>{observedMuscles.length === 0 ? <Text style={[styles.detail, { color: theme.textMuted }]}>Completa una rutina para ver exposición muscular.</Text> : <><View style={styles.wrap}>{observedMuscles.map((id) => <FilterChip key={id} label={muscleGroupLabel(catalogMuscleGroups, id)} selected={muscle === id} onPress={() => setMuscle(id)} />)}</View>{muscle && selectedMuscleStatistics ? <Text style={[styles.detail, { color: theme.text }]}>{muscleGroupLabel(catalogMuscleGroups, muscle)}: {selectedMuscleStatistics.weightedSets.toFixed(1)} series ponderadas · {selectedMuscleStatistics.direct.toFixed(1)} directas · frecuencia {selectedMuscleStatistics.frequency}</Text> : <Text style={[styles.detail, { color: theme.textMuted }]}>Elegí un músculo para comparar períodos.</Text>}</>}</View> : null}
+            {scope === 'pattern' ? <View><Text style={[styles.chartTitle, { color: theme.text }]}>Patrones de movimiento</Text><Text style={[styles.body, { color: theme.textMuted }]}>Distribución descriptiva de series efectivas. No es un diagnóstico de balance muscular.</Text>{Object.entries(statistics.patterns).length === 0 ? <Text style={[styles.detail, { color: theme.textMuted }]}>Las próximas sesiones guardarán patrones de movimiento para esta vista.</Text> : Object.entries(statistics.patterns).sort(([, left], [, right]) => right.effectiveSets - left.effectiveSets).map(([pattern, value]) => <View key={pattern} style={[styles.patternRow, { borderColor: theme.glassBorder }]}><View style={{ flex: 1 }}><Text style={[styles.patternName, { color: theme.text }]}>{pattern}</Text><Text style={{ color: theme.textMuted }}>{value.exercises} ejercicios · {Math.round(value.volume)} kg·rep</Text></View><Text style={[styles.patternSets, { color: theme.primary }]}>{value.effectiveSets}</Text></View>)}</View> : null}
             {(scope === 'exercise' || scope === 'routine') ? <EntityPanel kind={scope} options={scope === 'exercise' ? options.exercises : options.routines} search={search} setSearch={setSearch} selected={filterId} setSelected={setFilterId} /> : null}
             {scope === 'exercise' && filterId ? performance.partitions.length === 0 ? <EmptyFilter onClear={() => setFilterId(null)} /> : <View>{performance.state === 'incompatible' ? <Text style={[styles.body, { color: theme.textMuted }]}>Hay modos o unidades incompatibles; se muestran por separado.</Text> : performance.state === 'insufficient' ? <Text style={[styles.body, { color: theme.textMuted }]}>Faltan observaciones válidas en ambos períodos para afirmar una tendencia.</Text> : null}{performance.partitions.flatMap((partition) => Object.keys(partition.series.at(-1)?.values ?? {}).map((indicator) => { const points = partition.series.map((point) => ({ date: point.at, label: new Date(point.at).toLocaleDateString('es', { day: 'numeric', month: 'numeric' }), maxWeight: point.values[indicator] ?? 0, totalReps: 0, tonnage: 0 })); const unit = indicator === 'reps' ? '' : indicator === 'volume' ? `${partition.unit}·rep` : partition.unit; return <View key={`${partition.key}:${indicator}`} style={styles.partition}><SimpleLineChart data={points} dataKey="maxWeight" unit={unit} label={`${partition.mode === 'external-load' ? 'carga externa' : partition.mode === 'bodyweight' ? 'peso corporal' : 'asistido'} · ${indicator === 'reps' ? 'repeticiones' : indicator === 'load' ? 'carga' : indicator === 'volume' ? 'volumen' : indicator === 'bodyweight' ? 'peso corporal' : 'asistencia'} (${unit || 'conteo'})`} summary={`${formatPeriod(core.periods.previous.start, core.periods.previous.end)} frente a ${formatPeriod(core.periods.current.start, core.periods.current.end)}. ${partition.observationCount} observaciones compatibles. ${describeComparison(partition.trends[indicator])}`} /></View>; }))}</View> : null}
             {scope === 'routine' && filterId ? routine.state === 'no-data' ? <EmptyFilter onClear={() => setFilterId(null)} /> : <View><Text style={[styles.detail, { color: theme.text }]}>Completadas: {routine.current?.completionCount ?? 0} · período anterior: {routine.previous?.completionCount ?? 0}</Text><Text style={[styles.body, { color: theme.textMuted }]}>Adherencia actual: {routine.current?.adherence == null ? 'sin datos suficientes' : `${Math.round(routine.current.adherence * 100)}%`} · duración mediana: {routine.current?.medianDurationSeconds == null ? 'desconocida' : `${Math.round(routine.current.medianDurationSeconds / 60)} min`}</Text><Text style={[styles.body, { color: theme.textMuted }]}>Trabajo externo actual: {Object.entries(routine.current?.workload ?? {}).map(([unit, value]) => `${Math.round(value)} ${unit}·rep`).join(', ') || 'sin datos compatibles'}</Text></View> : null}
@@ -182,6 +198,11 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     paddingVertical: 24,
   },
+  weightAction: { borderWidth: 1, borderRadius: 16, padding: 14, marginBottom: 14 },
+  weightActionTitle: { fontSize: 15, fontWeight: '800', marginBottom: 3 },
+  patternRow: { borderTopWidth: 1, paddingVertical: 12, flexDirection: 'row', alignItems: 'center', gap: 12 },
+  patternName: { fontSize: 15, fontWeight: '800' },
+  patternSets: { fontSize: 22, fontWeight: '900' },
   recentTitle: {
     fontSize: 16,
     fontWeight: '700',

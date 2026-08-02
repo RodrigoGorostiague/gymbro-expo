@@ -36,7 +36,8 @@
           "sounds": []
         }
       ],
-      "expo-font"
+      "expo-font",
+      "expo-secure-store"
     ],
     "extra": {
       "firebaseApiKey": "AIzaSyDx1ndii4iuEpNJi171VqNJmet-61el06M",

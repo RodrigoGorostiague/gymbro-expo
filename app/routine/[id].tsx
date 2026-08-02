@@ -19,11 +19,15 @@ import { GlassButton, GlassInput } from '../../components/UI';
 import { useData } from '../../context/DataContext';
 import { useAuth } from '../../context/AuthContext';
 import { useTheme } from '../../context/ThemeContext';
-import { Exercise, ExerciseSet, MuscleGroup, RoutineExercise } from '../../types';
+import { Exercise, ExerciseSet, MuscleGroup, RoutineExercise, SetType } from '../../types';
 import { buildDecimalDraftMap, type DecimalDraftMap, normalizeDecimalInput } from '../../utils/decimalInput';
 import { generateId } from '../../utils/storage';
 import { matchesActiveWorkout } from '../../utils/activeWorkoutReentry';
 import { muscleGroupLabel } from '../../utils/catalogMuscleGroups';
+
+function nextEffectiveSetNumber(sets: readonly ExerciseSet[]): number {
+  return Math.max(0, ...sets.map((set) => typeof set.tipo === 'number' ? set.tipo : 0)) + 1;
+}
 
 export default function EditRoutineScreen() {
   const { id, addExerciseId } = useLocalSearchParams<{ id: string; addExerciseId?: string }>();
@@ -65,6 +69,11 @@ export default function EditRoutineScreen() {
     loadMode: exercise.loadMode,
     loadUnit: exercise.loadUnit,
     attribution: exercise.attribution,
+    catalog: exercise.catalog ? {
+      movementPattern: exercise.catalog.movementPattern,
+      equipment: exercise.catalog.equipment,
+      muscleParticipations: exercise.catalog.muscleParticipations.map((participation) => ({ ...participation })),
+    } : undefined,
     variant: exercise.variant,
     sets: exercise.defaultSets.map((set) => ({
       id: generateId(),
@@ -123,6 +132,7 @@ export default function EditRoutineScreen() {
 
       normalizedExercises.push({
         ...exercise,
+        catalog: exercise.catalog ?? catalogExercises.find((candidate) => candidate.id === exercise.catalogExerciseId)?.catalog,
         sets: normalizedSets,
       });
     }
@@ -160,7 +170,7 @@ export default function EditRoutineScreen() {
                 ...exercise.sets,
                 {
                   id: nextId,
-                  tipo: exercise.sets.length + 1,
+                  tipo: nextEffectiveSetNumber(exercise.sets),
                   weight: 0,
                   reps: 0,
                 },
@@ -187,6 +197,16 @@ export default function EditRoutineScreen() {
     );
   };
 
+  const updateSetType = (exerciseId: string, setId: string, type: 'C' | 'effective' | 'F') => {
+    const exercise = exercises.find((candidate) => candidate.id === exerciseId);
+    if (!exercise) return;
+    const current = exercise.sets.find((set) => set.id === setId);
+    const tipo: SetType = type === 'effective'
+      ? (typeof current?.tipo === 'number' ? current.tipo : nextEffectiveSetNumber(exercise.sets))
+      : type;
+    updateSet(exerciseId, setId, { tipo, ...(type === 'F' ? { reps: 0 } : {}) });
+  };
+
   const removeSet = (exerciseId: string, setId: string) => {
     setExercises((current) =>
       current.map((exercise) =>
@@ -207,15 +227,13 @@ export default function EditRoutineScreen() {
   return (
     <ThemeBackground>
       <SafeAreaView style={styles.safe}>
-        <AppNavBar
+          <AppNavBar
           onBack={() => router.back()}
           trailing={
-            <HapticPressable
+            <View style={{ flexDirection: 'row', gap: 14 }}><HapticPressable accessibilityLabel={`Compartir ${getRoutine(id)?.name ?? ''}`} onPress={() => { const routine = getRoutine(id); if (routine) router.push({ pathname: '/community/share-plan', params: { kind: 'routine', id: routine.id, name: routine.name } }); }}><Text style={{ color: theme.primary, fontWeight: '800' }}>Compartir</Text></HapticPressable><HapticPressable
               accessibilityLabel={`${matchesActiveWorkout(activeWorkoutDraft, { owner: user, routineId: id }) ? 'Continuar' : 'Ejecutar'} ${getRoutine(id)?.name ?? ''}`}
               onPress={() => router.push(`/routine/execute/${id}`)}
-            >
-              <Text style={{ color: theme.primary, fontWeight: '800' }}>▶ {matchesActiveWorkout(activeWorkoutDraft, { owner: user, routineId: id }) ? 'Continuar' : 'Ejecutar'}</Text>
-            </HapticPressable>
+            ><Text style={{ color: theme.primary, fontWeight: '800' }}>▶ {matchesActiveWorkout(activeWorkoutDraft, { owner: user, routineId: id }) ? 'Continuar' : 'Ejecutar'}</Text></HapticPressable></View>
           }
         />
 
@@ -289,7 +307,7 @@ export default function EditRoutineScreen() {
                 <Text style={[styles.lockedNote, { color: theme.textMuted }]}>Nombre, grupos musculares y variante quedan bloqueados en la rutina. Solo puedes editar las series.</Text>
 
                 <View style={styles.setHeader}>
-                  <Text style={[styles.setCol, { color: theme.textMuted }]}>Serie</Text>
+                  <Text style={[styles.setTypeCol, { color: theme.textMuted }]}>Tipo</Text>
                   <Text style={[styles.setCol, { color: theme.textMuted }]}>Peso</Text>
                   <Text style={[styles.setCol, { color: theme.textMuted }]}>Repeticiones</Text>
                   <View style={{ width: 28 }} />
@@ -297,7 +315,20 @@ export default function EditRoutineScreen() {
 
                 {exercise.sets.map((set, setIndex) => (
                   <View key={set.id} style={styles.setRow}>
-                    <Text style={[styles.setNum, { color: theme.text }]}>{setIndex + 1}</Text>
+                    <View style={styles.typeControl}>
+                      {(['C', 'effective', 'F'] as const).map((type) => {
+                        const selected = type === 'effective' ? typeof set.tipo === 'number' : set.tipo === type;
+                        const label = type === 'effective' ? String(typeof set.tipo === 'number' ? set.tipo : 'E') : type;
+                        return <HapticPressable
+                          key={type}
+                          accessibilityRole="radio"
+                          accessibilityLabel={type === 'C' ? 'Calentamiento' : type === 'F' ? 'Fallo muscular' : `Serie efectiva ${label}`}
+                          accessibilityState={{ selected }}
+                          onPress={() => updateSetType(exercise.id, set.id, type)}
+                          style={[styles.typeOption, { borderColor: selected ? theme.primary : theme.glassBorder, backgroundColor: selected ? theme.primary : theme.glass }]}
+                        ><Text style={{ color: selected ? theme.onPrimary : theme.textMuted, fontWeight: '800' }}>{label}</Text></HapticPressable>;
+                      })}
+                    </View>
                     <GlassInput
                       style={styles.setInput}
                       keyboardType="decimal-pad"
@@ -421,13 +452,15 @@ const styles = StyleSheet.create({
     paddingHorizontal: 4,
   },
   setCol: { flex: 1, fontSize: 12, fontWeight: '600' },
+  setTypeCol: { width: 92, fontSize: 12, fontWeight: '600' },
   setRow: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
     marginBottom: 8,
   },
-  setNum: { width: 24, textAlign: 'center', fontWeight: '600' },
+  typeControl: { width: 92, flexDirection: 'row', gap: 3 },
+  typeOption: { flex: 1, minHeight: 38, borderWidth: 1, borderRadius: 8, alignItems: 'center', justifyContent: 'center' },
   setInput: { flex: 1, paddingVertical: 8 },
   addSetBtn: {
     borderWidth: 1,

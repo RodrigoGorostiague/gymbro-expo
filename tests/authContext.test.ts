@@ -9,6 +9,9 @@ const auth = vi.hoisted(() => ({
   onAuthStateChange: vi.fn(),
   signInWithPassword: vi.fn(),
   signUp: vi.fn(),
+  resetPasswordForEmail: vi.fn(),
+  setSession: vi.fn(),
+  updateUser: vi.fn(),
   signOut: vi.fn(),
 }));
 const storage = vi.hoisted(() => ({
@@ -34,6 +37,9 @@ describe('AuthProvider', () => {
     auth.onAuthStateChange.mockReturnValue({ data: { subscription: { unsubscribe: vi.fn() } } });
     auth.signInWithPassword.mockResolvedValue({ error: null });
     auth.signUp.mockResolvedValue({ data: { session: { user: { id: 'uid-2' } } }, error: null });
+    auth.resetPasswordForEmail.mockResolvedValue({ error: null });
+    auth.setSession.mockResolvedValue({ error: null });
+    auth.updateUser.mockResolvedValue({ error: null });
     auth.signOut.mockResolvedValue({ error: null });
   });
 
@@ -54,12 +60,34 @@ describe('AuthProvider', () => {
     expect(current?.userEmail).toBeNull();
   });
 
-  test('returns the email-confirmation state when registration has no session', async () => {
+  test('returns an email-confirmation state when registration has no session', async () => {
     auth.signUp.mockResolvedValue({ data: { session: null }, error: null });
     let current: ReturnType<typeof useAuth> | undefined;
     const Probe = () => { current = useAuth(); return null; };
     await act(async () => { TestRenderer.create(React.createElement(AuthProvider, null, React.createElement(Probe))); });
 
-    await expect(current!.register('member@example.com', 'password')).resolves.toContain('correo electrónico');
+    await expect(current!.register('member@example.com', 'password')).resolves.toEqual({ error: null, emailConfirmationRequired: true });
+  });
+
+  test('sends password recovery links to the native update-password route', async () => {
+    let current: ReturnType<typeof useAuth> | undefined;
+    const Probe = () => { current = useAuth(); return null; };
+    await act(async () => { TestRenderer.create(React.createElement(AuthProvider, null, React.createElement(Probe))); });
+
+    await expect(current!.sendPasswordReset(' member@example.com ')).resolves.toBeNull();
+    expect(auth.resetPasswordForEmail).toHaveBeenCalledWith('member@example.com', {
+      redirectTo: 'gymbro:///auth/update-password',
+    });
+  });
+
+  test('establishes a recovery session from the deep-link tokens before updating the password', async () => {
+    let current: ReturnType<typeof useAuth> | undefined;
+    const Probe = () => { current = useAuth(); return null; };
+    await act(async () => { TestRenderer.create(React.createElement(AuthProvider, null, React.createElement(Probe))); });
+
+    await expect(current!.establishRecoverySession('gymbro://auth/update-password#access_token=access&refresh_token=refresh')).resolves.toBeNull();
+    expect(auth.setSession).toHaveBeenCalledWith({ access_token: 'access', refresh_token: 'refresh' });
+    await expect(current!.updatePassword('Stronger1')).resolves.toBeNull();
+    expect(auth.updateUser).toHaveBeenCalledWith({ password: 'Stronger1' });
   });
 });

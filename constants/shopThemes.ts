@@ -1,4 +1,4 @@
-import { AppTheme, ShopThemeCategory, ThemeDecoration, UserProfile } from '../types';
+import { AppTheme, ShopThemeCategory, ShopThemeRarity, ThemeDecoration, ThemeInteraction, UserProfile } from '../types';
 import { THEMES } from './theme';
 
 export interface ShopTheme extends AppTheme {
@@ -7,6 +7,7 @@ export interface ShopTheme extends AppTheme {
   price: number;
   preview: string;
   category: ShopThemeCategory;
+  rarity: ShopThemeRarity;
   description?: string;
 }
 
@@ -20,8 +21,9 @@ export const PROFILE_THEMES: ShopTheme[] = (
 ).map(({ profile, name, description }) => ({
   id: `profile-${profile}`,
   name,
-  price: 0,
-  category: 'profile' as const,
+    price: 0,
+    category: 'profile' as const,
+    rarity: 'common' as const,
   description,
   preview: THEMES[profile].primary,
   ...THEMES[profile],
@@ -35,12 +37,43 @@ export function getProfileThemeId(profile: UserProfile): string {
   return `profile-${profile}`;
 }
 
+type ThemePalette = Pick<AppTheme, 'primary' | 'secondary' | 'accent' | 'background' | 'text' | 'onPrimary' | 'success' | 'blurTint' | 'tabBarBackground'>;
+
+function createTheme(
+  id: string,
+  name: string,
+  price: number,
+  rarity: ShopThemeRarity,
+  description: string,
+  palette: ThemePalette,
+  decoration?: ThemeDecoration,
+  interaction?: ThemeInteraction,
+): ShopTheme {
+  const light = palette.blurTint === 'light';
+  return {
+    id,
+    name,
+    price,
+    rarity,
+    category: rarity === 'common' ? 'basic' : 'special',
+    description,
+    preview: palette.primary,
+    glass: light ? 'rgba(255, 255, 255, 0.72)' : 'rgba(255, 255, 255, 0.14)',
+    glassBorder: light ? 'rgba(20, 20, 35, 0.14)' : 'rgba(255, 255, 255, 0.34)',
+    textMuted: light ? 'rgba(20, 20, 35, 0.62)' : 'rgba(255, 255, 255, 0.66)',
+    ...palette,
+    decoration,
+    interaction,
+  };
+}
+
 export const SHOP_THEMES: ShopTheme[] = [
   {
     id: 'white',
     name: 'Blanco',
     price: 3,
     category: 'basic',
+    rarity: 'common',
     preview: '#F5F5F5',
     primary: '#5C5C5C',
     secondary: '#9E9E9E',
@@ -60,6 +93,7 @@ export const SHOP_THEMES: ShopTheme[] = [
     name: 'Negro',
     price: 12,
     category: 'basic',
+    rarity: 'common',
     preview: '#121212',
     primary: '#E0E0E0',
     secondary: '#757575',
@@ -79,6 +113,7 @@ export const SHOP_THEMES: ShopTheme[] = [
     name: 'Lila suave',
     price: 18,
     category: 'violet',
+    rarity: 'common',
     preview: '#E1BEE7',
     primary: '#BA68C8',
     secondary: '#9C27B0',
@@ -98,6 +133,7 @@ export const SHOP_THEMES: ShopTheme[] = [
     name: 'Verde',
     price: 35,
     category: 'basic',
+    rarity: 'common',
     preview: '#2E7D32',
     primary: '#43A047',
     secondary: '#1B5E20',
@@ -117,6 +153,7 @@ export const SHOP_THEMES: ShopTheme[] = [
     name: 'Lavanda',
     price: 55,
     category: 'violet',
+    rarity: 'common',
     preview: '#B39DDB',
     primary: '#9575CD',
     secondary: '#673AB7',
@@ -136,6 +173,7 @@ export const SHOP_THEMES: ShopTheme[] = [
     name: 'Amarillo',
     price: 80,
     category: 'basic',
+    rarity: 'common',
     preview: '#F9A825',
     primary: '#FBC02D',
     secondary: '#F57F17',
@@ -155,6 +193,7 @@ export const SHOP_THEMES: ShopTheme[] = [
     name: 'Violeta',
     price: 140,
     category: 'violet',
+    rarity: 'common',
     preview: '#7E57C2',
     primary: '#7E57C2',
     secondary: '#512DA8',
@@ -174,6 +213,7 @@ export const SHOP_THEMES: ShopTheme[] = [
     name: 'Sol · Verano',
     price: 180,
     category: 'special',
+    rarity: 'rare',
     description: 'Verano cálido',
     preview: '#FFB300',
     decoration: 'sun',
@@ -195,6 +235,7 @@ export const SHOP_THEMES: ShopTheme[] = [
     name: 'Lila Neón',
     price: 220,
     category: 'violet',
+    rarity: 'rare',
     preview: '#EA80FC',
     primary: '#E040FB',
     secondary: '#AA00FF',
@@ -214,6 +255,7 @@ export const SHOP_THEMES: ShopTheme[] = [
     name: 'Azul',
     price: 250,
     category: 'basic',
+    rarity: 'common',
     preview: '#1565C0',
     primary: '#1E88E5',
     secondary: '#0D47A1',
@@ -233,6 +275,7 @@ export const SHOP_THEMES: ShopTheme[] = [
     name: 'Hoja · Otoño',
     price: 420,
     category: 'special',
+    rarity: 'rare',
     description: 'Otoño cálido',
     preview: '#E65100',
     decoration: 'leaf',
@@ -254,6 +297,7 @@ export const SHOP_THEMES: ShopTheme[] = [
     name: 'Luna · Noche',
     price: 650,
     category: 'special',
+    rarity: 'rare',
     description: 'Noche lila',
     preview: '#7986CB',
     decoration: 'moon',
@@ -275,6 +319,7 @@ export const SHOP_THEMES: ShopTheme[] = [
     name: 'Estrella · Galaxia',
     price: 900,
     category: 'special',
+    rarity: 'rare',
     description: 'Violeta estrellado',
     preview: '#651FFF',
     decoration: 'star',
@@ -296,6 +341,7 @@ export const SHOP_THEMES: ShopTheme[] = [
     name: 'Copo · Invierno',
     price: 1200,
     category: 'special',
+    rarity: 'rare',
     description: 'Invierno frío',
     preview: '#81D4FA',
     decoration: 'snowflake',
@@ -317,6 +363,7 @@ export const SHOP_THEMES: ShopTheme[] = [
     name: 'Rojo',
     price: 1500,
     category: 'basic',
+    rarity: 'common',
     preview: '#C62828',
     primary: '#E53935',
     secondary: '#B71C1C',
@@ -331,6 +378,30 @@ export const SHOP_THEMES: ShopTheme[] = [
     blurTint: 'dark',
     tabBarBackground: 'rgba(20, 5, 5, 0.92)',
   },
+  createTheme('arena', 'Arena', 30, 'common', 'Dunas cálidas y minimalistas', { primary: '#D7A86E', secondary: '#A86C3A', accent: '#F7DBA7', background: ['#26170D', '#70421F', '#D7A86E'], text: '#FFF8EB', onPrimary: '#2A180D', success: '#F1C27D', blurTint: 'dark', tabBarBackground: 'rgba(38, 23, 13, 0.94)' }),
+  createTheme('menta', 'Menta', 45, 'common', 'Fresco, limpio y enérgico', { primary: '#2EC4A6', secondary: '#147D6B', accent: '#A4F4DD', background: ['#062620', '#0B6555', '#2EC4A6'], text: '#E9FFF9', onPrimary: '#03221C', success: '#9AF3D8', blurTint: 'dark', tabBarBackground: 'rgba(6, 38, 32, 0.94)' }),
+  createTheme('coral', 'Coral', 60, 'common', 'Energía tropical suave', { primary: '#FF7B72', secondary: '#D94B54', accent: '#FFD0C7', background: ['#32111A', '#8D3745', '#FF7B72'], text: '#FFF1EF', onPrimary: '#3A1116', success: '#FFB3AB', blurTint: 'dark', tabBarBackground: 'rgba(50, 17, 26, 0.94)' }),
+  createTheme('oceano', 'Océano', 80, 'common', 'Azul profundo de agua abierta', { primary: '#38BDF8', secondary: '#0369A1', accent: '#A5F3FC', background: ['#071A35', '#0B4773', '#167CB5'], text: '#ECFEFF', onPrimary: '#06213B', success: '#67E8F9', blurTint: 'dark', tabBarBackground: 'rgba(7, 26, 53, 0.94)' }),
+  createTheme('cobre', 'Cobre', 105, 'common', 'Metal cálido y robusto', { primary: '#D97745', secondary: '#934A2A', accent: '#F6BF8D', background: ['#28130F', '#65301E', '#A94F2A'], text: '#FFF4EE', onPrimary: '#2A130D', success: '#F0A56B', blurTint: 'dark', tabBarBackground: 'rgba(40, 19, 15, 0.94)' }),
+  createTheme('sakura', 'Sakura', 125, 'common', 'Pétalos rosados al amanecer', { primary: '#E879A8', secondary: '#B2386F', accent: '#FFD1E3', background: ['#FFF5FA', '#F9D8E6', '#EFA1C1'], text: '#702341', onPrimary: '#FFFFFF', success: '#B94876', blurTint: 'light', tabBarBackground: 'rgba(255, 245, 250, 0.96)' }),
+  createTheme('bosque', 'Bosque', 150, 'common', 'Verde denso de montaña', { primary: '#4A9D63', secondary: '#1C5B38', accent: '#B6E7A5', background: ['#091A10', '#164327', '#356D3C'], text: '#F1FFEE', onPrimary: '#FFFFFF', success: '#A7DE8B', blurTint: 'dark', tabBarBackground: 'rgba(9, 26, 16, 0.94)' }),
+  createTheme('cielo', 'Cielo', 170, 'common', 'Claridad azul brillante', { primary: '#5AA9FF', secondary: '#3870C8', accent: '#D6EDFF', background: ['#EAF6FF', '#B7DCFF', '#77B7FF'], text: '#123F79', onPrimary: '#FFFFFF', success: '#3384DC', blurTint: 'light', tabBarBackground: 'rgba(234, 246, 255, 0.96)' }),
+  createTheme('cafe', 'Café', 180, 'common', 'Tostado intenso para sesiones largas', { primary: '#B8784C', secondary: '#6F3E28', accent: '#F0C99B', background: ['#20100B', '#512817', '#8C4B2D'], text: '#FFF4EB', onPrimary: '#25120B', success: '#D4A373', blurTint: 'dark', tabBarBackground: 'rgba(32, 16, 11, 0.94)' }),
+  createTheme('pizarra', 'Pizarra', 180, 'common', 'Grafito sobrio y definido', { primary: '#94A3B8', secondary: '#475569', accent: '#E2E8F0', background: ['#0F172A', '#25364D', '#52677F'], text: '#F8FAFC', onPrimary: '#111827', success: '#CBD5E1', blurTint: 'dark', tabBarBackground: 'rgba(15, 23, 42, 0.94)' }),
+  createTheme('aurora', 'Aurora', 340, 'rare', 'Verdes y violetas en danza', { primary: '#5EEAD4', secondary: '#7C3AED', accent: '#D8B4FE', background: ['#071C2A', '#174A5B', '#6236B8'], text: '#F2FFFD', onPrimary: '#071C2A', success: '#A7F3D0', blurTint: 'dark', tabBarBackground: 'rgba(7, 28, 42, 0.94)' }, 'star'),
+  createTheme('volcan', 'Volcán', 440, 'rare', 'Lava encendida bajo obsidiana', { primary: '#FF5A36', secondary: '#A71919', accent: '#FFC14D', background: ['#170A0A', '#611313', '#C4341D'], text: '#FFF3E8', onPrimary: '#2A0705', success: '#FF9E5E', blurTint: 'dark', tabBarBackground: 'rgba(23, 10, 10, 0.94)' }, 'sun'),
+  createTheme('medusa', 'Medusa', 540, 'rare', 'Profundidad eléctrica y acuática', { primary: '#22D3EE', secondary: '#2563EB', accent: '#E879F9', background: ['#050B2B', '#123B76', '#4C1D95'], text: '#EFFBFF', onPrimary: '#06152F', success: '#67E8F9', blurTint: 'dark', tabBarBackground: 'rgba(5, 11, 43, 0.94)' }, 'moon'),
+  createTheme('cyberpunk', 'Cyberpunk', 650, 'rare', 'Fucsia y cian de ciudad nocturna', { primary: '#FF3CAC', secondary: '#784BA0', accent: '#00F5D4', background: ['#130526', '#4A125A', '#0B6072'], text: '#FFF1FD', onPrimary: '#25052E', success: '#00E5C3', blurTint: 'dark', tabBarBackground: 'rgba(19, 5, 38, 0.94)' }, 'star'),
+  createTheme('prisma', 'Prisma', 760, 'rare', 'Cristales de color refractado', { primary: '#8B5CF6', secondary: '#EC4899', accent: '#FDE047', background: ['#1A103B', '#543B9A', '#D94A99'], text: '#FFF9FF', onPrimary: '#1F1149', success: '#C4B5FD', blurTint: 'dark', tabBarBackground: 'rgba(26, 16, 59, 0.94)' }, 'star'),
+  createTheme('jade-imperial', 'Jade imperial', 850, 'rare', 'Esmeralda profunda y oro suave', { primary: '#2DD4A8', secondary: '#0F766E', accent: '#FCD34D', background: ['#062A29', '#0C5D55', '#167A6A'], text: '#F0FFFC', onPrimary: '#042E2A', success: '#A7F3D0', blurTint: 'dark', tabBarBackground: 'rgba(6, 42, 41, 0.94)' }, 'leaf'),
+  createTheme('atardecer', 'Atardecer', 940, 'rare', 'Magenta, naranja y último sol', { primary: '#FB7185', secondary: '#F97316', accent: '#FDE68A', background: ['#3A1034', '#A52B57', '#ED6527'], text: '#FFF7EE', onPrimary: '#4A102E', success: '#FDBA74', blurTint: 'dark', tabBarBackground: 'rgba(58, 16, 52, 0.94)' }, 'sun'),
+  createTheme('tormenta', 'Tormenta', 1000, 'rare', 'Electricidad sobre nubes oscuras', { primary: '#8B9EFF', secondary: '#4353B9', accent: '#DCE7FF', background: ['#101426', '#273356', '#5369A3'], text: '#F7F9FF', onPrimary: '#11162C', success: '#B8C7FF', blurTint: 'dark', tabBarBackground: 'rgba(16, 20, 38, 0.94)' }, 'moon'),
+  createTheme('caramelo-acido', 'Caramelo ácido', 1100, 'rare', 'Lima y rosa sin pedir permiso', { primary: '#D9F22D', secondary: '#EC4899', accent: '#72F4C3', background: ['#15230B', '#5A244B', '#9CBF20'], text: '#FCFFE9', onPrimary: '#253806', success: '#BEF264', blurTint: 'dark', tabBarBackground: 'rgba(21, 35, 11, 0.94)' }, 'star'),
+  createTheme('eclipse', 'Eclipse', 1800, 'exclusive', 'Corona dorada que celebra cada serie', { primary: '#F6C453', secondary: '#7C3FCE', accent: '#FFF1A8', background: ['#080611', '#211342', '#6A3FA0'], text: '#FFFBEA', onPrimary: '#191021', success: '#FFE082', blurTint: 'dark', tabBarBackground: 'rgba(8, 6, 17, 0.96)' }, 'moon', 'set-celebration'),
+  createTheme('nucleo', 'Núcleo', 2200, 'exclusive', 'Energía roja que explota al marcar una serie', { primary: '#FF4D4D', secondary: '#F59E0B', accent: '#FFE66D', background: ['#210407', '#7C1018', '#D64220'], text: '#FFF5E8', onPrimary: '#320609', success: '#FFB86B', blurTint: 'dark', tabBarBackground: 'rgba(33, 4, 7, 0.96)' }, 'sun', 'set-celebration'),
+  createTheme('aurora-boreal', 'Aurora boreal', 2600, 'exclusive', 'Cintas polares de luz al conquistar una serie', { primary: '#2EF2C3', secondary: '#4265FF', accent: '#D58CFF', background: ['#031C24', '#0C5A67', '#4933A6'], text: '#EFFFFB', onPrimary: '#04232D', success: '#8BFFD8', blurTint: 'dark', tabBarBackground: 'rgba(3, 28, 36, 0.96)' }, 'star', 'set-celebration'),
+  createTheme('fenix', 'Fénix', 3000, 'exclusive', 'Fuego magenta que renace con cada esfuerzo', { primary: '#FF3D71', secondary: '#FF8A3D', accent: '#FFE06B', background: ['#270515', '#8A123F', '#D8492F'], text: '#FFF4ED', onPrimary: '#350615', success: '#FFB26B', blurTint: 'dark', tabBarBackground: 'rgba(39, 5, 21, 0.96)' }, 'sun', 'set-celebration'),
+  createTheme('holograma', 'Holograma', 3500, 'exclusive', 'Irisación cian y violeta con destello de victoria', { primary: '#6EE7F9', secondary: '#A855F7', accent: '#F0ABFC', background: ['#09102B', '#22457A', '#7137A5'], text: '#F6FCFF', onPrimary: '#0A1531', success: '#A5F3FC', blurTint: 'dark', tabBarBackground: 'rgba(9, 16, 43, 0.96)' }, 'star', 'set-celebration'),
 ];
 
 export const SHOP_CATEGORIES: { key: ShopThemeCategory; label: string }[] = [
@@ -338,6 +409,12 @@ export const SHOP_CATEGORIES: { key: ShopThemeCategory; label: string }[] = [
   { key: 'basic', label: 'Colores clásicos' },
   { key: 'violet', label: 'Violetas y lilas' },
   { key: 'special', label: 'Temas especiales' },
+];
+
+export const SHOP_RARITIES: { key: ShopThemeRarity; label: string; description: string }[] = [
+  { key: 'common', label: 'Comunes', description: 'Paletas para entrenar todos los días' },
+  { key: 'rare', label: 'Raros', description: 'Colores intensos y escenarios memorables' },
+  { key: 'exclusive', label: 'Exclusivos', description: 'Efectos de celebración al completar una serie' },
 ];
 
 export const GEM_REWARDS = {
@@ -356,4 +433,8 @@ export function getAllShopThemes(): ShopTheme[] {
 
 export function getThemesByCategory(category: ShopThemeCategory): ShopTheme[] {
   return getAllShopThemes().filter((theme) => theme.category === category);
+}
+
+export function getThemesByRarity(rarity: ShopThemeRarity): ShopTheme[] {
+  return SHOP_THEMES.filter((theme) => theme.rarity === rarity);
 }

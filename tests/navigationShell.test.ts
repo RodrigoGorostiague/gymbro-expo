@@ -1,4 +1,6 @@
 import React from 'react';
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import TestRenderer, { act } from 'react-test-renderer';
 import { beforeEach, describe, expect, test, vi } from 'vitest';
 import { __resolveHref } from './helpers/expoRouterStub';
@@ -24,6 +26,7 @@ vi.mock('../context/ShopContext', () => ({ useShop: () => ({ gems: 0, purchasedT
 vi.mock('../context/SocialContext', () => ({ useSocial: () => social }));
 vi.mock('../services/workoutRecapFeed', () => ({ recapInputFromSession: vi.fn() }));
 vi.mock('../components/ThemePreviewBar', () => ({ ThemePreviewBar: () => null }));
+vi.mock('../components/ProfileAvatar', () => ({ ProfileAvatar: () => null }));
 vi.mock('../components/AppScreenHeader', async () => {
   const ReactModule = await import('react');
   return { AppScreenHeader: ({ trailing, ...props }: Record<string, any>) => ReactModule.createElement('AppScreenHeader', props, trailing) };
@@ -33,11 +36,13 @@ vi.mock('../components/LogoutButton', async () => {
   return { LogoutButton: () => ReactModule.createElement('LogoutButton') };
 });
 vi.mock('../components/CombineWithPartnerCard', () => ({ CombineWithPartnerCard: () => null }));
-vi.mock('../constants/shopThemes', () => ({ GEM_REWARDS: { setComplete: 1, routineComplete: 1, weeklyGoalImprovement: 1 }, getShopTheme: vi.fn(), getThemesByCategory: vi.fn(() => []), isProfileThemeId: vi.fn(() => false), SHOP_CATEGORIES: [] }));
+vi.mock('../constants/shopThemes', () => ({ GEM_REWARDS: { setComplete: 1, routineComplete: 1, weeklyGoalImprovement: 1 }, getShopTheme: vi.fn(), getThemesByRarity: vi.fn(() => []), isProfileThemeId: vi.fn(() => false), PROFILE_THEMES: [], SHOP_RARITIES: [] }));
 
 import TabsLayout from '../app/(tabs)/_layout';
 import CommunityScreen from '../app/(tabs)/community';
 import MoreScreen from '../app/(tabs)/more';
+
+const rootLayout = readFileSync(resolve(import.meta.dirname, '../app/_layout.tsx'), 'utf8');
 
 describe('navigation shell', () => {
   beforeEach(() => {
@@ -93,5 +98,10 @@ describe('navigation shell', () => {
 
     expect(tree!.root.find((node) => String(node.type) === 'AppScreenHeader').props).toMatchObject({ title: 'Más', subtitle: 'Tienda, temas y ayuda' });
     expect(tree!.root.findAll((node) => String(node.type) === 'LogoutButton')).toHaveLength(1);
+  });
+
+  test('presents the plan recipient picker as a full modal', () => {
+    expect(rootLayout).toContain('name="community/share-plan" options={{ animation: \'slide_from_bottom\', presentation: \'modal\' }}');
+    expect(rootLayout).not.toContain('presentation: \'formSheet\'');
   });
 });

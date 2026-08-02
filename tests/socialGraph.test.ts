@@ -32,6 +32,7 @@ import {
   getCirclePage,
   getBlockedUsersPage,
   getDiscoveryPage,
+  getPublicProfile,
   getRequestPage,
   getOwnProfile,
   normalizeAliasPrefix,
@@ -60,7 +61,7 @@ describe('social graph client boundary', () => {
 
     expect(normalizeAliasPrefix('  JÓSE  ')).toBe('jose');
     await expect(searchProfiles('  JÓSE  ', 'cursor-1')).resolves.toEqual({
-      profiles: [{ uid: 'member-1', alias: 'José', avatarId: 'capybara-athlete', categories: { style: 'powerlifting' }, relationshipStatus: 'partner' }],
+      profiles: [{ uid: 'member-1', alias: 'José', avatarId: 'capybara-athlete', categories: { style: 'powerlifting' }, presentationThemeId: null, relationshipStatus: 'partner' }],
       nextCursor: 'cursor-2',
     });
     await getDiscoveryPage();
@@ -89,6 +90,14 @@ describe('social graph client boundary', () => {
       cursor: null,
       page_size: 20,
     });
+  });
+
+  test('maps only the safe presentation theme from public profile lookups', async () => {
+    const maybeSingle = vi.fn().mockResolvedValue({ data: { id: 'member-2', alias: 'Theme athlete', avatar_id: 'capigirl', categories: { style: 'strength' }, presentation_theme_id: 'moon' }, error: null });
+    client.from.mockReturnValue({ select: vi.fn(() => ({ eq: vi.fn(() => ({ maybeSingle })) })) });
+
+    await expect(getPublicProfile('member-2')).resolves.toEqual({ uid: 'member-2', alias: 'Theme athlete', avatarId: 'capigirl', categories: { style: 'strength' }, presentationThemeId: 'moon' });
+    expect(client.from).toHaveBeenCalledWith('public_profiles');
   });
 
   test('persists the default-enabled completed-workout sharing preference with the private profile', async () => {

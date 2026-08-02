@@ -11,6 +11,7 @@ import { router, useFocusEffect, useLocalSearchParams } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { AppNavBar } from '../../../components/AppNavBar';
 import { AppScreenHeader } from '../../../components/AppScreenHeader';
+import { ExclusiveSetCelebration } from '../../../components/ExclusiveSetCelebration';
 import { GlassCard, ThemeBackground } from '../../../components/GlassCard';
 import { HapticPressable } from '../../../components/HapticPressable';
 import { GlassButton, GlassInput } from '../../../components/UI';
@@ -119,6 +120,7 @@ export default function ExecuteRoutineScreen() {
   const [isFinishing, setIsFinishing] = useState(false);
   const [earnedGems, setEarnedGems] = useState(0);
   const [rewardReceipt, setRewardReceipt] = useState<RewardReceipt | null>(null);
+  const [celebrationNonce, setCelebrationNonce] = useState(0);
 
   const elapsedRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const restRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -279,6 +281,7 @@ export default function ExecuteRoutineScreen() {
         if (activeWorkoutDraft) void updateActiveWorkout({ ...activeWorkoutDraft, completedSets: next });
         return next;
       });
+      if (theme.interaction === 'set-celebration') setCelebrationNonce((value) => value + 1);
       Alert.alert('¡Serie!', getRandomSetEncouragementMessage(), [{ text: '¡Vamos!' }]);
       startRestTimer();
     } finally {
@@ -554,6 +557,7 @@ export default function ExecuteRoutineScreen() {
           <GlassButton title="Cancelar entrenamiento" variant="secondary" onPress={() => { void cancelActiveWorkout(); router.back(); }} />
         </View>
       </SafeAreaView>
+      <ExclusiveSetCelebration active={celebrationNonce} theme={theme} />
     </ThemeBackground>
   );
 }

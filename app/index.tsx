@@ -1,6 +1,5 @@
 import React, { useEffect, useState } from 'react';
 import {
-  Alert,
   KeyboardAvoidingView,
   Platform,
   ScrollView,
@@ -13,15 +12,18 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { DualLoginBackground } from '../components/login/DualLoginBackground';
 import { DualLoginFooter } from '../components/login/DualLoginFooter';
 import { DualLoginHeader } from '../components/login/DualLoginHeader';
-import { LoginFormPanel } from '../components/login/LoginFormPanel';
+import { AuthMode, LoginFormPanel } from '../components/login/LoginFormPanel';
 import { useAuth } from '../context/AuthContext';
 import { useLoginThemes } from '../hooks/useLoginThemes';
 
 export default function LoginScreen() {
-  const { user, isLoading, authError, login, register } = useAuth();
+  const { user, isLoading, authError, login, register, sendPasswordReset } = useAuth();
   const loginThemes = useLoginThemes();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [mode, setMode] = useState<AuthMode>('signIn');
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [feedback, setFeedback] = useState<{ tone: 'error' | 'success'; message: string } | null>(null);
 
   useEffect(() => {
     if (!isLoading && user) {
@@ -29,9 +31,35 @@ export default function LoginScreen() {
     }
   }, [user, isLoading]);
 
-  const submit = async (action: typeof login) => {
-    const error = await action(email, password);
-    if (error) Alert.alert('Error', error);
+  const changeMode = (nextMode: AuthMode) => {
+    setMode(nextMode);
+    setFeedback(null);
+  };
+
+  const submit = async () => {
+    setIsSubmitting(true);
+    setFeedback(null);
+    try {
+      if (mode === 'signIn') {
+        const error = await login(email, password);
+        if (error) setFeedback({ tone: 'error', message: error });
+        return;
+      }
+      if (mode === 'signUp') {
+        const result = await register(email, password);
+        if (result.error) setFeedback({ tone: 'error', message: result.error });
+        else if (result.emailConfirmationRequired) setFeedback({ tone: 'success', message: 'Revisá tu correo para confirmar la cuenta antes de ingresar.' });
+        return;
+      }
+      const error = await sendPasswordReset(email);
+      setFeedback(error
+        ? { tone: 'error', message: error }
+        : { tone: 'success', message: 'Si existe una cuenta con ese correo, te enviamos un enlace de recuperación.' });
+    } catch {
+      setFeedback({ tone: 'error', message: 'No pudimos completar la solicitud. Intentá nuevamente.' });
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   return (
@@ -57,14 +85,15 @@ export default function LoginScreen() {
             <LoginFormPanel
               rodaja={loginThemes.rodaja}
               brisas={loginThemes.brisas}
-              activeProfile={null}
-              username={email}
+              mode={mode}
+              email={email}
               password={password}
-              onUsernameChange={setEmail}
+              isSubmitting={isSubmitting}
+              feedback={feedback}
+              onEmailChange={setEmail}
               onPasswordChange={setPassword}
-              onSelectProfile={() => undefined}
-              onSubmit={() => void submit(login)}
-              onRegister={() => void submit(register)}
+              onModeChange={changeMode}
+              onSubmit={() => void submit()}
             />
 
             <DualLoginFooter rodaja={loginThemes.rodaja} brisas={loginThemes.brisas} />

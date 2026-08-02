@@ -39,6 +39,10 @@ export function createWorkoutAttempt(input: AttemptCaptureInput): WorkoutAttempt
     const mode = exercise.loadMode ?? 'external-load';
     const unit = exercise.loadUnit ?? 'kg';
     return { exerciseId: exercise.catalogExerciseId ?? exercise.id, recordedName: exercise.name, attribution,
+      catalog: exercise.catalog ? {
+        movementPattern: exercise.catalog.movementPattern,
+        muscleParticipations: exercise.catalog.muscleParticipations.map((participation) => ({ ...participation })),
+      } : undefined,
       sets: exercise.sets.map((set) => {
       const id = `${exercise.id}:${set.id}`;
       const actual = input.results[id];

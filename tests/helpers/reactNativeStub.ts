@@ -10,6 +10,7 @@ const createHost = (name: string) => {
 export const Alert = {
   alert: vi.fn(),
 };
+export const ActivityIndicator = createHost('ActivityIndicator');
 
 const appStateListeners = new Set<(state: string) => void>();
 export const AppState = {

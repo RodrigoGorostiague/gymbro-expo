@@ -167,6 +167,11 @@ export default function ProfileScreen() {
             <Text style={{ color: theme.textMuted }}>Estos controles aplican solo a publicaciones futuras. Las publicaciones existentes conservan su privacidad original.</Text>
           </GlassCard>
           <GlassCard>
+            <Text accessibilityRole="header" style={[styles.title, { color: theme.text }]}>Mediciones</Text>
+            <Text style={{ color: theme.textMuted }}>Registrá tu peso corporal y seguí su evolución de forma privada.</Text>
+            <GlassButton title="Peso corporal" variant="secondary" onPress={() => router.push('/profile/measurements')} />
+          </GlassCard>
+          <GlassCard>
             <Text accessibilityRole="header" style={[styles.title, { color: theme.text }]}>Privacidad</Text>
             <GlassButton title="Usuarios bloqueados" variant="secondary" onPress={() => router.push('/profile/blocked')} />
           </GlassCard>

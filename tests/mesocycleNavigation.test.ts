@@ -10,6 +10,7 @@ const routine = { id: 'routine-1', name: 'Upper', muscleGroups: ['Pecho', 'Espal
 beforeEach(() => { vi.clearAllMocks(); vi.setSystemTime(new Date(2026, 6, 26, 12)); resetRuntimeHarness(); setMockParams({ id: 'mesocycle-1' }); });
 describe('mesocycle entry navigation', () => {
   test('passes entry lineage to routine execution', () => { setMockData({ getMesocycle: vi.fn(() => subject), routines: [routine], attempts: [], resolvePlannedRoutine: vi.fn(() => ({ id: 'routine-1' })) }); const screen = render(React.createElement(MesocycleSummaryScreen)); const [play] = screen.root.findAll((node) => node.props.accessibilityLabel === 'Ejecutar Upper'); press(play); expect(mockRouter.push).toHaveBeenCalledWith({ pathname: '/routine/execute/[id]', params: { id: 'routine-1', mesocycleId: 'mesocycle-1', weekNumber: '1', plannedSessionId: 'entry-1' } }); });
+  test('shares the summary mesocycle with its id and name', () => { setMockData({ getMesocycle: vi.fn(() => subject), routines: [routine], attempts: [], resolvePlannedRoutine: vi.fn(() => ({ id: 'routine-1' })) }); const screen = render(React.createElement(MesocycleSummaryScreen)); press(screen.root.find((node) => node.props.accessibilityLabel === 'Compartir Block')); expect(mockRouter.push).toHaveBeenCalledWith({ pathname: '/community/share-plan', params: { kind: 'mesocycle', id: 'mesocycle-1', name: 'Block' } }); });
   test('renders rest without an execute CTA', () => { setMockData({ getMesocycle: vi.fn(() => subject), routines: [routine], attempts: [], resolvePlannedRoutine: vi.fn(() => ({ id: 'routine-1' })) }); const screen = render(React.createElement(MesocycleSummaryScreen)); expect(findText(screen.root, 'Día de descanso')).toBeTruthy(); });
 });
 
@@ -177,6 +178,6 @@ describe('mesocycle schedule presentation', () => {
 
     expect(findText(screen.root, 'domingo · 26 de julio')).toBeTruthy();
     expect(findText(screen.root, 'Hoy es un día de recuperación.')).toBeTruthy();
-    expect(screen.root.findAll((node) => node.props.accessibilityRole === 'button')).toHaveLength(0);
+    expect(screen.root.findAll((node) => node.props.accessibilityLabel === 'Ejecutar Upper')).toHaveLength(0);
   });
 });

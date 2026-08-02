@@ -6,7 +6,10 @@ import {
   selectCoreProgressSignals,
   selectExercisePerformance,
   selectRoutineDetails,
+  selectTrainingStatistics,
   selectWeightedExposure,
+  bodyWeightAt,
+  aggregateMuscleStatistics,
 } from '../utils/analytics';
 
 const attempt = ({
@@ -261,5 +264,29 @@ describe('advanced scoped progress selectors', () => {
     expect(details.previous).toMatchObject({ completionCount: 0, medianDurationSeconds: 100, adherence: 0.5, workload: { kg: 50 } });
     expect(details.current?.lastPerformed).toBe(values[2].completedAt);
     expect(details.workloadComparisons?.kg).toMatchObject({ current: 200, previous: 50, percentageDelta: 300 });
+  });
+
+  test('summarizes effective sets, frozen muscular relevance, patterns, records, and body weight', () => {
+    const now = new Date(2026, 6, 24, 12);
+    const { current } = getDefaultComparisonPeriods(now);
+    const previousAttempt = attempt({ id: 'previous', completedAt: new Date(current.start.getTime() - 1).toISOString(), exercises: [exercise('press', 'Press', [['p', 1, { mode: 'external-load', reps: 5, load: 50, unit: 'kg' }]])] });
+    const currentAttempt = attempt({ id: 'current', completedAt: current.start.toISOString(), exercises: [{
+      ...exercise('press', 'Press', [
+        ['warmup', 'C', { mode: 'external-load', reps: 10, load: 20, unit: 'kg' }],
+        ['work', 'F', { mode: 'external-load', reps: 8, load: 60, unit: 'kg' }],
+      ]),
+      catalog: { movementPattern: 'Empuje horizontal', muscleParticipations: [
+        { muscleGroupId: 'pecho', role: 'Principal', relevance: 1, originalLabel: 'Pecho' },
+        { muscleGroupId: 'tríceps', role: 'Secundario', relevance: 0.4, originalLabel: 'Tríceps' },
+      ] },
+    }] });
+
+    const summary = selectTrainingStatistics([previousAttempt, currentAttempt], 'rodaja', current.start, current.end);
+    expect(summary).toMatchObject({ sessions: 1, effectiveSets: 1, repetitions: 8, volumeByUnit: { kg: 480 }, maxLoadByUnit: { kg: 60 }, records: 1 });
+    expect(summary.muscles.pecho).toMatchObject({ direct: 1, weightedSets: 1, weightedVolume: 480, frequency: 1 });
+    expect(summary.muscles.tríceps).toMatchObject({ indirect: 0.4, weightedSets: 0.4, weightedVolume: 192, frequency: 0 });
+    expect(summary.patterns['Empuje horizontal']).toMatchObject({ effectiveSets: 1, repetitions: 8, volume: 480, exercises: 1 });
+    expect(bodyWeightAt([{ id: 'w1', owner: 'rodaja', metricType: 'body_weight', value: 75, unit: 'kg', measuredAt: '2026-07-10T10:00:00.000Z', source: 'manual' }], current.start.toISOString())).toBe(75);
+    expect(aggregateMuscleStatistics(summary.muscles, ['pecho', 'pecho', 'tríceps'])).toMatchObject({ direct: 1, indirect: 0.4, weightedSets: 1.4, weightedVolume: 672, frequency: 1 });
   });
 });

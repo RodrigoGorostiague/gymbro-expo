@@ -13,15 +13,22 @@ import { ThemeDecorations } from '../../components/ThemeDecorations';
 import { GlassButton } from '../../components/UI';
 import {
   getShopTheme,
-  getThemesByCategory,
+  getThemesByRarity,
   isProfileThemeId,
-  SHOP_CATEGORIES,
+  PROFILE_THEMES,
+  SHOP_RARITIES,
   ShopTheme,
 } from '../../constants/shopThemes';
 import { useAuth } from '../../context/AuthContext';
 import { useShop } from '../../context/ShopContext';
 import { useTheme } from '../../context/ThemeContext';
-import { UserProfile } from '../../types';
+import { ShopThemeRarity, UserProfile } from '../../types';
+
+const RARITY_COLORS: Record<ShopThemeRarity, string> = {
+  common: '#B8C2D1',
+  rare: '#8B7CFF',
+  exclusive: '#F6C453',
+};
 
 function isThemeEquipped(
   itemId: string,
@@ -51,6 +58,7 @@ function ThemeCard({
   const equipped = isThemeEquipped(item.id, equippedThemeId, user);
   const canAfford = gems >= item.price;
   const selected = previewing || equipped;
+  const rarityColor = RARITY_COLORS[item.rarity];
 
   return (
     <SelectablePulse selected={selected} theme={item} style={styles.themeCard}>
@@ -69,10 +77,20 @@ function ThemeCard({
             </LinearGradient>
 
             <View style={styles.themeInfo}>
-              <Text style={[styles.themeName, { color: theme.text }]}>{item.name}</Text>
+              <View style={styles.themeTitleRow}>
+                <Text style={[styles.themeName, { color: theme.text }]}>{item.name}</Text>
+                {!isProfileThemeId(item.id) && (
+                  <View style={[styles.rarityBadge, { backgroundColor: `${rarityColor}30`, borderColor: rarityColor }]}>
+                    <Text style={[styles.rarityLabel, { color: rarityColor }]}>{item.rarity}</Text>
+                  </View>
+                )}
+              </View>
               {item.description ? (
                 <Text style={[styles.themeDesc, { color: theme.textMuted }]}>{item.description}</Text>
               ) : null}
+              {item.interaction && (
+                <Text style={[styles.effectHint, { color: item.accent }]}>Destello al completar una serie</Text>
+              )}
               <Text style={[styles.themePrice, { color: theme.textMuted }]}>
                 {isProfileThemeId(item.id)
                   ? 'Por defecto · incluido'
@@ -246,13 +264,33 @@ export default function ShopScreen() {
 
           <CombineWithPartnerCard />
 
-          {SHOP_CATEGORIES.map((category) => {
-            const items = getThemesByCategory(category.key);
+          <View style={styles.section}>
+            <Text style={[styles.sectionTitle, { color: theme.text }]}>Temas de perfil</Text>
+            {PROFILE_THEMES.map((item) => (
+              <ThemeCard
+                key={item.id}
+                item={item}
+                user={user}
+                previewing={previewThemeId === item.id}
+                onPreview={() => startPreview(item.id)}
+                onAction={() => handleBuyOrEquip(item.id)}
+              />
+            ))}
+          </View>
+
+          {SHOP_RARITIES.map((rarity) => {
+            const items = getThemesByRarity(rarity.key);
             if (items.length === 0) return null;
 
             return (
-              <View key={category.key} style={styles.section}>
-                <Text style={[styles.sectionTitle, { color: theme.text }]}>{category.label}</Text>
+              <View key={rarity.key} style={styles.section}>
+                <View style={styles.sectionHeader}>
+                  <View style={[styles.rarityMarker, { backgroundColor: RARITY_COLORS[rarity.key] }]} />
+                  <View style={styles.sectionHeaderCopy}>
+                    <Text style={[styles.sectionTitle, { color: theme.text }]}>{rarity.label}</Text>
+                    <Text style={[styles.sectionSubtitle, { color: theme.textMuted }]}>{rarity.description}</Text>
+                  </View>
+                </View>
                 {items.map((item) => (
                   <ThemeCard
                     key={item.id}
@@ -308,12 +346,14 @@ const styles = StyleSheet.create({
   },
   balanceValue: { fontSize: 40, fontWeight: '900', marginTop: 4 },
   section: { marginBottom: 8 },
+  sectionHeader: { flexDirection: 'row', alignItems: 'center', gap: 9, marginTop: 12, marginBottom: 10 },
+  sectionHeaderCopy: { flex: 1 },
+  rarityMarker: { width: 4, alignSelf: 'stretch', borderRadius: 4 },
   sectionTitle: {
     fontSize: 16,
     fontWeight: '800',
-    marginBottom: 10,
-    marginTop: 4,
   },
+  sectionSubtitle: { fontSize: 12, marginTop: 2 },
   themeCard: { marginBottom: 12 },
   themeCardInner: { marginBottom: 0 },
   themeRow: { flexDirection: 'row', gap: 14, marginBottom: 12 },
@@ -331,8 +371,12 @@ const styles = StyleSheet.create({
     borderRadius: 12,
   },
   themeInfo: { flex: 1, justifyContent: 'center' },
+  themeTitleRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
   themeName: { fontSize: 17, fontWeight: '800' },
+  rarityBadge: { borderWidth: 1, borderRadius: 9, paddingHorizontal: 6, paddingVertical: 2 },
+  rarityLabel: { fontSize: 9, fontWeight: '900', textTransform: 'uppercase', letterSpacing: 0.5 },
   themeDesc: { fontSize: 12, marginTop: 2 },
+  effectHint: { fontSize: 11, fontWeight: '700', marginTop: 3 },
   themePrice: { fontSize: 13, marginTop: 4 },
   equippedTag: { fontSize: 12, fontWeight: '700', marginTop: 4 },
   actionBorder: {

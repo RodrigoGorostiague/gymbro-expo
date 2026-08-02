@@ -10,7 +10,10 @@ interface AuthContextValue {
   authError: string | null;
   welcomeMessage: string | null;
   login: (email: string, password: string) => Promise<string | null>;
-  register: (email: string, password: string) => Promise<string | null>;
+  register: (email: string, password: string) => Promise<{ error: string | null; emailConfirmationRequired: boolean }>;
+  sendPasswordReset: (email: string) => Promise<string | null>;
+  establishRecoverySession: (url: string) => Promise<string | null>;
+  updatePassword: (password: string) => Promise<string | null>;
   logout: () => Promise<void>;
   setWelcomeMessage: (message: string | null) => void;
 }
@@ -74,11 +77,36 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     return error?.message ?? null;
   };
 
-  const register = async (email: string, password: string): Promise<string | null> => {
-    if (!supabase) return supabaseConfigurationError;
+  const register = async (email: string, password: string) => {
+    if (!supabase) return { error: supabaseConfigurationError, emailConfirmationRequired: false };
     const { data, error } = await supabase.auth.signUp({ email: email.trim(), password });
-    if (error) return error.message;
-    return data.session ? null : 'Revisa tu correo electrónico para confirmar la cuenta.';
+    if (error) return { error: error.message, emailConfirmationRequired: false };
+    return { error: null, emailConfirmationRequired: !data.session };
+  };
+
+  const sendPasswordReset = async (email: string): Promise<string | null> => {
+    if (!supabase) return supabaseConfigurationError;
+    const { error } = await supabase.auth.resetPasswordForEmail(email.trim(), {
+      redirectTo: 'gymbro:///auth/update-password',
+    });
+    return error?.message ?? null;
+  };
+
+  const establishRecoverySession = async (url: string): Promise<string | null> => {
+    if (!supabase) return supabaseConfigurationError;
+    const fragment = url.split('#')[1] ?? url.split('?')[1] ?? '';
+    const params = new URLSearchParams(fragment);
+    const accessToken = params.get('access_token');
+    const refreshToken = params.get('refresh_token');
+    if (!accessToken || !refreshToken) return 'El enlace de recuperación no es válido o ya venció.';
+    const { error } = await supabase.auth.setSession({ access_token: accessToken, refresh_token: refreshToken });
+    return error?.message ?? null;
+  };
+
+  const updatePassword = async (password: string): Promise<string | null> => {
+    if (!supabase) return supabaseConfigurationError;
+    const { error } = await supabase.auth.updateUser({ password });
+    return error?.message ?? null;
   };
 
   const logout = async () => {
@@ -89,7 +117,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     setUserEmail(null);
   };
 
-  return <AuthContext.Provider value={{ user, userEmail, isLoading, authError, welcomeMessage, login, register, logout, setWelcomeMessage }}>{children}</AuthContext.Provider>;
+  return <AuthContext.Provider value={{ user, userEmail, isLoading, authError, welcomeMessage, login, register, sendPasswordReset, establishRecoverySession, updatePassword, logout, setWelcomeMessage }}>{children}</AuthContext.Provider>;
 }
 
 export function useAuth() {

@@ -6,8 +6,8 @@ export type ProfileCategories = Record<string, string>;
 export type ProfileVisibility = Record<string, boolean>;
 export type RelationshipStatus = 'discover' | 'bro' | 'partner' | 'incoming_request' | 'outgoing_request';
 export type RelationshipKind = 'bro' | 'partner';
-export type PublicProfile = { uid: string; alias: string; avatarId: AvatarId; categories: ProfileCategories; relationshipStatus?: RelationshipStatus; requestedKind?: RelationshipKind };
-export type OwnProfile = PublicProfile & {
+export type PublicProfile = { uid: string; alias: string; avatarId: AvatarId; categories: ProfileCategories; presentationThemeId: string | null; relationshipStatus?: RelationshipStatus; requestedKind?: RelationshipKind };
+export type OwnProfile = Omit<PublicProfile, 'presentationThemeId'> & {
   categoryVisibility: ProfileVisibility;
   autoShareCompletedWorkouts: boolean;
   shareRoutineTemplate: boolean;
@@ -70,6 +70,7 @@ function asPage(data: unknown): { profiles: PublicProfile[]; nextCursor: string 
         alias: String(value.alias),
         avatarId: avatarIdOrDefault(value.avatar_id ?? value.avatarId),
         categories: (value.categories ?? {}) as ProfileCategories,
+        presentationThemeId: typeof value.presentation_theme_id === 'string' ? value.presentation_theme_id : typeof value.presentationThemeId === 'string' ? value.presentationThemeId : null,
         ...(typeof relationshipStatus === 'string' ? { relationshipStatus: relationshipStatus as RelationshipStatus } : {}),
         ...(requestedKind === 'bro' || requestedKind === 'partner' ? { requestedKind } : {}),
       };
@@ -138,9 +139,9 @@ export async function syncOwnPresentationTheme(themeId: string | null): Promise<
 }
 
 export async function getPublicProfile(uid: string): Promise<PublicProfile | null> {
-  const { data, error } = await requireClient().from('public_profiles').select('id, alias, avatar_id, categories').eq('id', uid).maybeSingle();
+  const { data, error } = await requireClient().from('public_profiles').select('id, alias, avatar_id, categories, presentation_theme_id').eq('id', uid).maybeSingle();
   if (error) throw new Error(error.message);
-  return data ? { uid: data.id, alias: data.alias, avatarId: avatarIdOrDefault(data.avatar_id), categories: stringRecord(data.categories) } : null;
+  return data ? { uid: data.id, alias: data.alias, avatarId: avatarIdOrDefault(data.avatar_id), categories: stringRecord(data.categories), presentationThemeId: typeof data.presentation_theme_id === 'string' ? data.presentation_theme_id : null } : null;
 }
 
 export async function getGraphSummary(targetId: string): Promise<GraphSummary> {

@@ -85,7 +85,7 @@ export default function MesocycleDetailScreen() {
   const scheduleByEntry = new Map(schedule.map((entry) => [entry.entryId, entry]));
   const adherence = deriveMesocycleAdherence(draft, attempts);
 
-  return <ThemeBackground><SafeAreaView style={styles.safe}><AppNavBar onBack={() => router.back()} /><ScrollView contentContainerStyle={styles.scroll}>
+  return <ThemeBackground><SafeAreaView style={styles.safe}><AppNavBar onBack={() => router.back()} trailing={<HapticPressable accessibilityLabel={`Compartir ${draft.name}`} onPress={() => router.push({ pathname: '/community/share-plan', params: { kind: 'mesocycle', id: draft.id, name: draft.name } })}><Text style={{ color: theme.primary, fontWeight: '800' }}>Compartir</Text></HapticPressable>} /><ScrollView contentContainerStyle={styles.scroll}>
     <Text style={[styles.title, { color: theme.text }]}>{draft.name}</Text>
     <GlassInput value={draft.name} onChangeText={(name) => change((value) => ({ ...value, name }))} />
     <DateTimeField value={derivedStartDate ?? startDate} onChange={setStartDate} mode="date" testID="mesocycle-edit-start-date-picker" />

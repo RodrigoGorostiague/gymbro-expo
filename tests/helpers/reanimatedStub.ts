@@ -16,4 +16,5 @@ export const useSharedValue = (value: number) => ({ value });
 export const withDelay = (_delay: number, value: any) => value;
 export const withRepeat = (value: any) => value;
 export const withSequence = (...values: any[]) => values[0];
+export const withSpring = (value: any) => value;
 export const withTiming = (value: any) => value;
