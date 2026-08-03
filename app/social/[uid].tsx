@@ -17,6 +17,12 @@ export default function PublicProfileScreen() {
   const load = useCallback(async () => { if (!uid) return; setLoading(true); try { const [nextProfile, nextSummary] = await Promise.all([getProfile(uid), getSummary(uid)]); setProfile(nextProfile); setSummary(nextSummary); setPlanLibrary(nextSummary.relationshipKind ? await getProfilePlanLibrary(uid) : null); } catch (error) { setPlanLibrary(null); Alert.alert('Perfil no disponible', error instanceof Error ? error.message : 'Este perfil ya no está disponible.'); } finally { setLoading(false); } }, [getProfile, getSummary, getProfilePlanLibrary, uid]);
   useFocusEffect(useCallback(() => { void load(); }, [load]));
   useEffect(() => { if (realtimeRevision > 0) void load(); }, [load, realtimeRevision]);
+  useEffect(() => {
+    if (!summary?.outgoingRequest || !uid) return undefined;
+    const refresh = () => { void getSummary(uid).then(setSummary).catch(() => undefined); };
+    const timer = setInterval(refresh, 10_000);
+    return () => clearInterval(timer);
+  }, [getSummary, summary?.outgoingRequest, uid]);
   const act = async (input: Parameters<typeof command>[0]) => { setActing(true); try { setSummary(await command(input)); } catch (error) { Alert.alert('Acción no disponible', error instanceof Error ? error.message : 'Inténtalo de nuevo.'); } finally { setActing(false); } };
   const requestKindLabel = summary?.requestKind === 'partner' ? 'Partner' : 'Bro';
   const downgrade = () => Alert.alert('Bajar a Bro', 'Esta acción conserva la conexión y la cambia de Partner a Bro.', [
