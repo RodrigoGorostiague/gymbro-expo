@@ -8,6 +8,8 @@ export type RewardWallet = {
   combineWithPartner: boolean;
 };
 
+export type WelcomeGemReward = { claimed: boolean; wallet: RewardWallet };
+
 function requireClient() {
   if (!supabase) throw new Error(supabaseConfigurationError ?? 'La billetera remota no está configurada.');
   return supabase;
@@ -22,6 +24,12 @@ function isWallet(value: unknown): value is RewardWallet {
     && typeof wallet.combineWithPartner === 'boolean';
 }
 
+function isWelcomeGemReward(value: unknown): value is WelcomeGemReward {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+  const reward = value as Record<string, unknown>;
+  return typeof reward.claimed === 'boolean' && isWallet(reward.wallet);
+}
+
 async function walletRpc(name: string, args: Record<string, unknown> = {}): Promise<RewardWallet> {
   const { data, error } = await requireClient().rpc(name, args);
   if (error) throw new Error(`No se pudo actualizar la billetera: ${error.message}`);
@@ -34,6 +42,13 @@ export const purchaseRewardTheme = (themeId: string) => walletRpc('purchase_rewa
 export const updateRewardWalletPreferences = (equippedThemeId: string | null, combineWithPartner: boolean) => (
   walletRpc('update_reward_wallet_preferences', { equipped_theme_id_input: equippedThemeId, combine_with_partner_input: combineWithPartner })
 );
+
+export async function claimWelcomeGemReward(): Promise<WelcomeGemReward> {
+  const { data, error } = await requireClient().rpc('claim_welcome_gem_reward', {});
+  if (error) throw new Error(`No se pudo acreditar el regalo de bienvenida: ${error.message}`);
+  if (!isWelcomeGemReward(data)) throw new Error('El regalo de bienvenida tiene un formato inválido.');
+  return data;
+}
 
 export function receiptTotal(receipt: RewardReceipt): number {
   return receipt.entries.reduce((total, entry) => total + Math.max(0, entry.amount), 0);

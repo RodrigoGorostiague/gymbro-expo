@@ -1,5 +1,5 @@
 begin;
-select plan(19);
+select plan(23);
 
 insert into auth.users (id, instance_id, aud, role, email, encrypted_password, email_confirmed_at, raw_app_meta_data, raw_user_meta_data, created_at, updated_at)
 values ('40000000-0000-0000-0000-000000000001', '00000000-0000-0000-0000-000000000000', 'authenticated', 'authenticated', 'wallet@example.com', '', now(), '{}', '{}', now(), now()),
@@ -37,6 +37,10 @@ select ok(exists(select 1 from public.reward_ledger_entries where owner_id = pub
 select throws_ok($$select public.purchase_reward_theme('not-a-theme')$$, 'unknown theme', 'server rejects forged theme catalog entries');
 select throws_ok($$select public.purchase_reward_theme('red')$$, 'insufficient reward balance', 'purchase is atomically rejected when unaffordable');
 select throws_ok($$select public.finalize_training_attempt(jsonb_set(pg_temp.test_attempt('forged', 10), '{owner}', '"40000000-0000-0000-0000-000000000002"'::jsonb))$$, 'invalid training attempt input', 'forged cross-owner attempt is rejected');
+select is((public.claim_welcome_gem_reward() ->> 'claimed')::boolean, true, 'welcome gift is granted once');
+select is((public.claim_welcome_gem_reward() ->> 'claimed')::boolean, false, 'welcome gift retry does not grant again');
+select is((select count(*) from public.reward_ledger_entries where owner_id = public.require_actor() and kind = 'welcome_gift'), 1::bigint, 'welcome gift has one ledger entry');
+select is((select amount from public.reward_ledger_entries where owner_id = public.require_actor() and kind = 'welcome_gift'), 250, 'welcome gift amount is fixed');
 
 select * from finish();
 rollback;

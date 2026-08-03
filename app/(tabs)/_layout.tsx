@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { Tabs, Redirect } from 'expo-router';
 import { Platform, StyleSheet, View } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { BlurView } from 'expo-blur';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
@@ -8,6 +9,7 @@ import { ThemePreviewBar } from '../../components/ThemePreviewBar';
 import { useAuth } from '../../context/AuthContext';
 import { useTheme } from '../../context/ThemeContext';
 import { useSocial } from '../../context/SocialContext';
+import { getCommunityBadgeCounts } from '../../services/communityBadge';
 
 type TabIconName = keyof typeof Ionicons.glyphMap;
 
@@ -62,19 +64,22 @@ function TabBarBackground() {
 export default function TabsLayout() {
   const { user, isLoading } = useAuth();
   const { theme } = useTheme();
-  const { requests, realtimeRevision } = useSocial();
-  const [pendingRequestBadge, setPendingRequestBadge] = useState<number | string | undefined>();
+  const { realtimeRevision } = useSocial();
+  const insets = useSafeAreaInsets();
+  const [communityBadge, setCommunityBadge] = useState<number | string | undefined>();
 
   useEffect(() => {
     let active = true;
-    void requests().then((page) => {
+    const refresh = () => void getCommunityBadgeCounts().then((counts) => {
       if (!active) return;
-      setPendingRequestBadge(page.nextCursor ? `${page.profiles.length}+` : page.profiles.length || undefined);
+      setCommunityBadge(counts.total > 99 ? '99+' : counts.total || undefined);
     }).catch(() => {
-      if (active) setPendingRequestBadge(undefined);
+      if (active) setCommunityBadge(undefined);
     });
-    return () => { active = false; };
-  }, [requests, realtimeRevision]);
+    refresh();
+    const timer = setInterval(refresh, 30_000);
+    return () => { active = false; clearInterval(timer); };
+  }, [realtimeRevision]);
 
   if (isLoading) return null;
   if (!user) return <Redirect href="/" />;
@@ -88,9 +93,9 @@ export default function TabsLayout() {
           tabBarStyle: {
             backgroundColor: 'transparent',
             borderTopWidth: 0,
-            height: 68,
+            height: 58 + insets.bottom,
             paddingTop: 6,
-            paddingBottom: 10,
+            paddingBottom: Math.max(insets.bottom, 10),
             elevation: 0,
           },
           tabBarActiveTintColor: theme.primary,
@@ -125,8 +130,8 @@ export default function TabsLayout() {
           name="community"
           options={{
             title: 'Comunidad',
-            tabBarBadge: pendingRequestBadge,
-            tabBarAccessibilityLabel: pendingRequestBadge ? `Comunidad, ${pendingRequestBadge} solicitudes pendientes` : 'Comunidad',
+            tabBarBadge: communityBadge,
+            tabBarAccessibilityLabel: communityBadge ? `Comunidad, ${communityBadge} pendientes` : 'Comunidad',
             tabBarIcon: ({ focused }) => <TabIcon name={focused ? 'people' : 'people-outline'} focused={focused} />,
           }}
         />

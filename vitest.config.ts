@@ -17,6 +17,7 @@ export default defineConfig({
       'react-native-reanimated': resolve(rootDir, 'tests/helpers/reanimatedStub.ts'),
       'react-native-safe-area-context': resolve(rootDir, 'tests/helpers/safeAreaStub.ts'),
       'react-native-svg': resolve(rootDir, 'tests/helpers/reactNativeSvgStub.ts'),
+      'react-native-url-polyfill/auto': resolve(rootDir, 'tests/helpers/urlPolyfillStub.ts'),
     },
   },
   test: {

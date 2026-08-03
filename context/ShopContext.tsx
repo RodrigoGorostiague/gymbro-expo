@@ -10,7 +10,7 @@ import {
 import { PARTNER_PROFILE } from '../constants/kiss';
 import { subscribeToEquippedThemes, syncEquippedTheme } from '../services/themeSync';
 import { UserProfile } from '../types';
-import { loadRewardWallet, purchaseRewardTheme, RewardWallet, updateRewardWalletPreferences } from '../services/rewardWallet';
+import { claimWelcomeGemReward, purchaseRewardTheme, RewardWallet, updateRewardWalletPreferences } from '../services/rewardWallet';
 import { useAuth } from './AuthContext';
 import { useData } from './DataContext';
 import { syncOwnPresentationTheme } from '../services/socialGraph';
@@ -37,6 +37,8 @@ interface ShopContextValue {
   setCombineWithPartner: (value: boolean) => void;
   startPreview: (themeId: string) => void;
   stopPreview: () => void;
+  welcomeGemReward: number | null;
+  dismissWelcomeGemReward: () => void;
 }
 
 const PREVIEW_DURATION_MS = 5000;
@@ -50,6 +52,7 @@ export function ShopProvider({ children }: { children: React.ReactNode }) {
   const [partnerEquippedThemeId, setPartnerEquippedThemeId] = useState<string | null>(null);
   const [previewThemeId, setPreviewThemeId] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+  const [welcomeGemReward, setWelcomeGemReward] = useState<number | null>(null);
   const previewTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const walletRequestRef = useRef(0);
 
@@ -79,6 +82,7 @@ export function ShopProvider({ children }: { children: React.ReactNode }) {
     if (!user) {
       walletRequestRef.current += 1;
       setShop(DEFAULT_SHOP);
+      setWelcomeGemReward(null);
       setPartnerEquippedThemeId(null);
       setIsLoading(false);
       return;
@@ -88,9 +92,10 @@ export function ShopProvider({ children }: { children: React.ReactNode }) {
     walletRequestRef.current = request;
     let active = true;
     setIsLoading(true);
-    void loadRewardWallet().then((loaded) => {
+    void claimWelcomeGemReward().then(({ wallet: loaded, claimed }) => {
       if (!active || walletRequestRef.current !== request) return;
       setShop(loaded);
+      setWelcomeGemReward(claimed ? 250 : null);
       syncEquippedTheme(user, loaded.equippedThemeId);
       void syncOwnPresentationTheme(loaded.equippedThemeId).catch(() => undefined);
     }).finally(() => {
@@ -202,6 +207,8 @@ export function ShopProvider({ children }: { children: React.ReactNode }) {
         setCombineWithPartner,
         startPreview,
         stopPreview,
+        welcomeGemReward,
+        dismissWelcomeGemReward: () => setWelcomeGemReward(null),
       }}
     >
       {children}

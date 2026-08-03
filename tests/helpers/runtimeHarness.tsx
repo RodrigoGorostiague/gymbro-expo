@@ -156,6 +156,8 @@ vi.mock('../../components/HapticPressable', hapticPressableMock);
 vi.mock('../../../components/HapticPressable', hapticPressableMock);
 vi.mock('../../components/UI', uiMock);
 vi.mock('../../../components/UI', uiMock);
+vi.mock('../../components/ProfileAvatar', () => ({ ProfileAvatar: createHost('ProfileAvatar') }));
+vi.mock('../../context/SocialContext', () => ({ useSocial: () => ({ circle: vi.fn(async () => ({ profiles: [], nextCursor: null })) }) }));
 
 export function resetRuntimeHarness() {
   __blurFocus();

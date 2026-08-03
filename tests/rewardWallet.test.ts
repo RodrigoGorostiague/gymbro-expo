@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, test, vi } from 'vitest';
 const rpc = vi.hoisted(() => vi.fn());
 vi.mock('../services/supabase', () => ({ supabase: { rpc }, supabaseConfigurationError: null }));
 
-import { loadRewardWallet, purchaseRewardTheme, receiptTotal, updateRewardWalletPreferences } from '../services/rewardWallet';
+import { claimWelcomeGemReward, loadRewardWallet, purchaseRewardTheme, receiptTotal, updateRewardWalletPreferences } from '../services/rewardWallet';
 
 const wallet = { balance: 25, purchasedThemeIds: ['white'], equippedThemeId: 'white', combineWithPartner: false };
 
@@ -28,6 +28,12 @@ describe('remote reward wallet boundary', () => {
     expect(rpc).toHaveBeenCalledWith('update_reward_wallet_preferences', {
       equipped_theme_id_input: 'white', combine_with_partner_input: true,
     });
+  });
+
+  test('claims the launch reward through the idempotent server RPC', async () => {
+    rpc.mockResolvedValueOnce({ data: { claimed: true, wallet: { ...wallet, balance: 275 } }, error: null });
+    await expect(claimWelcomeGemReward()).resolves.toEqual({ claimed: true, wallet: { ...wallet, balance: 275 } });
+    expect(rpc).toHaveBeenCalledWith('claim_welcome_gem_reward', {});
   });
 
   test('totals only positive server receipt entries', () => {

@@ -11,6 +11,19 @@ export const Alert = {
   alert: vi.fn(),
 };
 export const ActivityIndicator = createHost('ActivityIndicator');
+class AnimatedValue {
+  constructor(public value: number) {}
+  interpolate() { return this; }
+}
+const animation = () => ({ start: (callback?: (result: { finished: boolean }) => void) => callback?.({ finished: true }), stop: vi.fn() });
+export const Animated = {
+  Value: AnimatedValue,
+  View: createHost('AnimatedView'),
+  timing: animation,
+  spring: animation,
+  loop: animation,
+};
+export const Easing = { linear: (value: number) => value };
 
 const appStateListeners = new Set<(state: string) => void>();
 export const AppState = {
@@ -40,6 +53,7 @@ export const FlatList = ({ data, renderItem, keyExtractor, ...props }: any) => R
   }),
 );
 export const KeyboardAvoidingView = createHost('KeyboardAvoidingView');
+export const Modal = createHost('Modal');
 export const Platform = { OS: 'ios' };
 export const Pressable = ({ children, ...props }: any) => React.createElement(
   'Pressable',

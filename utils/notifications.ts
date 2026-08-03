@@ -32,9 +32,11 @@ async function getNotifications(): Promise<NotificationsModule | null> {
   return notificationsModule;
 }
 
-async function isExpoGoRuntime(): Promise<boolean> {
+export async function isExpoGoRuntime(): Promise<boolean> {
   try {
-    return (await import('expo-constants')).default.appOwnership === 'expo';
+    const constants = await import('expo-constants');
+    const value = constants.default ?? constants;
+    return value.appOwnership === 'expo' || value.expoGoConfig != null;
   } catch {
     return false;
   }
@@ -191,6 +193,7 @@ export async function scheduleRestNotification(
   input: RestNotificationInput,
 ): Promise<string | null> {
   if (!Number.isFinite(input.seconds) || input.seconds <= 0) return null;
+  if (await isExpoGoRuntime()) return null;
 
   const Notifications = await getNotifications();
   if (!Notifications) return null;
@@ -218,6 +221,7 @@ export async function scheduleRestNotification(
 
 export async function cancelRestNotification(notificationId: string): Promise<boolean> {
   if (!notificationId) return false;
+  if (await isExpoGoRuntime()) return false;
 
   const Notifications = await getNotifications();
   if (!Notifications) return false;
@@ -234,12 +238,12 @@ export async function showPartnerNotification(
   title: string,
   message: string,
 ): Promise<boolean> {
-  const Notifications = await getNotifications();
-  if (!Notifications) return false;
-
   try {
     const granted = await setupNotifications();
     if (!granted) return false;
+
+    const Notifications = await getNotifications();
+    if (!Notifications) return false;
 
     await Notifications.scheduleNotificationAsync({
       content: {

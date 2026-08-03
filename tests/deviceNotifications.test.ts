@@ -63,19 +63,16 @@ describe('device notification layer', () => {
     expect(remove).toHaveBeenCalledOnce();
   });
 
-  test('schedules and cancels rest notifications when local notifications are available in Expo Go', async () => {
+  test('does not import native notifications for rest scheduling in Expo Go', async () => {
     expoConstants.appOwnership = 'expo';
     device.isDevice = false;
     const { cancelRestNotification, scheduleRestNotification } = await import('../utils/notifications');
 
-    await expect(scheduleRestNotification({ title: 'Rest complete', body: 'Start your next set', seconds: 90 })).resolves.toBe('rest-notification-id');
-    await expect(cancelRestNotification('rest-notification-id')).resolves.toBe(true);
+    await expect(scheduleRestNotification({ title: 'Rest complete', body: 'Start your next set', seconds: 90 })).resolves.toBeNull();
+    await expect(cancelRestNotification('rest-notification-id')).resolves.toBe(false);
 
-    expect(notifications.scheduleNotificationAsync).toHaveBeenCalledWith(expect.objectContaining({
-      content: expect.objectContaining({ title: 'Rest complete' }),
-      trigger: expect.objectContaining({ seconds: 90, channelId: 'training' }),
-    }));
-    expect(notifications.cancelScheduledNotificationAsync).toHaveBeenCalledWith('rest-notification-id');
+    expect(notifications.scheduleNotificationAsync).not.toHaveBeenCalled();
+    expect(notifications.cancelScheduledNotificationAsync).not.toHaveBeenCalled();
   });
 
   test('does not request remote tokens or listeners in Expo Go', async () => {

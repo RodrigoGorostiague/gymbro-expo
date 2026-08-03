@@ -15,6 +15,7 @@ const social = vi.hoisted(() => ({
   blockedUsers: vi.fn().mockResolvedValue({ profiles: [{ uid: 'blocked-1', alias: 'Blocked athlete', categories: { style: 'strength' } }], nextCursor: null }),
   command: vi.fn().mockResolvedValue({ targetId: 'blocked-1' }),
   getWorkoutRecaps: vi.fn(),
+  getCommunityActivities: vi.fn().mockResolvedValue({ activities: [], nextCursor: null }),
   createWorkoutRecap: vi.fn(),
   deleteWorkoutRecap: vi.fn(),
   failedAutoRecapSessionIds: new Set<string>(),
@@ -29,6 +30,7 @@ vi.mock('react-native', async () => {
   return {
     Alert: { alert },
     RefreshControl: host('RefreshControl'),
+    Platform: { OS: 'ios', Version: '17' },
     ScrollView: host('ScrollView'),
     StyleSheet: { create: <T,>(styles: T) => styles },
     Switch: host('Switch'),
@@ -40,6 +42,7 @@ vi.mock('../context/SocialContext', () => ({ useSocial: () => social }));
 const workoutData = vi.hoisted(() => ({ sessions: [] as Array<Record<string, unknown>>, ensureRecapPublicationKey: vi.fn() }));
 vi.mock('../context/DataContext', () => ({ useData: () => workoutData }));
 vi.mock('../services/workoutRecapFeed', () => ({ recapInputFromSession: vi.fn() }));
+vi.mock('../services/jointWorkouts', () => ({ listJointWorkoutPosts: vi.fn(async () => []) }));
 vi.mock('../context/ThemeContext', () => ({
   useTheme: () => ({ theme: { text: '#111', textMuted: '#666', primary: '#00f', success: '#0a0' } }),
 }));
@@ -86,6 +89,7 @@ describe('Community feed', () => {
     social.blockedUsers.mockResolvedValue({ profiles: [{ uid: 'blocked-1', alias: 'Blocked athlete', categories: { style: 'strength' } }], nextCursor: null });
     social.command.mockResolvedValue({ targetId: 'blocked-1' });
     social.getWorkoutRecaps.mockResolvedValue({ recaps: [], nextCursor: null });
+    social.getCommunityActivities.mockResolvedValue({ activities: [], nextCursor: null });
     Object.assign(social.ownProfile, {
       uid: 'member-1', alias: 'Blocker', categories: {}, categoryVisibility: {}, autoShareCompletedWorkouts: true,
       shareRoutineTemplate: true, shareMesocycleTemplate: true, sharePerformedSetDetails: true,
