@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { Ionicons } from '@expo/vector-icons';
 import {
   Animated,
+  Alert,
   Easing,
   Pressable,
   StyleSheet,
@@ -9,9 +10,9 @@ import {
   View,
 } from 'react-native';
 import { PARTNER_MESSAGES, PartnerMessageType } from '../constants/kiss';
-import { useKiss } from '../context/KissContext';
 import { useShop } from '../context/ShopContext';
 import { useTheme } from '../context/ThemeContext';
+import { sendPartnerMessage } from '../services/partnerMessages';
 import { vibrateButtonPress } from '../utils/haptics';
 
 const FAB_SIZE = 58;
@@ -103,10 +104,10 @@ const chatIconStyles = StyleSheet.create({
   },
 });
 
-export function ChatFab() {
+export function ChatFab({ recipientId }: { recipientId: string }) {
   const { theme } = useTheme();
   const { previewThemeId } = useShop();
-  const { isSending, sendPartnerMessage } = useKiss();
+  const [isSending, setIsSending] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
   const scaleAnim = useRef(new Animated.Value(0)).current;
 
@@ -134,9 +135,19 @@ export function ChatFab() {
   const handleSelect = useCallback(
     async (type: PartnerMessageType) => {
       closeMenu();
-      await sendPartnerMessage(type);
+      if (isSending) return;
+      setIsSending(true);
+      try {
+        await sendPartnerMessage(recipientId, type);
+        const { sentLabel, emoji } = PARTNER_MESSAGES[type];
+        Alert.alert(`${sentLabel} ${emoji}`, 'Enviado a tu Partner.');
+      } catch {
+        Alert.alert('Error', 'No se pudo enviar el mensaje. Revisa la conexión.');
+      } finally {
+        setIsSending(false);
+      }
     },
-    [closeMenu, sendPartnerMessage],
+    [closeMenu, isSending, recipientId],
   );
 
   return (

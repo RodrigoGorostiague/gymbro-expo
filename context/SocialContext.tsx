@@ -7,6 +7,7 @@ import {
 } from '../services/socialGraph';
 import { createWorkoutRecap, deleteWorkoutRecap, getWorkoutRecapDetail, getWorkoutRecapPage, recapInputFromSession, recapSharePayload, subscribeToWorkoutRecapChanges } from '../services/workoutRecapFeed';
 import { attemptToSession } from '../utils/workoutAttempts';
+import { getCommunityActivities, subscribeToCommunityActivityChanges } from '../services/experience';
 import {
   acceptPrivatePlanShareRequest,
   createPrivatePlanShareRequest,
@@ -14,6 +15,7 @@ import {
   listReceivedPrivatePlanShareRequests,
   rejectPrivatePlanShareRequest,
 } from '../services/privatePlanSharing';
+import { subscribeToJointWorkoutChanges } from '../services/jointWorkouts';
 
 type SocialContextValue = {
   ownProfile: OwnProfile | null;
@@ -29,6 +31,7 @@ type SocialContextValue = {
   command: (command: GraphCommand) => Promise<GraphSummary>;
   getWorkoutRecaps: typeof getWorkoutRecapPage;
   getWorkoutRecapDetail: typeof getWorkoutRecapDetail;
+  getCommunityActivities: typeof getCommunityActivities;
   createWorkoutRecap: typeof createWorkoutRecap;
   deleteWorkoutRecap: typeof deleteWorkoutRecap;
   failedAutoRecapSessionIds: ReadonlySet<string>;
@@ -64,6 +67,8 @@ export function SocialProvider({ children }: { children: React.ReactNode }) {
     let mounted = true;
     let unsubscribeGraph: () => void = () => undefined;
     let unsubscribeRecaps: () => void = () => undefined;
+    let unsubscribeActivities: () => void = () => undefined;
+    let unsubscribeJointWorkouts: () => void = () => undefined;
     if (!user) {
       setOwnProfile(null);
       return undefined;
@@ -80,12 +85,20 @@ export function SocialProvider({ children }: { children: React.ReactNode }) {
       if (mounted) unsubscribeRecaps = cleanup;
       else cleanup();
     }).catch(() => undefined);
-    return () => { mounted = false; unsubscribeGraph(); unsubscribeRecaps(); };
+    void subscribeToCommunityActivityChanges(invalidate).then((cleanup) => {
+      if (mounted) unsubscribeActivities = cleanup;
+      else cleanup();
+    }).catch(() => undefined);
+    void subscribeToJointWorkoutChanges(invalidate).then((cleanup) => {
+      if (mounted) unsubscribeJointWorkouts = cleanup;
+      else cleanup();
+    }).catch(() => undefined);
+    return () => { mounted = false; unsubscribeGraph(); unsubscribeRecaps(); unsubscribeActivities(); unsubscribeJointWorkouts(); };
   }, [user, refreshOwnProfile]);
   useEffect(() => {
     if (!ownProfile?.autoShareCompletedWorkouts) return;
     for (const attempt of attempts) {
-      if (!attempt.recapPublicationKey || autoPublishingKeys.current.has(attempt.recapPublicationKey)) continue;
+      if (attempt.jointWorkoutId || !attempt.recapPublicationKey || autoPublishingKeys.current.has(attempt.recapPublicationKey)) continue;
       autoPublishingKeys.current.add(attempt.recapPublicationKey);
       const session = attemptToSession(attempt);
       const publicationKey = session.recapPublicationKey;
@@ -105,7 +118,7 @@ export function SocialProvider({ children }: { children: React.ReactNode }) {
     const retry = setTimeout(() => setRecapRetryRevision((revision) => revision + 1), 30_000);
     return () => clearTimeout(retry);
   }, [failedAutoRecapSessionIds, ownProfile?.autoShareCompletedWorkouts]);
-  const value = useMemo(() => ({ ownProfile, refreshOwnProfile, saveProfile, discover: getDiscoveryPage, search: searchProfiles, circle: getCirclePage, requests: getRequestPage, blockedUsers: getBlockedUsersPage, getProfile: getPublicProfile, getSummary: getGraphSummary, command: runGraphCommand, getWorkoutRecaps: getWorkoutRecapPage, getWorkoutRecapDetail, createWorkoutRecap, deleteWorkoutRecap, failedAutoRecapSessionIds, clearFailedAutoRecapSession, getProfilePlanLibrary, createPrivatePlanShareRequest, listReceivedPrivatePlanShareRequests, acceptPrivatePlanShareRequest, rejectPrivatePlanShareRequest, realtimeRevision }), [ownProfile, realtimeRevision, refreshOwnProfile, saveProfile, failedAutoRecapSessionIds, clearFailedAutoRecapSession]);
+  const value = useMemo(() => ({ ownProfile, refreshOwnProfile, saveProfile, discover: getDiscoveryPage, search: searchProfiles, circle: getCirclePage, requests: getRequestPage, blockedUsers: getBlockedUsersPage, getProfile: getPublicProfile, getSummary: getGraphSummary, command: runGraphCommand, getWorkoutRecaps: getWorkoutRecapPage, getWorkoutRecapDetail, getCommunityActivities, createWorkoutRecap, deleteWorkoutRecap, failedAutoRecapSessionIds, clearFailedAutoRecapSession, getProfilePlanLibrary, createPrivatePlanShareRequest, listReceivedPrivatePlanShareRequests, acceptPrivatePlanShareRequest, rejectPrivatePlanShareRequest, realtimeRevision }), [ownProfile, realtimeRevision, refreshOwnProfile, saveProfile, failedAutoRecapSessionIds, clearFailedAutoRecapSession]);
   return <SocialContext.Provider value={value}>{children}</SocialContext.Provider>;
 }
 

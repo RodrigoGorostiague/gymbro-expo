@@ -16,6 +16,8 @@ import { ExclusiveSetCelebration } from '../../../components/ExclusiveSetCelebra
 import { GlassCard, ThemeBackground } from '../../../components/GlassCard';
 import { HapticPressable } from '../../../components/HapticPressable';
 import { ProfileAvatar } from '../../../components/ProfileAvatar';
+import { JointParticipantProfileCard } from '../../../components/JointParticipantProfileCard';
+import { ChatFab } from '../../../components/ChatFab';
 import { GlassButton, GlassInput } from '../../../components/UI';
 import { getRandomSetEncouragementMessage } from '../../../constants/encouragement';
 import { useAuth } from '../../../context/AuthContext';
@@ -23,7 +25,7 @@ import { useData } from '../../../context/DataContext';
 import { useShop } from '../../../context/ShopContext';
 import { useTheme } from '../../../context/ThemeContext';
 import { useSocial } from '../../../context/SocialContext';
-import { CompletedExercise, CompletedSet, Routine, SetType, WorkoutAttempt } from '../../../types';
+import { CompletedExercise, CompletedSet, ExperienceReceipt, Routine, SetType, WorkoutAttempt } from '../../../types';
 import { vibrateRestTimerComplete } from '../../../utils/haptics';
 import { cancelRestNotification, scheduleRestNotification } from '../../../utils/notifications';
 import { generateId } from '../../../utils/storage';
@@ -35,10 +37,11 @@ import { RewardReceipt } from '../../../types';
 import { matchesActiveWorkout } from '../../../utils/activeWorkoutReentry';
 import { reconcileActiveWorkoutTiming } from '../../../utils/activeWorkoutTiming';
 import { validateMesocycleExecutionLineage } from '../../../utils/mesocycleExecutionLineage';
-import { addJointWorkoutParticipant, completedJointWorkoutInput, createJointWorkout, finishJointWorkout, JointAction, JointParticipant, listJointWorkoutActions, listJointWorkouts, sendJointWorkoutAction } from '../../../services/jointWorkouts';
+import { addJointWorkoutParticipant, completedJointWorkoutInput, createJointWorkout, directPartnerRecipient, finishJointWorkout, jointParticipantInviteCapacity, JointParticipant, listJointWorkouts } from '../../../services/jointWorkouts';
 import { PublicProfile } from '../../../services/socialGraph';
 import { getShopTheme } from '../../../constants/shopThemes';
 import { LinearGradient } from 'expo-linear-gradient';
+import Animated, { FadeIn, ZoomIn } from 'react-native-reanimated';
 
 function readSingleParam(value: string | string[] | undefined): string | undefined {
   if (typeof value === 'string') {
@@ -131,12 +134,12 @@ export default function ExecuteRoutineScreen() {
   const [isFinishing, setIsFinishing] = useState(false);
   const [earnedGems, setEarnedGems] = useState(0);
   const [rewardReceipt, setRewardReceipt] = useState<RewardReceipt | null>(null);
+  const [experienceReceipt, setExperienceReceipt] = useState<ExperienceReceipt | null>(null);
   const [celebrationNonce, setCelebrationNonce] = useState(0);
   const [jointWorkoutId, setJointWorkoutId] = useState<string | null>(initialJointWorkoutId ?? null);
   const [jointTargets, setJointTargets] = useState<JointParticipant[]>([]);
   const [jointInviteCandidates, setJointInviteCandidates] = useState<PublicProfile[]>([]);
   const [selectedJointInviteIds, setSelectedJointInviteIds] = useState<string[]>([]);
-  const [jointActions, setJointActions] = useState<JointAction[]>([]);
   const [isJointBusy, setJointBusy] = useState(false);
 
   const elapsedRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -286,17 +289,16 @@ export default function ExecuteRoutineScreen() {
 
   const loadJointState = async (workoutId = jointWorkoutId) => {
     if (!workoutId) return;
-    const [sessions, actions] = await Promise.all([listJointWorkouts(), listJointWorkoutActions(workoutId)]);
+    const sessions = await listJointWorkouts();
     const current = sessions.find((session) => session.id === workoutId);
-    setJointTargets(current?.participants.filter((participant) => !participant.isSelf && participant.status !== 'declined') ?? []);
-    setJointActions(actions);
+    setJointTargets(current?.participants.filter((participant) => !participant.isSelf) ?? []);
   };
 
   const toggleJointInviteCandidate = (profileId: string) => {
     if (isJointBusy) return;
     setSelectedJointInviteIds((current) => current.includes(profileId)
       ? current.filter((id) => id !== profileId)
-      : current.length < (jointWorkoutId ? Math.max(0, 3 - jointTargets.length) : 3)
+      : current.length < (jointWorkoutId ? jointParticipantInviteCapacity(jointTargets) : 3)
         ? [...current, profileId]
         : current);
   };
@@ -330,7 +332,7 @@ export default function ExecuteRoutineScreen() {
       if (!failedCount) Alert.alert('Invitaciones enviadas', `${successfulIds.size} ${successfulIds.size === 1 ? 'persona fue invitada' : 'personas fueron invitadas'} a entrenar con vos.`);
       else Alert.alert(successfulIds.size ? 'Invitaciones parciales' : 'No se pudo invitar', successfulIds.size
         ? `Se enviaron ${successfulIds.size} de ${selected.length} invitaciones. Las restantes siguen seleccionadas para reintentar.`
-        : 'No se pudo enviar ninguna invitación. Intentá nuevamente.');
+        : 'No se pudo enviar ninguna invitación. Intentá otra vez.');
     } finally { setJointBusy(false); }
   };
 
@@ -343,16 +345,8 @@ export default function ExecuteRoutineScreen() {
       setJointInviteCandidates(page.profiles.filter((profile) => !existing.has(profile.uid)));
       setSelectedJointInviteIds([]);
     } catch (error) {
-      Alert.alert('No se pudieron cargar tus conexiones', error instanceof Error ? error.message : 'Intentá nuevamente.');
+      Alert.alert('No se pudieron cargar tus conexiones', error instanceof Error ? error.message : 'Intentá otra vez.');
     } finally { setJointBusy(false); }
-  };
-
-  const sendJointAction = async (recipientId: string, action: 'push' | 'nice_set' | 'finish_strong' | 'partner_proud') => {
-    if (!jointWorkoutId) return;
-    setJointBusy(true);
-    try { await sendJointWorkoutAction(jointWorkoutId, recipientId, action); await loadJointState(); }
-    catch (error) { Alert.alert('No se pudo enviar', error instanceof Error ? error.message : 'Intentá nuevamente.'); }
-    finally { setJointBusy(false); }
   };
 
   const updateSetValue = (setKey: SetKey, field: keyof SetRuntimeValues, value: string) => {
@@ -389,6 +383,15 @@ export default function ExecuteRoutineScreen() {
     } finally {
       completingSetsRef.current.delete(setKey);
     }
+  };
+
+  const reopenSet = (setKey: SetKey) => {
+    if (!completedSets[setKey]) return;
+    setCompletedSets((prev) => {
+      const next = { ...prev, [setKey]: false };
+      if (activeWorkoutDraft) void updateActiveWorkout({ ...activeWorkoutDraft, completedSets: next });
+      return next;
+    });
   };
 
   const finishWorkout = async (jointVisibility?: 'public' | 'circle' | 'private') => {
@@ -429,14 +432,16 @@ export default function ExecuteRoutineScreen() {
         durationSeconds: elapsed,
         restTimerSeconds: restTimerConfig,
         lineage,
+        jointWorkoutId: jointWorkoutId ?? undefined,
         results: Object.fromEntries(exercises.flatMap((exercise) => exercise.sets.map((set) =>
           [`${exercise.exerciseId}:${set.setId}`, { performed: set.completed, reps: set.reps, load: set.weight }]))),
       });
       attemptRef.current = attempt;
-      const receipt = await addAttempt(attempt);
+      const finalized = await addAttempt(attempt);
       if (jointWorkoutId) await finishJointWorkout(jointWorkoutId, jointVisibility ?? 'circle', completedJointWorkoutInput(routine, elapsed, exercises));
-      setRewardReceipt(receipt);
-      setEarnedGems(receiptTotal(receipt));
+      setRewardReceipt(finalized.receipt);
+      setExperienceReceipt(finalized.experienceReceipt);
+      setEarnedGems(receiptTotal(finalized.receipt));
       void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => undefined);
       setPhase('done');
     } catch (error) {
@@ -518,6 +523,12 @@ export default function ExecuteRoutineScreen() {
             <Text style={[styles.doneGems, { color: theme.primary }]}>
               +{earnedGems} gemas
             </Text>
+            {experienceReceipt ? <Animated.View entering={FadeIn.duration(220)} style={styles.experienceReceipt}>
+              <Animated.Text entering={ZoomIn.duration(360)} style={[styles.doneXp, { color: theme.secondary }]}>+{experienceReceipt.earnedXp} XP</Animated.Text>
+              <Text style={[styles.receiptLine, { color: theme.textMuted }]}>Nivel {experienceReceipt.progress.level} · {experienceReceipt.progress.rank}</Text>
+              <View style={[styles.xpTrack, { backgroundColor: theme.glassBorder }]}><View style={[styles.xpFill, { width: `${Math.min(100, experienceReceipt.progress.xpIntoLevel / experienceReceipt.progress.xpForNextLevel * 100)}%`, backgroundColor: theme.secondary }]} /></View>
+              {experienceReceipt.entries.some((entry) => entry.kind === 'personal_record') ? <Text style={[styles.receiptLine, { color: theme.secondary }]}>Nuevo récord personal</Text> : null}
+            </Animated.View> : null}
             {rewardReceipt && (
               <View style={styles.receipt}>
                 {rewardReceipt.entries.map((entry, index) => (
@@ -547,8 +558,9 @@ export default function ExecuteRoutineScreen() {
 
   const totalSets = routine.exercises.reduce((acc, e) => acc + e.sets.length, 0);
   const doneSets = Object.values(completedSets).filter(Boolean).length;
-  const jointInviteLimit = jointWorkoutId ? Math.max(0, 3 - jointTargets.length) : 3;
+  const jointInviteLimit = jointWorkoutId ? jointParticipantInviteCapacity(jointTargets) : 3;
   const selectedJointInviteCount = selectedJointInviteIds.length;
+  const partnerRecipientId = directPartnerRecipient({ id: jointWorkoutId ?? '', createdAt: '', participants: jointTargets });
 
   return (
     <ThemeBackground>
@@ -582,11 +594,10 @@ export default function ExecuteRoutineScreen() {
             <Text style={{ color: theme.textMuted }}>Invitá a un Bro o Partner mientras esta rutina está activa.</Text>
             <GlassButton title="Invitar a entrenar juntos" variant="secondary" loading={isJointBusy} disabled={isJointBusy} onPress={() => void openJointInvite()} />
           </> : <>
-            <Text style={{ color: theme.textMuted }}>Sesión conjunta activa. Las acciones se envían sólo a conexiones actuales.</Text>
+            <Text style={{ color: theme.textMuted }}>Sesión conjunta activa.</Text>
             <GlassButton title="Actualizar grupo" variant="secondary" disabled={isJointBusy} onPress={() => void loadJointState()} />
-            <GlassButton title="Agregar Bro o Partner" variant="secondary" disabled={isJointBusy || jointTargets.length >= 3} onPress={() => void openJointInvite()} />
-            {jointTargets.map((target) => <View key={target.id} style={styles.jointTarget}><Text style={{ color: theme.text }}>{target.alias} · {target.status}</Text><View style={styles.jointActions}><GlassButton title="¡Dale!" variant="secondary" disabled={isJointBusy} onPress={() => void sendJointAction(target.id, 'push')} /><GlassButton title="Buena serie" variant="secondary" disabled={isJointBusy} onPress={() => void sendJointAction(target.id, 'nice_set')} />{target.relationshipKind === 'partner' ? <GlassButton title="Orgulloso de vos" variant="secondary" disabled={isJointBusy} onPress={() => void sendJointAction(target.id, 'partner_proud')} /> : null}</View></View>)}
-            {jointActions.slice(0, 2).map((action) => <Text key={action.id} style={{ color: theme.textMuted }}>Acción: {action.action.replace('_', ' ')}</Text>)}
+            <GlassButton title="Agregar Bro o Partner" variant="secondary" disabled={isJointBusy || jointInviteLimit === 0} onPress={() => void openJointInvite()} />
+            {jointTargets.map((target) => <JointParticipantProfileCard key={target.id} participant={target} />)}
           </>}
           {jointInviteCandidates.length && jointInviteLimit > 0 ? <View style={styles.jointInviteList}><Text style={{ color: theme.textMuted }}>Elegí hasta {jointInviteLimit} {jointInviteLimit === 1 ? 'persona' : 'personas'} para invitar juntas.</Text>{jointInviteCandidates.map((profile) => {
             const recipientTheme = getShopTheme(profile.presentationThemeId ?? '') ?? getShopTheme('profile-rodaja')!;
@@ -669,7 +680,17 @@ export default function ExecuteRoutineScreen() {
                       )}
                     </View>
 
-                    {!completed && (
+                    {completed ? (
+                      <HapticPressable
+                        accessibilityRole="button"
+                        accessibilityLabel={`Editar ${getSetTypeLabel(set.tipo)}`}
+                        accessibilityHint="Reabre la serie para corregir carga o repeticiones"
+                        onPress={() => reopenSet(setKey)}
+                        style={[styles.editSetBtn, { borderColor: theme.success }]}
+                      >
+                        <Text style={[styles.editSetBtnText, { color: theme.text }]}>Editar serie</Text>
+                      </HapticPressable>
+                    ) : (
                       <HapticPressable
                         onPress={() => completeSet(setKey, set.tipo)}
                         style={[styles.completeBtn, { backgroundColor: theme.primary }]}
@@ -683,6 +704,8 @@ export default function ExecuteRoutineScreen() {
             </GlassCard>
           ))}
         </ScrollView>
+
+        {partnerRecipientId ? <ChatFab recipientId={partnerRecipientId} /> : null}
 
         <View style={styles.footer}>
           <GlassButton
@@ -796,6 +819,17 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     fontSize: 14,
   },
+  editSetBtn: {
+    alignItems: 'center',
+    borderRadius: 12,
+    borderWidth: 1,
+    marginTop: 12,
+    paddingVertical: 12,
+  },
+  editSetBtnText: {
+    fontSize: 14,
+    fontWeight: '700',
+  },
   footer: {
     position: 'absolute',
     bottom: 24,
@@ -826,6 +860,10 @@ const styles = StyleSheet.create({
   doneTitle: { fontSize: 22, fontWeight: '800' },
   doneMeta: { marginTop: 8, fontSize: 16 },
   doneGems: { marginTop: 6, fontSize: 15, fontWeight: '700' },
+  doneXp: { fontSize: 25, fontWeight: '900' },
+  experienceReceipt: { alignSelf: 'stretch', alignItems: 'center', gap: 5, marginTop: 10 },
+  xpTrack: { alignSelf: 'stretch', height: 8, borderRadius: 999, overflow: 'hidden' },
+  xpFill: { height: '100%', borderRadius: 999 },
   receipt: { alignSelf: 'stretch', marginTop: 14, gap: 4 },
   receiptLine: { fontSize: 13, textTransform: 'capitalize' },
   receiptBalance: { marginTop: 4, fontSize: 14, fontWeight: '700' },

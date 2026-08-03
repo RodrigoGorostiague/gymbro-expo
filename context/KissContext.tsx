@@ -2,7 +2,6 @@ import React, { createContext, useCallback, useContext, useEffect, useState } fr
 import { Alert } from 'react-native';
 import {
   PARTNER_MESSAGES,
-  PARTNER_PROFILE,
   PartnerMessageType,
 } from '../constants/kiss';
 import {
@@ -23,8 +22,8 @@ import { useAuth } from './AuthContext';
 
 interface KissContextValue {
   isSending: boolean;
-  sendPartnerMessage: (type: PartnerMessageType) => Promise<void>;
-  /** @deprecated use sendPartnerMessage('kiss') */
+  sendPartnerMessage: (recipientId: string, type: PartnerMessageType) => Promise<void>;
+  /** @deprecated a direct Partner recipient is required. */
   sendKiss: () => Promise<void>;
 }
 
@@ -69,11 +68,10 @@ export function KissProvider({ children }: { children: React.ReactNode }) {
   }, [user]);
 
   const sendPartnerMessage = useCallback(
-    async (type: PartnerMessageType) => {
-      if (!user || isSending) return;
+    async (recipientId: string, type: PartnerMessageType) => {
+      if (!user || isSending || !recipientId.trim() || recipientId === user) return;
 
       const { message, title, sentLabel, emoji } = PARTNER_MESSAGES[type];
-      const partner = PARTNER_PROFILE[user];
 
       setIsSending(true);
 
@@ -86,10 +84,10 @@ export function KissProvider({ children }: { children: React.ReactNode }) {
           return;
         }
 
-        await sendPartnerEvent(user, { message, title });
+        await sendPartnerEvent(user, recipientId, { message, title });
 
         if (supportsRemotePush() && await setupNotifications()) {
-          const partnerToken = await getPartnerPushToken(user);
+          const partnerToken = await getPartnerPushToken(recipientId);
           if (partnerToken) {
             try {
               await sendExpoPushNotification(partnerToken, title, message);
@@ -99,7 +97,7 @@ export function KissProvider({ children }: { children: React.ReactNode }) {
           }
         }
 
-        Alert.alert(`${sentLabel} ${emoji}`, `Enviado a ${partner}.`);
+        Alert.alert(`${sentLabel} ${emoji}`, 'Enviado a tu Partner.');
       } catch {
         Alert.alert('Error', 'No se pudo enviar el mensaje. Revisa la conexión.');
       } finally {
@@ -109,10 +107,7 @@ export function KissProvider({ children }: { children: React.ReactNode }) {
     [user, isSending],
   );
 
-  const sendKiss = useCallback(
-    () => sendPartnerMessage('kiss'),
-    [sendPartnerMessage],
-  );
+  const sendKiss = useCallback(() => Promise.reject(new Error('A direct Partner recipient is required')), []);
 
   return (
     <KissContext.Provider value={{ isSending, sendPartnerMessage, sendKiss }}>

@@ -19,12 +19,7 @@ import {
   ShareNotificationType,
   UserProfile,
 } from '../types';
-import {
-  FIREBASE_COLLECTIONS,
-  KISS_MESSAGE,
-  PARTNER_PROFILE,
-  SHARE_NOTIFICATION_TYPES,
-} from '../constants/kiss';
+import { FIREBASE_COLLECTIONS, KISS_MESSAGE, SHARE_NOTIFICATION_TYPES } from '../constants/kiss';
 import { PARTNER_NOTIFICATION_CHANNEL } from '../utils/notifications';
 
 export interface PartnerEventPayload {
@@ -74,24 +69,23 @@ export async function savePushToken(profile: UserProfile, token: string): Promis
   });
 }
 
-export async function getPartnerPushToken(profile: UserProfile): Promise<string | null> {
+export async function getPartnerPushToken(recipient: UserProfile): Promise<string | null> {
   const firestore = getDb();
   if (!firestore) return null;
 
-  const partner = PARTNER_PROFILE[profile];
-  const snap = await getDoc(doc(firestore, FIREBASE_COLLECTIONS.pushTokens, partner));
+  const snap = await getDoc(doc(firestore, FIREBASE_COLLECTIONS.pushTokens, recipient));
   if (!snap.exists()) return null;
   return (snap.data().token as string) ?? null;
 }
 
 export async function sendPartnerEvent(
   from: UserProfile,
+  to: UserProfile,
   payload: PartnerEventPayload,
 ): Promise<void> {
   const firestore = getDb();
   if (!firestore) throw new Error('Firebase no configurado');
 
-  const to = PARTNER_PROFILE[from];
   const docData: Record<string, unknown> = {
     from,
     to,
@@ -109,10 +103,8 @@ export async function sendPartnerEvent(
 
 /** @deprecated use sendPartnerEvent */
 export async function sendKissEvent(from: UserProfile): Promise<void> {
-  await sendPartnerEvent(from, {
-    message: KISS_MESSAGE,
-    title: '💋 GymBro',
-  });
+  void from;
+  throw new Error('A direct Partner recipient is required');
 }
 
 export async function sendShareNotification(
@@ -120,12 +112,14 @@ export async function sendShareNotification(
   type: ShareNotificationType,
   shareId: string,
   routineName: string,
+  to?: UserProfile,
 ): Promise<void> {
+  if (!to || to === from) return;
   const formatter = SHARE_NOTIFICATION_TYPES[type];
   const message = formatter.message(from, routineName);
   const title = formatter.title(from, routineName);
 
-  await sendPartnerEvent(from, {
+  await sendPartnerEvent(from, to, {
     message,
     title,
     type,
@@ -133,7 +127,7 @@ export async function sendShareNotification(
     routineName,
   });
 
-  const partnerToken = await getPartnerPushToken(from);
+  const partnerToken = await getPartnerPushToken(to);
   if (!partnerToken) return;
 
   try {

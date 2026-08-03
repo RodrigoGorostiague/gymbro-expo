@@ -102,6 +102,7 @@ export function ShareProvider({ children }: { children: React.ReactNode }) {
           'routine_accepted',
           shareId,
           share.routine.name,
+          share.sharedBy,
         );
       }
     },
@@ -122,6 +123,7 @@ export function ShareProvider({ children }: { children: React.ReactNode }) {
           'routine_rejected',
           shareId,
           share.routine.name,
+          share.sharedBy,
         );
       }
     },
