@@ -1,4 +1,5 @@
-import { ActiveWorkoutDraft, ExerciseDefinition, RewardReceipt, WorkoutAttempt, WorkoutSession } from '../types';
+import { ActiveWorkoutDraft, ExperienceReceipt, ExerciseDefinition, RewardReceipt, WorkoutAttempt, WorkoutSession } from '../types';
+import { asExperienceProgress } from './experience';
 import { supabase, supabaseConfigurationError } from './supabase';
 
 export type TrainingState = {
@@ -152,15 +153,33 @@ function isReceipt(value: unknown): value is RewardReceipt {
     && (value.mesocycle === undefined || isRecord(value.mesocycle));
 }
 
-export async function finalizeTrainingAttempt(attempt: WorkoutAttempt): Promise<{ attempt: WorkoutAttempt; receipt: RewardReceipt }> {
+function isExperienceReceipt(value: unknown): value is ExperienceReceipt {
+  return isRecord(value) && isNonEmptyString(value.attempt_id) && Number.isInteger(value.earned_xp)
+    && (value.earned_xp as number) >= 0 && Array.isArray(value.entries)
+    && asExperienceProgress(value.progress) !== null;
+}
+
+function experienceReceipt(value: unknown): ExperienceReceipt {
+  if (!isRecord(value)) throw new Error('La confirmación de experiencia tiene un formato inválido. Inténtalo nuevamente.');
+  const progress = asExperienceProgress(value.progress);
+  if (!progress || !isExperienceReceipt(value)) throw new Error('La confirmación de experiencia tiene un formato inválido. Inténtalo nuevamente.');
+  return {
+    attemptId: value.attempt_id as string,
+    earnedXp: value.earned_xp as number,
+    entries: value.entries as ExperienceReceipt['entries'],
+    progress,
+  };
+}
+
+export async function finalizeTrainingAttempt(attempt: WorkoutAttempt): Promise<{ attempt: WorkoutAttempt; receipt: RewardReceipt; experienceReceipt: ExperienceReceipt }> {
   if (!isAttempt(attempt)) throw new Error('El intento de entrenamiento no es válido.');
   const { data, error } = await requireClient().rpc('finalize_training_attempt', { attempt_input: attempt });
   // Preserve RPC metadata so the UI can classify safe messages and diagnostics retain the cause.
   if (error) throw error;
-  if (!isRecord(data) || !isAttempt(data.attempt) || !isReceipt(data.receipt)) {
+  if (!isRecord(data) || !isAttempt(data.attempt) || !isReceipt(data.receipt) || !isExperienceReceipt(data.experience_receipt)) {
     throw new Error('La confirmación de recompensas tiene un formato inválido. Inténtalo nuevamente.');
   }
-  return { attempt: data.attempt, receipt: data.receipt };
+  return { attempt: data.attempt, receipt: data.receipt, experienceReceipt: experienceReceipt(data.experience_receipt) };
 }
 
 export async function importLegacyCustomDefinitions(definitions: ExerciseDefinition[]): Promise<void> {

@@ -421,6 +421,39 @@ export interface RewardReceipt {
   readonly mesocycle?: { readonly next?: string };
 }
 
+export type TrainingRank = 'Principiante' | 'Intermedio' | 'Avanzado' | 'GymBro' | 'GymRat' | 'G-Boom' | 'Alfa' | 'Sigma';
+
+export interface ExperienceProgress {
+  readonly level: number;
+  readonly rank: TrainingRank;
+  readonly xpIntoLevel: number;
+  readonly xpForNextLevel: number;
+  readonly totalXp: number;
+}
+
+export interface ExperienceReceipt {
+  readonly attemptId: string;
+  readonly earnedXp: number;
+  readonly entries: readonly RewardReceiptEntry[];
+  readonly progress: ExperienceProgress;
+}
+
+export interface CommunityRankUpActivity {
+  readonly id: string;
+  readonly kind: 'rank_up';
+  readonly authorAlias: string;
+  readonly authorAvatarId: AvatarId;
+  readonly authorThemeId: string | null;
+  readonly level: number;
+  readonly rank: TrainingRank;
+  readonly createdAt: string;
+}
+
+export interface CommunityActivityPage {
+  readonly activities: readonly CommunityRankUpActivity[];
+  readonly nextCursor: string | null;
+}
+
 export interface RewardApplication {
   readonly id: string;
   readonly state: 'pending' | 'applied';
@@ -444,6 +477,8 @@ export interface WorkoutAttempt {
   readonly restTimerSeconds: number;
   readonly lineage?: WorkoutLineage;
   readonly recapPublicationKey?: string;
+  /** A joint completion is represented by its single server-owned group post, never a standalone recap. */
+  readonly jointWorkoutId?: string;
   readonly exercises: readonly AttemptExerciseSnapshot[];
   readonly completion: AttemptCompletion;
   readonly reward: AttemptReward;

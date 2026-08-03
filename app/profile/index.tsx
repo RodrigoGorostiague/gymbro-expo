@@ -10,6 +10,8 @@ import { useTheme } from '../../context/ThemeContext';
 import { AVATARS, AvatarId, avatarIdOrDefault, DEFAULT_AVATAR_ID } from '../../constants/avatars';
 import { ProfileAvatar } from '../../components/ProfileAvatar';
 import { HapticPressable } from '../../components/HapticPressable';
+import { ExperienceProgressCard } from '../../components/ExperienceProgressCard';
+import { useData } from '../../context/DataContext';
 
 const categoryKeys = ['trainingStyle', 'about'] as const;
 
@@ -56,6 +58,7 @@ function ProfileSetting({ label, value, onValueChange, primaryColor }: {
 
 export default function ProfileScreen() {
   const { theme } = useTheme();
+  const { experienceProgress } = useData();
   const { ownProfile, refreshOwnProfile, saveProfile } = useSocial();
   const [alias, setAlias] = useState('');
   const [categories, setCategories] = useState<Record<string, string>>({});
@@ -128,8 +131,9 @@ export default function ProfileScreen() {
     <ThemeBackground>
       <SafeAreaView style={styles.safe}>
         <ScrollView contentContainerStyle={styles.scroll} keyboardShouldPersistTaps="handled">
-          <AppScreenHeader title="Perfil" subtitle="Tu identidad y privacidad" />
-          <GlassCard>
+           <AppScreenHeader title="Perfil" subtitle="Tu identidad y privacidad" />
+           <GlassCard><ExperienceProgressCard progress={experienceProgress} theme={theme} title="Tu rango" /></GlassCard>
+           <GlassCard>
             <View style={styles.identityRow}>
               <ProfileAvatar avatarId={avatarId} size={88} borderColor={theme.primary} />
               <View style={styles.identityCopy}>

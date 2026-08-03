@@ -19,7 +19,7 @@ import {
 
 export interface AttemptCaptureInput { id: string; owner: UserProfile; routine: Routine; completedAt: string; durationSeconds: number;
   restTimerSeconds: number; results: Readonly<Record<string, { performed: boolean; reps: number; load: number }>>;
-  lineage?: WorkoutLineage }
+  lineage?: WorkoutLineage; jointWorkoutId?: string }
 
 function isValidLineage(lineage?: WorkoutLineage): lineage is WorkoutLineage {
   return !!lineage
@@ -62,7 +62,7 @@ export function createWorkoutAttempt(input: AttemptCaptureInput): WorkoutAttempt
   const lineage = isValidLineage(input.lineage) ? input.lineage : undefined;
   return { version: WORKOUT_ATTEMPT_VERSION, id: input.id, owner: input.owner, routineId: input.routine.id, recordedRoutineName: input.routine.name,
     completedAt: input.completedAt, durationSeconds: input.durationSeconds,
-    restTimerSeconds: input.restTimerSeconds, lineage, recapPublicationKey: `${Date.now()}-${Math.random().toString(36).slice(2, 14)}`, exercises, completion, reward,
+    restTimerSeconds: input.restTimerSeconds, lineage, ...(input.jointWorkoutId ? { jointWorkoutId: input.jointWorkoutId } : { recapPublicationKey: `${Date.now()}-${Math.random().toString(36).slice(2, 14)}` }), exercises, completion, reward,
     rewardApplication: { id: `${input.owner}:${input.id}:v${WORKOUT_ATTEMPT_VERSION}`, state: 'pending' } };
 }
 

@@ -50,8 +50,8 @@ describe('training state RPC boundary', () => {
       version: 1, id: 'attempt', owner: 'owner', routineId: null, recordedRoutineName: 'Routine', completedAt: '2026-08-01T00:00:00.000Z', durationSeconds: 0, restTimerSeconds: 0,
       exercises: [], completion: {}, reward: {}, rewardApplication: { id: 'forged', state: 'pending' },
     } as any;
-    rpc.mockResolvedValueOnce({ data: { attempt, receipt: { balance: 12, entries: [], weekly: {} } }, error: null });
-    await expect(finalizeTrainingAttempt(attempt)).resolves.toMatchObject({ receipt: { balance: 12 } });
+    rpc.mockResolvedValueOnce({ data: { attempt, receipt: { balance: 12, entries: [], weekly: {} }, experience_receipt: { attempt_id: 'attempt', earned_xp: 12, entries: [], progress: { level: 1, rank: 'Principiante', xp_into_level: 12, xp_for_next_level: 100, total_xp: 12 } } }, error: null });
+    await expect(finalizeTrainingAttempt(attempt)).resolves.toMatchObject({ receipt: { balance: 12 }, experienceReceipt: { earnedXp: 12 } });
     expect(rpc).toHaveBeenCalledWith('finalize_training_attempt', { attempt_input: attempt });
   });
 

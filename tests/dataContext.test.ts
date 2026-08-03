@@ -26,6 +26,7 @@ const trainingState = vi.hoisted(() => ({
   load: vi.fn(async () => trainingState.value),
   save: vi.fn(async () => undefined),
   import: vi.fn(async () => undefined),
+  experience: vi.fn(async () => ({ level: 1, rank: 'Principiante', xpIntoLevel: 0, xpForNextLevel: 100, totalXp: 0 })),
 }));
 
 vi.mock('@react-native-async-storage/async-storage', () => ({ default: storage }));
@@ -45,6 +46,11 @@ vi.mock('../services/trainingState', () => ({
   loadTrainingState: trainingState.load,
   saveTrainingState: trainingState.save,
   importLegacyCustomDefinitions: trainingState.import,
+  loadExperienceProgress: trainingState.experience,
+  finalizeTrainingAttempt: vi.fn(),
+}));
+vi.mock('../services/experience', () => ({
+  loadExperienceProgress: trainingState.experience,
 }));
 
 import { DataProvider, useData } from '../context/DataContext';

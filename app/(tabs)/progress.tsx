@@ -13,6 +13,7 @@ import { useAuth } from '../../context/AuthContext';
 import { useTheme } from '../../context/ThemeContext';
 import { MuscleGroup } from '../../types';
 import { muscleGroupLabel } from '../../utils/catalogMuscleGroups';
+import { ExperienceProgressCard } from '../../components/ExperienceProgressCard';
 import {
   buildHistoricalOptions,
   aggregateMuscleStatistics,
@@ -33,7 +34,7 @@ const SCOPES: { value: Scope; label: string }[] = [
 export default function ProgressScreen() {
   const { theme } = useTheme();
   const { user } = useAuth();
-  const { exercises, routines, sessions, attempts, quarantinedSessionCount, resolveQuarantine, dataState, dataError, retryData, catalogMuscleGroups = [] } = useData();
+  const { exercises, routines, sessions, attempts, experienceProgress, quarantinedSessionCount, resolveQuarantine, dataState, dataError, retryData, catalogMuscleGroups = [] } = useData();
   const [scope, setScope] = useState<Scope>('overview');
   const [filterId, setFilterId] = useState<string | null>(null);
   const [muscle, setMuscle] = useState<MuscleGroup | null>(null);
@@ -72,6 +73,7 @@ export default function ProgressScreen() {
             <Text style={[styles.heroTitle, { color: theme.text }]}>{dataState !== 'ready' ? 'Preparando tus períodos de progreso' : activity.current.attempts === 0 ? 'Todavía no hay actividad en este período' : `${core.current.attempts} sesiones de entrenamiento y ${core.current.validSets} series válidas`}</Text>
             <Text style={[styles.body, { color: theme.textMuted }]}>{dataState === 'ready' ? `Comparado con ${formatPeriod(core.periods.previous.start, core.periods.previous.end)}. Las señales se muestran por separado.` : 'No mostraremos afirmaciones hasta terminar de cargar tus datos.'}</Text>
           </GlassCard>
+          <GlassCard><ExperienceProgressCard progress={experienceProgress} theme={theme} title="Nivel y próximos hitos" /></GlassCard>
 
           <HapticPressable accessibilityRole="button" accessibilityLabel="Registrar peso corporal" onPress={() => router.push('/profile/measurements')} style={[styles.weightAction, { borderColor: theme.primary, backgroundColor: theme.glass }]}>
             <Text style={[styles.weightActionTitle, { color: theme.text }]}>Peso corporal</Text>

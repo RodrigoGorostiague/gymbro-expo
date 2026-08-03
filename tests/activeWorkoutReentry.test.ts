@@ -124,4 +124,47 @@ describe('active workout re-entry', () => {
     );
   });
 
+  test('reopens a completed set so its values can be corrected and reconfirmed', () => {
+    const routineWithSet = {
+      ...routineA,
+      exercises: [{
+        id: 'exercise-1',
+        name: 'Press',
+        loadMode: 'external-load' as const,
+        loadUnit: 'kg' as const,
+        sets: [{ id: 'set-1', tipo: 1 as const, weight: 10, reps: 8 }],
+      }],
+    };
+    const updateActiveWorkout = vi.fn();
+    setMockParams({ id: routineWithSet.id });
+    setMockData({
+      getRoutine: vi.fn(() => routineWithSet),
+      activeWorkoutDraft: { ...draft, routineId: routineWithSet.id },
+      addAttempt: vi.fn(),
+      startActiveWorkout: vi.fn(),
+      updateActiveWorkout,
+      cancelActiveWorkout: vi.fn(),
+      refreshActiveWorkoutTiming: vi.fn(),
+    });
+
+    const screen = render(React.createElement(ExecuteRoutineScreen));
+    const inputs = screen.root.findAll((node) => (node.type as any) === 'GlassInput');
+    changeText(inputs[0], '10');
+    changeText(inputs[1], '8');
+    press(screen.root.find((node) => (node.type as any) === 'HapticPressable'));
+
+    expect(inputs[0].props.editable).toBe(false);
+    press(screen.root.find((node) => node.props.accessibilityLabel === 'Editar Serie 1'));
+    expect(inputs[0].props.editable).toBe(true);
+    expect(updateActiveWorkout).toHaveBeenCalledWith(expect.objectContaining({
+      completedSets: { 'exercise-1-set-1': false },
+    }));
+
+    changeText(inputs[0], '12.5');
+    changeText(inputs[1], '7');
+    expect(updateActiveWorkout).toHaveBeenLastCalledWith(expect.objectContaining({
+      setValues: { 'exercise-1-set-1': { weight: '12.5', reps: '7' } },
+    }));
+  });
+
 });
