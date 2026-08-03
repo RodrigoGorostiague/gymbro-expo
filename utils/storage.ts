@@ -1,4 +1,5 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { generateId } from './ids';
 import {
   ActiveWorkoutDraft,
   CatalogLibrary,
@@ -1233,6 +1234,4 @@ export async function loadEquippedThemes(): Promise<Record<UserProfile, string |
   };
 }
 
-export function generateId(): string {
-  return `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
-}
+export { generateId };

@@ -1,5 +1,5 @@
 import { Mesocycle, MesocycleEntry, PlannedSession, PlannedSessionRef, Routine, WorkoutAttempt, WorkoutLineage } from '../types';
-import { generateId } from './storage';
+import { generateId } from './ids';
 import { isValidPerformance } from './workoutAttempts';
 
 export type PlannedSessionAdherenceStatus = 'not-started' | 'partial' | 'completed';
