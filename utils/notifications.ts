@@ -1,16 +1,9 @@
 import { Platform } from 'react-native';
-import { KISS_MESSAGE, KISS_NOTIFICATION_TITLE } from '../constants/kiss';
 
-export const PARTNER_NOTIFICATION_CHANNEL = 'partner_messages';
-export const TRAINING_NOTIFICATION_CHANNEL = 'training';
-export const SOCIAL_NOTIFICATION_CHANNEL = 'social';
-export const COMMUNITY_NOTIFICATION_CHANNEL = 'community';
-
-export type RestNotificationInput = {
-  title: string;
-  body?: string;
-  seconds: number;
-};
+export const PARTNER_NOTIFICATION_CHANNEL = 'social_v2';
+export const SOCIAL_NOTIFICATION_CHANNEL = 'social_v2';
+export const COMMUNITY_NOTIFICATION_CHANNEL = 'community_v2';
+const SOCIAL_NOTIFICATION_SOUND = 'notification_social.wav';
 
 type NotificationsModule = typeof import('expo-notifications');
 
@@ -36,7 +29,7 @@ export async function isExpoGoRuntime(): Promise<boolean> {
   try {
     const constants = await import('expo-constants');
     const value = constants.default ?? constants;
-    return value.appOwnership === 'expo' || value.expoGoConfig != null;
+    return value.appOwnership === 'expo';
   } catch {
     return false;
   }
@@ -73,30 +66,16 @@ async function configureAndroidChannels(Notifications: NotificationsModule): Pro
   if (typeof Notifications.setNotificationChannelAsync !== 'function' || !Notifications.AndroidImportance) return;
 
   await Promise.all([
-    Notifications.setNotificationChannelAsync(PARTNER_NOTIFICATION_CHANNEL, {
-      name: 'Mensajes de pareja',
-      importance: Notifications.AndroidImportance.HIGH,
-      sound: 'default',
-      enableVibrate: true,
-      vibrationPattern: [0, 200, 100, 200],
-      lightColor: '#FF69B4',
-    }),
-    Notifications.setNotificationChannelAsync(TRAINING_NOTIFICATION_CHANNEL, {
-      name: 'Entrenamiento',
-      importance: Notifications.AndroidImportance.HIGH,
-      sound: 'default',
-      enableVibrate: true,
-    }),
     Notifications.setNotificationChannelAsync(SOCIAL_NOTIFICATION_CHANNEL, {
       name: 'Social',
       importance: Notifications.AndroidImportance.DEFAULT,
-      sound: 'default',
+      sound: SOCIAL_NOTIFICATION_SOUND,
       enableVibrate: true,
     }),
     Notifications.setNotificationChannelAsync(COMMUNITY_NOTIFICATION_CHANNEL, {
       name: 'Comunidad',
       importance: Notifications.AndroidImportance.DEFAULT,
-      sound: 'default',
+      sound: SOCIAL_NOTIFICATION_SOUND,
       enableVibrate: true,
     }),
   ]);
@@ -117,18 +96,26 @@ async function requestNotificationPermission(Notifications: NotificationsModule)
     finalStatus = status;
   }
 
+  console.info(`Push notification permission status: ${finalStatus}`);
   return finalStatus === 'granted';
 }
 
 export async function setupNotifications(): Promise<boolean> {
-  if (await isExpoGoRuntime()) return false;
+  if (await isExpoGoRuntime()) {
+    console.info('Push notification setup skipped in Expo Go.');
+    return false;
+  }
   const Notifications = await getNotifications();
-  if (!Notifications) return false;
+  if (!Notifications) {
+    console.warn('Push notification setup failed: expo-notifications is unavailable.');
+    return false;
+  }
 
   await configureForegroundHandler(Notifications);
   await configureAndroidChannels(Notifications);
 
   if (!await isPhysicalDevice()) {
+    console.info('Push notification setup skipped on a non-physical device.');
     return false;
   }
 
@@ -136,23 +123,36 @@ export async function setupNotifications(): Promise<boolean> {
 }
 
 export async function getExpoPushToken(): Promise<string | null> {
-  if (!supportsRemotePush() || await isExpoGoRuntime() || !await isPhysicalDevice()) return null;
+  if (!supportsRemotePush() || await isExpoGoRuntime() || !await isPhysicalDevice()) {
+    console.info('Expo push token request skipped for this runtime.');
+    return null;
+  }
 
   const Notifications = await getNotifications();
-  if (!Notifications) return null;
+  if (!Notifications) {
+    console.warn('Expo push token request failed: expo-notifications is unavailable.');
+    return null;
+  }
 
   const granted = await setupNotifications();
-  if (!granted) return null;
+  if (!granted) {
+    console.info('Expo push token request skipped because notifications are not granted.');
+    return null;
+  }
 
   try {
     const Constants = (await import('expo-constants')).default;
     const projectId = Constants.expoConfig?.extra?.eas?.projectId ?? Constants.easConfig?.projectId;
+    if (!projectId) {
+      console.warn('Expo push token request failed: EAS project ID is unavailable.');
+      return null;
+    }
 
-    const token = await Notifications.getExpoPushTokenAsync(
-      projectId ? { projectId } : undefined,
-    );
+    const token = await Notifications.getExpoPushTokenAsync({ projectId });
+    console.info('Expo push token acquired.');
     return token.data;
-  } catch {
+  } catch (error) {
+    console.warn('Unable to obtain an Expo push token.', error);
     return null;
   }
 }
@@ -183,54 +183,34 @@ export function subscribeToNotificationResponses(
 
     const subscription = Notifications.addNotificationResponseReceivedListener((response) => {
       const url = response.notification.request.content.data?.url;
-      if (typeof url === 'string' && url.startsWith('/')) onUrl(url);
+      if (isInternalNotificationUrl(url)) onUrl(url);
     });
     return () => subscription.remove();
   })();
 }
 
-export async function scheduleRestNotification(
-  input: RestNotificationInput,
-): Promise<string | null> {
-  if (!Number.isFinite(input.seconds) || input.seconds <= 0) return null;
-  if (await isExpoGoRuntime()) return null;
-
-  const Notifications = await getNotifications();
-  if (!Notifications) return null;
+export function isInternalNotificationUrl(value: unknown): value is string {
+  if (typeof value !== 'string' || !value.startsWith('/')) return false;
 
   try {
-    await configureAndroidChannels(Notifications);
-    if (!await requestNotificationPermission(Notifications)) return null;
-
-    return await Notifications.scheduleNotificationAsync({
-      content: {
-        title: input.title,
-        body: input.body,
-        sound: 'default',
-      },
-      trigger: {
-        type: Notifications.SchedulableTriggerInputTypes.TIME_INTERVAL,
-        seconds: input.seconds,
-        ...(Platform.OS === 'android' ? { channelId: TRAINING_NOTIFICATION_CHANNEL } : {}),
-      },
-    });
+    return new URL(value, 'https://gymbro.invalid').origin === 'https://gymbro.invalid';
   } catch {
-    return null;
+    return false;
   }
 }
 
-export async function cancelRestNotification(notificationId: string): Promise<boolean> {
-  if (!notificationId) return false;
-  if (await isExpoGoRuntime()) return false;
+export async function getLastNotificationResponseUrl(): Promise<string | null> {
+  if (await isExpoGoRuntime()) return null;
 
   const Notifications = await getNotifications();
-  if (!Notifications) return false;
+  if (!Notifications || typeof Notifications.getLastNotificationResponseAsync !== 'function') return null;
 
   try {
-    await Notifications.cancelScheduledNotificationAsync(notificationId);
-    return true;
+    const response = await Notifications.getLastNotificationResponseAsync();
+    const url = response?.notification.request.content.data?.url;
+    return isInternalNotificationUrl(url) ? url : null;
   } catch {
-    return false;
+    return null;
   }
 }
 
@@ -249,7 +229,7 @@ export async function showPartnerNotification(
       content: {
         title,
         body: message,
-        sound: 'default',
+        sound: SOCIAL_NOTIFICATION_SOUND,
         ...(Platform.OS === 'ios' ? { interruptionLevel: 'active' as const } : {}),
       },
       trigger:
@@ -259,11 +239,4 @@ export async function showPartnerNotification(
   } catch {
     return false;
   }
-}
-
-/** @deprecated use showPartnerNotification */
-export async function showKissNotification(
-  message: string = KISS_MESSAGE,
-): Promise<boolean> {
-  return showPartnerNotification(KISS_NOTIFICATION_TITLE, message);
 }

@@ -2,6 +2,7 @@ import React from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 import { ExperienceProgress } from '../types';
 import { experienceProgressPercent } from '../utils/experience';
+import { AnimatedProgressBar } from './AnimatedProgressBar';
 
 type Theme = { primary: string; secondary: string; text: string; textMuted: string; glassBorder: string };
 
@@ -18,7 +19,7 @@ export function ExperienceProgressCard({ progress, theme, title = 'Progreso de e
       <Text style={[styles.title, { color: theme.text }]}>{title}</Text>
       <Text style={[styles.rank, { color: theme.secondary }]}>Nivel {progress.level} · {progress.rank}</Text>
       <Text style={[styles.total, { color: theme.textMuted }]}>{progress.totalXp} XP total</Text>
-      <View style={[styles.track, { backgroundColor: theme.glassBorder }]}><View style={[styles.fill, { width: `${percent}%`, backgroundColor: theme.secondary }]} /></View>
+      <AnimatedProgressBar value={percent} primary={theme.primary} accent={theme.secondary} track={theme.glassBorder} />
       <Text style={[styles.next, { color: theme.textMuted }]}>{progress.xpIntoLevel}/{progress.xpForNextLevel} XP para nivel {progress.level + 1}</Text>
     </View>
   </View>;
@@ -33,7 +34,5 @@ const styles = StyleSheet.create({
   title: { fontSize: 15, fontWeight: '800' },
   rank: { fontSize: 16, fontWeight: '900' },
   total: { fontSize: 12 },
-  track: { borderRadius: 999, height: 7, marginTop: 4, overflow: 'hidden' },
-  fill: { borderRadius: 999, height: '100%' },
   next: { fontSize: 11 },
 });

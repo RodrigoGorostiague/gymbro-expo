@@ -1,7 +1,7 @@
-import { CatalogImportPlan, Mesocycle, MesocycleEntry, Routine, WorkoutRecap, WorkoutRecapDetail, WorkoutRecapExercise, WorkoutRecapInput, WorkoutRecapPage, WorkoutRecapSharePayload, WorkoutSession } from '../types';
+import { CatalogImportPlan, Mesocycle, MesocycleEntry, MuscleGroup, Routine, WorkoutRecap, WorkoutRecapComment, WorkoutRecapDetail, WorkoutRecapExercise, WorkoutRecapInput, WorkoutRecapPage, WorkoutRecapReactionState, WorkoutRecapSharePayload, WorkoutSession } from '../types';
 import { supabase, supabaseConfigurationError } from './supabase';
 import { avatarIdOrDefault } from '../constants/avatars';
-import { canonicalMuscleGroups } from '../constants/muscleGroups';
+import { canonicalMuscleGroups, isCanonicalMuscleGroup } from '../constants/muscleGroups';
 
 const PAGE_SIZE = 20;
 
@@ -10,10 +10,22 @@ function requireClient() {
   return supabase;
 }
 
+function asMuscleDistribution(value: unknown): Array<{ id: MuscleGroup; value: number }> {
+  if (!Array.isArray(value)) return [];
+  return value.flatMap((entry) => {
+    if (!entry || typeof entry !== 'object') return [];
+    const row = entry as Record<string, unknown>;
+    return isCanonicalMuscleGroup(row.id) && typeof row.value === 'number' && Number.isInteger(row.value) && row.value > 0
+      ? [{ id: row.id as MuscleGroup, value: row.value }]
+      : [];
+  });
+}
+
 function asRecap(row: unknown): WorkoutRecap {
   const value = row as Record<string, unknown>;
   return {
     id: String(value.id),
+    authorId: typeof value.author_profile_id === 'string' ? value.author_profile_id : undefined,
     authorAlias: String(value.author_alias),
     authorAvatarId: avatarIdOrDefault(value.author_avatar_id),
     authorThemeId: typeof value.author_theme_id === 'string' ? value.author_theme_id : null,
@@ -22,6 +34,8 @@ function asRecap(row: unknown): WorkoutRecap {
     durationSeconds: Number(value.duration_seconds),
     exerciseCount: Number(value.exercise_count),
     muscleGroupIds: Array.isArray(value.muscle_group_ids) ? value.muscle_group_ids.filter((id): id is string => typeof id === 'string') : [],
+    muscleDistribution: asMuscleDistribution(value.muscle_distribution),
+    commentCount: typeof value.comment_count === 'number' && Number.isInteger(value.comment_count) && value.comment_count >= 0 ? value.comment_count : 0,
     metrics: (value.metrics ?? {}) as Record<string, number>,
     caption: typeof value.caption === 'string' ? value.caption : null,
     createdAt: String(value.created_at),
@@ -89,7 +103,14 @@ export function recapSharePayload(
     const included: NonNullable<WorkoutRecapSharePayload['routine']>[] = [];
     const indexFor = (routineId: string) => {
       const existing = linked.get(routineId); if (existing !== undefined) return existing;
-      const candidate = routines.find(({ id }) => id === routineId); if (!candidate) return -1;
+      const plannedSnapshot = mesocycle.weeks.flatMap((week) => week.entries).reduce<Routine | undefined>((found, entry) => {
+        if (found || !('ref' in entry) || entry.ref.routineId !== routineId) return found;
+        return entry.routineSnapshot;
+      }, undefined);
+      const candidate = routines.find(({ id }) => id === routineId)
+        ?? (routine.id === routineId ? routine : undefined)
+        ?? plannedSnapshot;
+      if (!candidate) return -1;
       const index = included.length; linked.set(routineId, index); included.push(routinePayload(candidate)); return index;
     };
     const weeks = mesocycle.weeks.map((week) => week.entries.slice(0, 7).map((entry) => {
@@ -142,6 +163,28 @@ function asExercises(value: unknown): WorkoutRecapExercise[] {
   });
 }
 
+function asComment(value: unknown): WorkoutRecapComment | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  const row = value as Record<string, unknown>;
+  if (typeof row.id !== 'string' || typeof row.author_alias !== 'string' || typeof row.body !== 'string' || typeof row.created_at !== 'string') return null;
+  return { id: row.id, authorAlias: row.author_alias, authorAvatarId: avatarIdOrDefault(row.author_avatar_id), authorThemeId: typeof row.author_theme_id === 'string' ? row.author_theme_id : null, body: row.body, createdAt: row.created_at, isAuthor: row.is_author === true };
+}
+
+function asReactionState(value: unknown): WorkoutRecapReactionState {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('Invalid recap reaction response.');
+  const row = value as Record<string, unknown>;
+  if (typeof row.reacted !== 'boolean' || typeof row.reaction_count !== 'number' || !Number.isInteger(row.reaction_count) || row.reaction_count < 0) throw new Error('Invalid recap reaction response.');
+  return { reacted: row.reacted, reactionCount: row.reaction_count };
+}
+
+function asPreviousComparable(value: unknown): WorkoutRecapDetail['previousComparable'] {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  const row = value as Record<string, unknown>;
+  if (typeof row.id !== 'string' || typeof row.completed_at !== 'string' || typeof row.duration_seconds !== 'number' || typeof row.exercise_count !== 'number') return null;
+  const metrics = row.metrics && typeof row.metrics === 'object' && !Array.isArray(row.metrics) ? Object.fromEntries(Object.entries(row.metrics).filter(([, metric]) => typeof metric === 'number' && Number.isFinite(metric))) as Record<string, number> : {};
+  return { id: row.id, completedAt: row.completed_at, durationSeconds: row.duration_seconds, exerciseCount: row.exercise_count, metrics };
+}
+
 export function recapInputFromSession(session: WorkoutSession, caption?: string): WorkoutRecapInput {
   const routineName = session.routineName.trim();
   if (!routineName || !Number.isFinite(session.durationSeconds) || session.durationSeconds < 0) {
@@ -177,27 +220,39 @@ export function recapInputFromSession(session: WorkoutSession, caption?: string)
   };
 }
 
-export async function createWorkoutRecap(input: WorkoutRecapInput, publicationKey: string): Promise<string> {
-  if (!publicationKey.trim()) throw new Error('This completed workout cannot be shared.');
-  const { data, error } = await requireClient().rpc('create_workout_recap', {
-    input: {
-      routine_name: input.routineName,
-      completed_at: input.completedAt,
-      duration_seconds: input.durationSeconds,
-      exercise_count: input.exerciseCount,
-      metrics: input.metrics,
-      exercise_details: { exercises: input.exercises.map((exercise) => ({
-        name: exercise.name,
-        muscle_group_ids: exercise.muscleGroupIds,
-        sets: exercise.sets,
-      })) },
-      publication_key: publicationKey,
-      ...(input.caption ? { caption: input.caption } : {}),
-      ...(input.sharePayload ? { share_payload: input.sharePayload } : {}),
-    },
-  });
+function recapPayload(input: WorkoutRecapInput, publicationKey: string) {
+  return {
+    routine_name: input.routineName,
+    completed_at: input.completedAt,
+    duration_seconds: input.durationSeconds,
+    exercise_count: input.exerciseCount,
+    metrics: input.metrics,
+    exercise_details: { exercises: input.exercises.map((exercise) => ({
+      name: exercise.name,
+      muscle_group_ids: exercise.muscleGroupIds,
+      sets: exercise.sets,
+    })) },
+    publication_key: publicationKey,
+    ...(input.caption ? { caption: input.caption } : {}),
+    ...(input.sharePayload ? { share_payload: input.sharePayload } : {}),
+  };
+}
+
+async function submitWorkoutRecap(input: WorkoutRecapInput, publicationKey: string): Promise<string> {
+  const { data, error } = await requireClient().rpc('create_workout_recap', { input: recapPayload(input, publicationKey) });
   if (error) throw new Error(error.message);
   return String(data);
+}
+
+export async function createWorkoutRecap(input: WorkoutRecapInput, publicationKey: string): Promise<string> {
+  if (!publicationKey.trim()) throw new Error('This completed workout cannot be shared.');
+  try {
+    return await submitWorkoutRecap(input, publicationKey);
+  } catch (error) {
+    if (!input.sharePayload) throw error;
+    const { sharePayload: _sharePayload, ...summary } = input;
+    return submitWorkoutRecap(summary, publicationKey);
+  }
 }
 
 export async function getWorkoutRecapDetail(recapId: string): Promise<WorkoutRecapDetail | null> {
@@ -205,7 +260,23 @@ export async function getWorkoutRecapDetail(recapId: string): Promise<WorkoutRec
   if (error) throw new Error(error.message);
   if (!data) return null;
   const detail = data as Record<string, unknown>;
-  return { ...asRecap(detail), exercises: asExercises(detail.exercises), sharePayload: asSharePayload(detail.share_payload) };
+  return { ...asRecap(detail), exercises: asExercises(detail.exercises), sharePayload: asSharePayload(detail.share_payload), reactionCount: typeof detail.reaction_count === 'number' && Number.isInteger(detail.reaction_count) && detail.reaction_count >= 0 ? detail.reaction_count : 0, viewerHasReacted: detail.viewer_has_reacted === true, comments: Array.isArray(detail.comments) ? detail.comments.flatMap((value) => { const comment = asComment(value); return comment ? [comment] : []; }) : [], previousComparable: asPreviousComparable(detail.previous_comparable) };
+}
+
+export async function setWorkoutRecapReaction(recapId: string, reacted: boolean): Promise<WorkoutRecapReactionState> {
+  const { data, error } = await requireClient().rpc('set_workout_recap_reaction', { recap_id: recapId, reacted });
+  if (error) throw new Error(error.message);
+  return asReactionState(data);
+}
+
+export async function createWorkoutRecapComment(recapId: string, body: string): Promise<WorkoutRecapComment> {
+  const trimmed = body.trim();
+  if (trimmed.length < 1 || trimmed.length > 500) throw new Error('Comments must contain between 1 and 500 characters.');
+  const { data, error } = await requireClient().rpc('create_workout_recap_comment', { recap_id: recapId, body_input: trimmed });
+  if (error) throw new Error(error.message);
+  const comment = asComment(data);
+  if (!comment) throw new Error('Invalid recap comment response.');
+  return comment;
 }
 
 export async function publishAutomaticWorkoutRecaps(
@@ -234,8 +305,15 @@ export async function getWorkoutRecapPage(cursor: string | null = null): Promise
   const { data, error } = await requireClient().rpc('list_workout_recaps', { cursor, page_size: PAGE_SIZE });
   if (error) throw new Error(error.message);
   const page = (data ?? {}) as { recaps?: unknown[]; next_cursor?: unknown };
+  const recaps = Array.isArray(page.recaps) ? page.recaps.map(asRecap) : [];
+  const { data: reactions, error: reactionError } = await requireClient().rpc('get_workout_recap_reaction_states', { recap_ids: recaps.map(({ id }) => id) });
+  if (reactionError) throw new Error(reactionError.message);
+  const states = reactions && typeof reactions === 'object' && !Array.isArray(reactions) ? reactions as Record<string, unknown> : {};
   return {
-    recaps: Array.isArray(page.recaps) ? page.recaps.map(asRecap) : [],
+    recaps: recaps.map((recap) => {
+      const state = states[recap.id] as Record<string, unknown> | undefined;
+      return { ...recap, reactionCount: typeof state?.reaction_count === 'number' ? state.reaction_count : 0, viewerHasReacted: state?.viewer_has_reacted === true };
+    }),
     nextCursor: typeof page.next_cursor === 'string' && page.next_cursor ? page.next_cursor : null,
   };
 }

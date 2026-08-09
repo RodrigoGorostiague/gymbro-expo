@@ -34,3 +34,14 @@ Blocked before implementation. No planned task is complete and no source, test, 
 
 - Maintainer authorization: approved single PR `size:exception`.
 - No commit, push, PR, archive, deployment, or formal review was performed.
+
+## Resumption: 2026-08-08
+
+The historical native attempt remains blocked and untouched. Normal scoped implementation resumed outside that runtime.
+
+- Reconciled the recap contract with the approved MVP: normalized performed sets, import-safe templates, reactions, and comments remain in scope; local identifiers, private notes, media, and editable posts remain prohibited.
+- Updated `supabase/tests/workout_recap_feed.sql` fixtures and assertions to require approved performed sets and reject local set identifiers.
+- Corrected the current Supabase CLI invocation: `npx supabase test db --local supabase/tests/workout_recap_feed.sql`.
+- Focused recap contract result: PASS, 37 tests, on the local Supabase stack.
+- Focused engagement authorization result: PASS, 24 tests. It verifies publication and policy presence plus read/reaction/comment denial for unrelated, blocked, and removed members.
+- Remaining before release: run the broader automated gates and record the two-account manual validation of relationship changes, blocks, recap engagement, and authorized Realtime invalidation.

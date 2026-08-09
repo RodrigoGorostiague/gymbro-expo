@@ -2,17 +2,18 @@
 
 ## Intent
 
-Let members share a private workout recap with accepted Bro/Partner connections, without exposing local workout records or public Community activity. Legacy Firebase routine sharing is unchanged.
+Let members share a private, immutable workout recap with accepted Bro/Partner connections. The approved recap can include normalized exercises and performed sets, optional import-safe routine/mesocycle templates, reactions, and comments, without exposing local identifiers, private notes, or public Community activity. Legacy Firebase routine sharing is unchanged.
 
 ## Scope
 
 ### In Scope
-- Create an immutable, reduced recap: routine name, completion time, duration, exercise count, available aggregate metrics, and optional length-limited caption.
-- Provide server-owned create, author-delete, cursor-projected feed, and Community feed/composer/refresh/error states.
+- Create an immutable recap: routine name, completion time, duration, exercise count, aggregate metrics, normalized exercises and performed sets, plus an optional length-limited caption and import-safe templates.
+- Provide server-owned create, author-delete, cursor-projected feed, reactions, comments, and Community feed/composer/refresh/error states.
 - Enforce authentication, author-only mutation, accepted Bro/Partner visibility, and either-direction block denial for reads, mutations, and Realtime invalidation.
 
 ### Out of Scope
-- Community-wide/public posts, media/Storage, likes, comments, reshares, notifications, routine import, and raw sets/private notes/local IDs.
+- Community-wide/public posts, media/Storage, reshares, and editable recap content.
+- Local identifiers, private notes, credentials, and arbitrary local workout records.
 - Migrating or modifying Firebase routine sharing.
 - Reopening Phase 4's manual two-account social validation.
 

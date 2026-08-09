@@ -2,20 +2,21 @@ import React, { useCallback, useState } from 'react';
 import { Alert, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { router, useFocusEffect } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { AnthropometricDraft, AnthropometricFields } from '../../components/AnthropometricFields';
 import { AppNavBar } from '../../components/AppNavBar';
 import { GlassCard, ThemeBackground } from '../../components/GlassCard';
-import { SimpleLineChart } from '../../components/LineChart';
-import { GlassButton, GlassInput } from '../../components/UI';
+import { GlassButton } from '../../components/UI';
+import { anthropometricByType, ANTHROPOMETRICS } from '../../constants/anthropometrics';
 import { useAuth } from '../../context/AuthContext';
 import { useTheme } from '../../context/ThemeContext';
+import { loadBodyMetrics, recordBodyMetric } from '../../services/bodyMetrics';
 import { BodyMetric } from '../../types';
-import { loadBodyMetrics, recordBodyWeight } from '../../services/bodyMetrics';
 import { normalizeDecimalInput } from '../../utils/decimalInput';
 
 export default function MeasurementsScreen() {
   const { theme } = useTheme();
   const { user } = useAuth();
-  const [weight, setWeight] = useState('');
+  const [draft, setDraft] = useState<AnthropometricDraft>({});
   const [metrics, setMetrics] = useState<BodyMetric[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -23,63 +24,36 @@ export default function MeasurementsScreen() {
   const load = useCallback(async () => {
     if (!user) return;
     setLoading(true);
-    try {
-      setMetrics(await loadBodyMetrics(user));
-    } catch (error) {
-      Alert.alert('Mediciones no disponibles', error instanceof Error ? error.message : 'Intentá nuevamente.');
-    } finally {
-      setLoading(false);
-    }
+    try { setMetrics(await loadBodyMetrics(user)); }
+    catch (error) { Alert.alert('Mediciones no disponibles', error instanceof Error ? error.message : 'Intentá nuevamente.'); }
+    finally { setLoading(false); }
   }, [user]);
-
   useFocusEffect(useCallback(() => { void load(); }, [load]));
 
   const save = async () => {
     if (!user) return;
-    const value = normalizeDecimalInput(weight);
-    if (value === null || value <= 0) {
-      Alert.alert('Peso inválido', 'Ingresá un peso mayor a cero.');
-      return;
-    }
+    const entries = ANTHROPOMETRICS.flatMap((definition) => {
+      const value = normalizeDecimalInput(draft[definition.type] ?? '');
+      return value === null ? [] : [{ ...definition, value }];
+    });
+    if (!entries.length) { Alert.alert('Sin mediciones', 'Ingresá al menos una medición para guardar.'); return; }
+    if (entries.some(({ value }) => value <= 0)) { Alert.alert('Medición inválida', 'Cada valor debe ser mayor a cero.'); return; }
     setSaving(true);
     try {
-      const saved = await recordBodyWeight(user, { value, measuredAt: new Date().toISOString() });
-      setMetrics((current) => [saved, ...current]);
-      setWeight('');
-    } catch (error) {
-      Alert.alert('No se pudo registrar el peso', error instanceof Error ? error.message : 'Intentá nuevamente.');
-    } finally {
-      setSaving(false);
-    }
+      const measuredAt = new Date().toISOString();
+      const saved = await Promise.all(entries.map(({ type, unit, value }) => recordBodyMetric(user, { metricType: type, unit, value, measuredAt })));
+      setMetrics((current) => [...saved, ...current]);
+      setDraft({});
+    } catch (error) { Alert.alert('No se pudo registrar', error instanceof Error ? error.message : 'Intentá nuevamente.'); }
+    finally { setSaving(false); }
   };
 
-  const latest = metrics[0];
   return <ThemeBackground><SafeAreaView style={styles.safe}><AppNavBar onBack={() => router.back()} /><ScrollView contentContainerStyle={styles.scroll} keyboardShouldPersistTaps="handled">
-    <Text style={[styles.title, { color: theme.text }]}>Peso corporal</Text>
-    <Text style={[styles.subtitle, { color: theme.textMuted }]}>Registro privado para contextualizar tu fuerza relativa.</Text>
-    <GlassCard style={styles.hero}>
-      <Text style={[styles.eyebrow, { color: theme.primary }]}>ÚLTIMO REGISTRO</Text>
-      <Text style={[styles.value, { color: theme.text }]}>{latest ? `${latest.value} kg` : 'Sin registro'}</Text>
-      {latest ? <Text style={{ color: theme.textMuted }}>{new Date(latest.measuredAt).toLocaleDateString('es')}</Text> : null}
-    </GlassCard>
-    <GlassCard>
-      <Text style={[styles.section, { color: theme.text }]}>Registrar peso</Text>
-      <GlassInput accessibilityLabel="Peso corporal en kilogramos" keyboardType="decimal-pad" value={weight} onChangeText={setWeight} placeholder="Ej.: 72,5 kg" />
-      <Text style={[styles.hint, { color: theme.textMuted }]}>Por ahora registramos peso corporal. Esta base admite futuras mediciones antropométricas.</Text>
-      <GlassButton title="Guardar peso" loading={saving} disabled={saving} onPress={() => void save()} />
-    </GlassCard>
-    <GlassCard>
-      <Text style={[styles.section, { color: theme.text }]}>Historial</Text>
-      {loading ? <Text style={{ color: theme.textMuted }}>Cargando mediciones…</Text> : metrics.length === 0 ? <Text style={{ color: theme.textMuted }}>Tu primera medición aparecerá acá.</Text> : metrics.map((metric) => <View key={metric.id} style={[styles.row, { borderColor: theme.glassBorder }]}><Text style={[styles.rowValue, { color: theme.text }]}>{metric.value} kg</Text><Text style={{ color: theme.textMuted }}>{new Date(metric.measuredAt).toLocaleDateString('es', { day: 'numeric', month: 'short', year: 'numeric' })}</Text></View>)}
-    </GlassCard>
-    {metrics.length > 0 ? <GlassCard><SimpleLineChart data={[...metrics].reverse().map((metric) => ({ date: metric.measuredAt, label: new Date(metric.measuredAt).toLocaleDateString('es', { day: 'numeric', month: 'numeric' }), maxWeight: metric.value, totalReps: 0, tonnage: 0 }))} dataKey="maxWeight" unit=" kg" label="Evolución del peso corporal" summary="Registros manuales ordenados por fecha." /></GlassCard> : null}
+    <Text style={[styles.title, { color: theme.text }]}>Antropometrías</Text>
+    <Text style={[styles.subtitle, { color: theme.textMuted }]}>Registros privados para seguir tu evolución corporal.</Text>
+    <GlassCard><Text style={[styles.section, { color: theme.text }]}>Actualizar mediciones</Text><Text style={[styles.hint, { color: theme.textMuted }]}>Cargá sólo las medidas que quieras actualizar hoy. Tocá el ícono de información para ver cómo tomar cada una.</Text><AnthropometricFields values={draft} onChange={(type, value) => setDraft((current) => ({ ...current, [type]: value }))} theme={theme} /><View style={styles.action}><GlassButton title="Guardar mediciones" loading={saving} disabled={saving} onPress={() => void save()} /></View></GlassCard>
+    <GlassCard><Text style={[styles.section, { color: theme.text }]}>Historial</Text>{loading ? <Text style={{ color: theme.textMuted }}>Cargando mediciones...</Text> : metrics.length === 0 ? <Text style={{ color: theme.textMuted }}>Tu primera medición aparecerá acá.</Text> : metrics.map((metric) => <View key={metric.id} style={[styles.row, { borderColor: theme.glassBorder }]}><View><Text style={[styles.rowValue, { color: theme.text }]}>{anthropometricByType[metric.metricType].label}</Text><Text style={{ color: theme.textMuted }}>{new Date(metric.measuredAt).toLocaleDateString('es-AR', { day: 'numeric', month: 'short', year: 'numeric' })}</Text></View><Text style={[styles.value, { color: theme.primary }]}>{metric.value} {metric.unit}</Text></View>)}</GlassCard>
   </ScrollView></SafeAreaView></ThemeBackground>;
 }
 
-const styles = StyleSheet.create({
-  safe: { flex: 1, paddingHorizontal: 20, paddingTop: 8 }, scroll: { paddingBottom: 40, gap: 14 },
-  title: { fontSize: 28, fontWeight: '900' }, subtitle: { fontSize: 13, lineHeight: 19, marginTop: -8 },
-  hero: { gap: 4 }, eyebrow: { fontSize: 11, fontWeight: '900', letterSpacing: 1 }, value: { fontSize: 34, fontWeight: '900' },
-  section: { fontSize: 17, fontWeight: '800', marginBottom: 10 }, hint: { fontSize: 12, lineHeight: 18, marginVertical: 10 },
-  row: { borderTopWidth: 1, paddingVertical: 12, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }, rowValue: { fontSize: 16, fontWeight: '800' },
-});
+const styles = StyleSheet.create({ safe: { flex: 1, paddingHorizontal: 20, paddingTop: 8 }, scroll: { gap: 14, paddingBottom: 40 }, title: { fontSize: 28, fontWeight: '900' }, subtitle: { fontSize: 13, lineHeight: 19, marginTop: -8 }, section: { fontSize: 17, fontWeight: '800', marginBottom: 8 }, hint: { fontSize: 12, lineHeight: 18, marginBottom: 14 }, action: { marginTop: 16 }, row: { alignItems: 'center', borderTopWidth: 1, flexDirection: 'row', justifyContent: 'space-between', paddingVertical: 12 }, rowValue: { fontSize: 15, fontWeight: '800' }, value: { fontSize: 16, fontWeight: '900' } });

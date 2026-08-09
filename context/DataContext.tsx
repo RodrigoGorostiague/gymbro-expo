@@ -5,9 +5,10 @@ import { loadTrainingLibrary, saveTrainingLibrary, saveTrainingMesocycles, saveT
 import {
   generateId,
   readLegacyCustomDefinitions,
-  wipeLegacyTrainingRuntimeState,
+  removeActiveWorkoutDraftIfMatches,
 } from '../utils/storage';
 import { reconcileActiveWorkoutTiming } from '../utils/activeWorkoutTiming';
+import { hasActiveWorkoutReentryIntegrity, matchesActiveWorkout, WorkoutLaunchTarget } from '../utils/activeWorkoutReentry';
 import { applySessionEdits, attemptToSession } from '../utils/workoutAttempts';
 import { deleteCustomDefinition, planRecipientImport } from '../utils/catalogLibrary';
 import { finalizeTrainingAttempt, importLegacyCustomDefinitions, loadTrainingState, saveTrainingState, TrainingState } from '../services/trainingState';
@@ -61,6 +62,7 @@ interface DataContextValue {
   cancelActiveWorkout: () => Promise<void>;
   startActiveWorkout: (draft: ActiveWorkoutDraft) => Promise<void>;
   updateActiveWorkout: (draft: ActiveWorkoutDraft) => Promise<void>;
+  clearActiveWorkoutIfMatches: (target: WorkoutLaunchTarget) => Promise<void>;
   refreshActiveWorkoutTiming: () => Promise<void>;
 }
 
@@ -126,6 +128,7 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
       setDefinitions([]);
       setExercises([]);
       setCatalogMuscleGroups([]);
+      activeWorkoutDraftRef.current = null;
       setActiveWorkoutDraft(null);
       setQuarantinedSessionCount(0);
       setIsLoading(false);
@@ -143,7 +146,6 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
     const operation = sessionMutationQueueRef.current.then(async () => {
       const legacyDefinitions = await readLegacyCustomDefinitions(user);
       if (legacyDefinitions.length) await importLegacyCustomDefinitions(legacyDefinitions);
-      await wipeLegacyTrainingRuntimeState();
       const [state, trainingLibrary, loadedCatalogExercises, loadedCatalogMuscleGroups, loadedExperienceProgress] =
         await Promise.all([
           loadTrainingState(),
@@ -154,7 +156,11 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
         ]);
       const training = trainingLibrary;
       if (!active) return;
-      trainingStateRef.current = state;
+      const activeDraft = hasActiveWorkoutReentryIntegrity(state.activeWorkoutDraft, training.routines, training.mesocycles)
+        ? state.activeWorkoutDraft
+        : null;
+      const orphanedDraft = state.activeWorkoutDraft && !activeDraft ? state.activeWorkoutDraft : null;
+      trainingStateRef.current = { ...state, activeWorkoutDraft: activeDraft };
       setDefinitions(state.definitions);
       setExercises([...loadedCatalogExercises, ...state.definitions.map(definitionAsExercise)]);
       setVariants([...new Set([...loadedCatalogExercises, ...state.definitions.map(definitionAsExercise)].map((definition) => definition.variant))]);
@@ -171,7 +177,14 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
       setSessions(sortedSessions);
       setAttempts(state.attempts);
       setExperienceProgress(loadedExperienceProgress);
-      setActiveWorkoutDraft(state.activeWorkoutDraft);
+      activeWorkoutDraftRef.current = activeDraft;
+      setActiveWorkoutDraft(activeDraft);
+      if (orphanedDraft && activeUserRef.current === user) {
+        // This local runtime key predates remote state. Remove only this exact draft;
+        // do not run a broad legacy wipe that can affect another owner's data.
+        void removeActiveWorkoutDraftIfMatches(user, orphanedDraft.attemptId).catch(() => undefined);
+        void saveTrainingState({ activeWorkoutDraft: null }).catch(() => undefined);
+      }
       setQuarantinedSessionCount(0);
       setIsLoading(false);
       setDataState('ready');
@@ -193,15 +206,38 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
   const startActiveWorkout = async (draft: ActiveWorkoutDraft) => {
     const owner = activeUserRef.current;
     if (!owner || draft.owner !== owner) throw new Error('Se requiere el propietario activo.');
-    if (activeWorkoutDraft && activeWorkoutDraft.attemptId !== draft.attemptId) throw new Error('Ya hay un entrenamiento activo para este perfil.');
+    const current = activeWorkoutDraftRef.current;
+    if (current && current.attemptId !== draft.attemptId) throw new Error('Ya hay un entrenamiento activo para este perfil.');
+    if (current?.attemptId === draft.attemptId) return;
     await saveTrainingState({ activeWorkoutDraft: draft });
-    if (activeUserRef.current === owner) setActiveWorkoutDraft(draft);
+    if (activeUserRef.current === owner) {
+      activeWorkoutDraftRef.current = draft;
+      setActiveWorkoutDraft(draft);
+    }
   };
   const updateActiveWorkout = async (draft: ActiveWorkoutDraft) => {
-    if (!activeWorkoutDraft || draft.owner !== activeWorkoutDraft.owner || draft.attemptId !== activeWorkoutDraft.attemptId) throw new Error('El borrador activo no coincide.');
-    await startActiveWorkout(draft);
+    const current = activeWorkoutDraftRef.current;
+    if (!current || draft.owner !== current.owner || draft.attemptId !== current.attemptId) throw new Error('El borrador activo no coincide.');
+    await saveTrainingState({ activeWorkoutDraft: draft });
+    if (activeUserRef.current === draft.owner && activeWorkoutDraftRef.current?.attemptId === draft.attemptId) {
+      activeWorkoutDraftRef.current = draft;
+      setActiveWorkoutDraft(draft);
+    }
   };
-  const cancelActiveWorkout = async () => { const owner = activeUserRef.current; if (!owner) throw new Error('Se requiere autenticación.'); await saveTrainingState({ activeWorkoutDraft: null }); if (activeUserRef.current === owner) setActiveWorkoutDraft(null); };
+  const cancelActiveWorkout = async () => { const owner = activeUserRef.current; if (!owner) throw new Error('Se requiere autenticación.'); await saveTrainingState({ activeWorkoutDraft: null }); if (activeUserRef.current === owner) { activeWorkoutDraftRef.current = null; setActiveWorkoutDraft(null); } };
+  const clearActiveWorkoutIfMatches = async (target: WorkoutLaunchTarget) => {
+    const draft = activeWorkoutDraftRef.current;
+    if (!matchesActiveWorkout(draft, target)) return;
+    const owner = target.owner;
+    if (!owner || activeUserRef.current !== owner) return;
+    activeWorkoutDraftRef.current = null;
+    setActiveWorkoutDraft(null);
+    try {
+      await saveTrainingState({ activeWorkoutDraft: null });
+    } catch {
+      // The unavailable route must not trap the user when best-effort cleanup is offline.
+    }
+  };
   const refreshActiveWorkoutTiming = async () => {
     const owner = activeUserRef.current;
     const expectedAttemptId = activeWorkoutDraftRef.current?.attemptId;
@@ -703,6 +739,7 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
          cancelActiveWorkout,
          startActiveWorkout,
           updateActiveWorkout,
+          clearActiveWorkoutIfMatches,
           refreshActiveWorkoutTiming,
       }}
     >

@@ -6,9 +6,9 @@ Provide a private, no-media feed of immutable workout recaps to eligible Bro/Par
 
 ## Requirements
 
-### Requirement: Reduced immutable recap creation
+### Requirement: Approved immutable recap creation
 
-The system MUST allow an authenticated member to create a recap containing only routine name, completion time, duration, exercise count, available aggregate metrics, and an optional length-limited caption. It MUST NOT accept media, raw sets, private notes, local identifiers, or later content edits.
+The system MUST allow an authenticated member to create a recap containing approved immutable fields: routine name, completion time, duration, exercise count, aggregate metrics, normalized exercises and performed sets, optional length-limited caption, and separately validated import-safe templates. It MUST NOT accept media, private notes, local identifiers, arbitrary local workout records, or later content edits.
 
 #### Scenario: Create an approved recap
 - GIVEN an authenticated member supplies the approved summary fields

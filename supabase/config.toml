@@ -41,3 +41,8 @@ enable_confirmations = false
 [edge_runtime]
 enabled = true
 policy = "per_worker"
+
+# The dispatcher validates its own server-only shared secret. Gateway JWT
+# verification must be disabled so a scheduled server caller can reach it.
+[functions.notification-dispatch]
+verify_jwt = false

@@ -32,4 +32,16 @@ describe('JointParticipantProfileCard', () => {
     control.props.onPress();
     expect(onPress).toHaveBeenCalledOnce();
   });
+
+  test.each([
+    ['invited', 'Invitado', '#A3A3A3'],
+    ['declined', 'Declinó', '#EF4444'],
+    ['active', 'Activo', '#F48C06'],
+  ] as const)('renders a compact %s participant badge with the status palette', (status, badge, accent) => {
+    const card = render(React.createElement(JointParticipantProfileCard, {
+      participant: { id: 'member-1', alias: 'Capy', avatarId: 'capigirl', status, themeId: 'profile-rodaja' }, compact: true,
+    }));
+    expect(card.root.findByProps({ accessibilityLabel: `Participante Capy: ${badge}` })).toBeTruthy();
+    expect(JSON.stringify(card.toJSON())).toContain(accent);
+  });
 });

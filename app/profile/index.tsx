@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { Alert, ScrollView, StyleSheet, Switch, Text, View } from 'react-native';
 import { router, useFocusEffect } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -7,11 +7,14 @@ import { GlassCard, ThemeBackground } from '../../components/GlassCard';
 import { GlassButton, GlassInput } from '../../components/UI';
 import { useSocial } from '../../context/SocialContext';
 import { useTheme } from '../../context/ThemeContext';
-import { AVATARS, AvatarId, avatarIdOrDefault, DEFAULT_AVATAR_ID } from '../../constants/avatars';
+import { AVATARS, AvatarId, AvatarSex, avatarIdOrDefault, avatarsForSex, DEFAULT_AVATAR_ID } from '../../constants/avatars';
+import { getOwnOnboarding } from '../../services/onboarding';
 import { ProfileAvatar } from '../../components/ProfileAvatar';
 import { HapticPressable } from '../../components/HapticPressable';
 import { ExperienceProgressCard } from '../../components/ExperienceProgressCard';
+import { MuscleDistributionRadar } from '../../components/MuscleDistributionRadar';
 import { useData } from '../../context/DataContext';
+import { ownMuscleDistribution } from '../../utils/muscleDistribution';
 
 const categoryKeys = ['trainingStyle', 'about'] as const;
 
@@ -58,7 +61,7 @@ function ProfileSetting({ label, value, onValueChange, primaryColor }: {
 
 export default function ProfileScreen() {
   const { theme } = useTheme();
-  const { experienceProgress } = useData();
+  const { experienceProgress, attempts, catalogMuscleGroups = [] } = useData();
   const { ownProfile, refreshOwnProfile, saveProfile } = useSocial();
   const [alias, setAlias] = useState('');
   const [categories, setCategories] = useState<Record<string, string>>({});
@@ -69,10 +72,17 @@ export default function ProfileScreen() {
   const [shareRoutine, setShareRoutine] = useState(true);
   const [shareMesocycle, setShareMesocycle] = useState(true);
   const [shareSets, setShareSets] = useState(true);
+  const [shareSocialActivity, setShareSocialActivity] = useState(true);
+  const [shareSocialProgress, setShareSocialProgress] = useState(true);
+  const [shareSocialConsistency, setShareSocialConsistency] = useState(true);
+  const [shareSocialStatistics, setShareSocialStatistics] = useState(true);
+  const [shareSocialMuscleDistribution, setShareSocialMuscleDistribution] = useState(true);
   const [avatarId, setAvatarId] = useState<AvatarId>(DEFAULT_AVATAR_ID);
+  const [sex, setSex] = useState<AvatarSex | null>(null);
   const [isAvatarPickerOpen, setAvatarPickerOpen] = useState(false);
   const [saving, setSaving] = useState(false);
   const profile = isRecord(ownProfile) ? ownProfile : null;
+  const muscleDistribution = useMemo(() => ownMuscleDistribution(attempts ?? [], catalogMuscleGroups), [attempts, catalogMuscleGroups]);
 
   useEffect(() => {
     if (!profile) return;
@@ -87,12 +97,18 @@ export default function ProfileScreen() {
     setShareRoutine(booleanOrDefault(profile.shareRoutineTemplate));
     setShareMesocycle(booleanOrDefault(profile.shareMesocycleTemplate));
     setShareSets(booleanOrDefault(profile.sharePerformedSetDetails));
+    setShareSocialActivity(booleanOrDefault(profile.shareSocialActivity));
+    setShareSocialProgress(booleanOrDefault(profile.shareSocialProgress));
+    setShareSocialConsistency(booleanOrDefault(profile.shareSocialConsistency));
+    setShareSocialStatistics(booleanOrDefault(profile.shareSocialStatistics));
+    setShareSocialMuscleDistribution(booleanOrDefault(profile.shareSocialMuscleDistribution));
   }, [profile]);
 
   useFocusEffect(useCallback(() => {
     const refresh = async () => {
       try {
-        await refreshOwnProfile();
+        const [, onboarding] = await Promise.all([refreshOwnProfile(), getOwnOnboarding()]);
+        setSex(onboarding.sex);
       } catch (reason) {
         Alert.alert('Perfil no disponible', reason instanceof Error ? reason.message : 'Inténtalo de nuevo.');
       }
@@ -118,6 +134,11 @@ export default function ProfileScreen() {
         shareRoutineTemplate: shareRoutine,
         shareMesocycleTemplate: shareMesocycle,
         sharePerformedSetDetails: shareSets,
+        shareSocialActivity,
+        shareSocialProgress,
+        shareSocialConsistency,
+        shareSocialStatistics,
+        shareSocialMuscleDistribution,
       });
       Alert.alert('Perfil guardado', 'Tus ajustes de privacidad se actualizaron.');
     } catch (reason) {
@@ -134,6 +155,11 @@ export default function ProfileScreen() {
            <AppScreenHeader title="Perfil" subtitle="Tu identidad y privacidad" />
            <GlassCard><ExperienceProgressCard progress={experienceProgress} theme={theme} title="Tu rango" /></GlassCard>
            <GlassCard>
+            <Text accessibilityRole="header" style={[styles.title, { color: theme.text }]}>Tu distribución muscular</Text>
+            <Text style={[styles.identityHint, { color: theme.textMuted }]}>{shareSocialMuscleDistribution ? 'Así se ve tu distribución en tu círculo.' : 'Tu distribución está privada para tu círculo.'}</Text>
+            <MuscleDistributionRadar data={muscleDistribution} />
+           </GlassCard>
+           <GlassCard>
             <View style={styles.identityRow}>
               <ProfileAvatar avatarId={avatarId} size={88} borderColor={theme.primary} />
               <View style={styles.identityCopy}>
@@ -144,7 +170,8 @@ export default function ProfileScreen() {
                 </HapticPressable>
               </View>
             </View>
-            {isAvatarPickerOpen ? <View accessibilityRole="radiogroup" style={styles.avatarOptions}>{(Object.keys(AVATARS) as AvatarId[]).map((candidate) => <HapticPressable key={candidate} accessibilityRole="radio" accessibilityLabel={AVATARS[candidate].label} accessibilityState={{ selected: avatarId === candidate }} onPress={() => { setAvatarId(candidate); setAvatarPickerOpen(false); }} style={[styles.avatarOption, { borderColor: avatarId === candidate ? theme.primary : theme.glassBorder, backgroundColor: avatarId === candidate ? theme.glass : 'transparent' }]}><ProfileAvatar avatarId={candidate} size={54} borderColor={avatarId === candidate ? theme.primary : theme.glassBorder} /><Text style={[styles.avatarOptionLabel, { color: theme.text }]}>{AVATARS[candidate].label}</Text></HapticPressable>)}</View> : null}
+            {isAvatarPickerOpen && !sex ? <Text style={[styles.identityHint, { color: theme.textMuted }]}>Cargando tus avatares...</Text> : null}
+            {isAvatarPickerOpen && sex ? <View accessibilityRole="radiogroup" style={styles.avatarOptions}>{avatarsForSex(sex).map((candidate) => <HapticPressable key={candidate} accessibilityRole="radio" accessibilityLabel={AVATARS[candidate].label} accessibilityState={{ selected: avatarId === candidate }} onPress={() => { setAvatarId(candidate); setAvatarPickerOpen(false); }} style={[styles.avatarOption, { borderColor: avatarId === candidate ? theme.primary : theme.glassBorder, backgroundColor: avatarId === candidate ? theme.glass : 'transparent' }]}><ProfileAvatar avatarId={candidate} size={54} borderColor={avatarId === candidate ? theme.primary : theme.glassBorder} /><Text style={[styles.avatarOptionLabel, { color: theme.text }]}>{AVATARS[candidate].label}</Text></HapticPressable>)}</View> : null}
             <Text style={[styles.identityHint, { color: theme.textMuted }]}>Elegí un avatar y guardá el perfil para aplicarlo en Comunidad.</Text>
           </GlassCard>
           <GlassCard>
@@ -171,9 +198,18 @@ export default function ProfileScreen() {
             <Text style={{ color: theme.textMuted }}>Estos controles aplican solo a publicaciones futuras. Las publicaciones existentes conservan su privacidad original.</Text>
           </GlassCard>
           <GlassCard>
+            <Text accessibilityRole="header" style={[styles.title, { color: theme.text }]}>Perfil en tu círculo</Text>
+            <Text style={[styles.identityHint, { color: theme.textMuted }]}>Tus conexiones aceptadas ven estos resúmenes sólo cuando estén habilitados.</Text>
+            <ProfileSetting label="Actividad reciente" value={shareSocialActivity} onValueChange={setShareSocialActivity} primaryColor={theme.primary} />
+            <ProfileSetting label="Nivel y rango" value={shareSocialProgress} onValueChange={setShareSocialProgress} primaryColor={theme.primary} />
+            <ProfileSetting label="Consistencia" value={shareSocialConsistency} onValueChange={setShareSocialConsistency} primaryColor={theme.primary} />
+            <ProfileSetting label="Estadísticas resumidas" value={shareSocialStatistics} onValueChange={setShareSocialStatistics} primaryColor={theme.primary} />
+            <ProfileSetting label="Distribución muscular" value={shareSocialMuscleDistribution} onValueChange={setShareSocialMuscleDistribution} primaryColor={theme.primary} />
+          </GlassCard>
+          <GlassCard>
             <Text accessibilityRole="header" style={[styles.title, { color: theme.text }]}>Mediciones</Text>
-            <Text style={{ color: theme.textMuted }}>Registrá tu peso corporal y seguí su evolución de forma privada.</Text>
-            <GlassButton title="Peso corporal" variant="secondary" onPress={() => router.push('/profile/measurements')} />
+            <Text style={{ color: theme.textMuted }}>Actualizá peso, talla y perímetros de forma privada para seguir tu evolución.</Text>
+            <GlassButton title="Actualizar antropometrías" variant="secondary" onPress={() => router.push('/profile/measurements')} />
           </GlassCard>
           <GlassCard>
             <Text accessibilityRole="header" style={[styles.title, { color: theme.text }]}>Privacidad</Text>

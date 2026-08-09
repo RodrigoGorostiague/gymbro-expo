@@ -126,6 +126,14 @@ export interface Routine {
   shareId?: string;
 }
 
+/** Current lifecycle states introduced by the mesocycle rebuild. */
+export const MESOCYCLE_STATUSES = ['draft', 'scheduled', 'active', 'completed', 'paused', 'cancelled'] as const;
+export type CurrentMesocycleStatus = typeof MESOCYCLE_STATUSES[number];
+
+/**
+ * Legacy persisted-model status. This stays separate until the screen rebuild
+ * moves all existing consumers to `CurrentMesocycleStatus`.
+ */
 export type MesocycleStatus = 'draft' | 'active' | 'completed' | 'archived';
 
 export type PlannedSessionRoutineSource = 'local' | 'shared';
@@ -140,6 +148,8 @@ export interface PlannedSessionRef {
 export interface PlannedSession {
   id: string;
   ref: PlannedSessionRef;
+  /** Immutable prescription captured when this calendar slot is created. */
+  routineSnapshot?: Routine;
   dayLabel?: string;
   order: number;
   progressionNote?: string;
@@ -183,39 +193,6 @@ export interface PrivatePlanShareRequest {
 export interface PrivatePlanShareImport {
   routineIds: string[];
   mesocycleId: string | null;
-}
-
-export type ShareStatus = 'pending' | 'accepted' | 'rejected';
-
-export interface SharedRoutineDoc {
-  id: string;
-  sharedBy: UserProfile;
-  sharedWith: UserProfile;
-  status: ShareStatus;
-  routine: {
-    name: string;
-    muscleGroups: MuscleGroup[];
-    exercises: RoutineExercise[];
-  };
-  createdAt: number;
-  updatedAt: number;
-}
-
-export type ShareNotificationType =
-  | 'routine_share'
-  | 'routine_accepted'
-  | 'routine_rejected';
-
-export interface ShareNotification {
-  from: UserProfile;
-  to: UserProfile;
-  type: ShareNotificationType;
-  shareId: string;
-  routineName: string;
-  message: string;
-  title: string;
-  createdAt: number;
-  delivered: boolean;
 }
 
 export interface CompletedSet {
@@ -264,6 +241,7 @@ export interface WorkoutRecapExercise {
 
 export interface WorkoutRecap {
   id: string;
+  authorId?: string;
   authorAlias: string;
   authorAvatarId: string;
   authorThemeId: string | null;
@@ -272,6 +250,10 @@ export interface WorkoutRecap {
   durationSeconds: number;
   exerciseCount: number;
   muscleGroupIds: MuscleGroup[];
+  muscleDistribution?: Array<{ id: MuscleGroup; value: number }>;
+  reactionCount?: number;
+  commentCount?: number;
+  viewerHasReacted?: boolean;
   metrics: Record<string, number>;
   caption: string | null;
   createdAt: string;
@@ -283,6 +265,25 @@ export interface WorkoutRecap {
 export interface WorkoutRecapDetail extends WorkoutRecap {
   exercises: WorkoutRecapExercise[];
   sharePayload: WorkoutRecapSharePayload | null;
+  reactionCount: number;
+  viewerHasReacted: boolean;
+  comments: WorkoutRecapComment[];
+  previousComparable: { id: string; completedAt: string; durationSeconds: number; exerciseCount: number; metrics: Record<string, number> } | null;
+}
+
+export interface WorkoutRecapComment {
+  id: string;
+  authorAlias: string;
+  authorAvatarId: string;
+  authorThemeId: string | null;
+  body: string;
+  createdAt: string;
+  isAuthor: boolean;
+}
+
+export interface WorkoutRecapReactionState {
+  reacted: boolean;
+  reactionCount: number;
 }
 
 export interface WorkoutRecapSharePayload {
@@ -324,7 +325,14 @@ export interface ActiveWorkoutDraft {
   completedSets: Record<string, boolean>;
   setValues: Record<string, { weight: string; reps: string }>;
   restEndsAtMs?: number;
+  /** Optional pause metadata; omitted fields keep version-1 drafts backwards compatible. */
+  pausedAtMs?: number;
+  pausedDurationMs?: number;
+  pausedRestRemainingSeconds?: number;
   lineage?: WorkoutLineage;
+  jointWorkoutId?: string;
+  /** Session-local prescription. Existing drafts without it are migrated on resume. */
+  routineSnapshot?: Routine;
 }
 
 export const WORKOUT_ATTEMPT_VERSION = 1 as const;
@@ -374,14 +382,28 @@ export interface AttemptExerciseSnapshot {
   readonly sets: readonly AttemptSetSnapshot[];
 }
 
-export type AnthropometricMetricType = 'body_weight';
+export type AnthropometricMetricType =
+  | 'body_weight'
+  | 'height'
+  | 'neck'
+  | 'shoulders'
+  | 'chest'
+  | 'waist'
+  | 'hips'
+  | 'biceps_relaxed'
+  | 'biceps_flexed'
+  | 'forearm'
+  | 'thigh'
+  | 'calf';
+
+export type AnthropometricUnit = 'kg' | 'cm';
 
 export interface BodyMetric {
   readonly id: string;
   readonly owner: UserId;
   readonly metricType: AnthropometricMetricType;
   readonly value: number;
-  readonly unit: 'kg';
+  readonly unit: AnthropometricUnit;
   readonly measuredAt: string;
   readonly source: 'manual';
   readonly notes?: string;
@@ -438,19 +460,45 @@ export interface ExperienceReceipt {
   readonly progress: ExperienceProgress;
 }
 
-export interface CommunityRankUpActivity {
+export type CommunityActivityKind =
+  | 'rank_up'
+  | 'personal_record'
+  | 'mesocycle_completed'
+  | 'mesocycle_perfect_week'
+  | 'weekly_goal'
+  | 'weekly_streak'
+  | 'first_joint_workout'
+  | 'joint_workout_completed'
+  | 'weekly_volume_record'
+  | 'monthly_volume_record'
+  | 'monthly_consistency'
+  | 'muscle_balance_improved';
+
+export interface CommunityActivityIdentity {
   readonly id: string;
-  readonly kind: 'rank_up';
+  readonly kind: CommunityActivityKind;
   readonly authorAlias: string;
   readonly authorAvatarId: AvatarId;
   readonly authorThemeId: string | null;
-  readonly level: number;
-  readonly rank: TrainingRank;
   readonly createdAt: string;
 }
 
+export interface CommunityRankUpActivity extends CommunityActivityIdentity {
+  readonly kind: 'rank_up';
+  readonly level: number;
+  readonly rank: TrainingRank;
+}
+
+export interface CommunityMilestoneActivity extends CommunityActivityIdentity {
+  readonly kind: Exclude<CommunityActivityKind, 'rank_up'>;
+  /** The server projection contains only display-safe milestone aggregates. */
+  readonly payload: Readonly<Record<string, string | number>>;
+}
+
+export type CommunityActivity = CommunityRankUpActivity | CommunityMilestoneActivity;
+
 export interface CommunityActivityPage {
-  readonly activities: readonly CommunityRankUpActivity[];
+  readonly activities: readonly CommunityActivity[];
   readonly nextCursor: string | null;
 }
 

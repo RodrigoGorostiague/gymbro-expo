@@ -1,8 +1,10 @@
 import 'react-native-gesture-handler';
 import 'react-native-reanimated';
+import React, { useEffect, useState } from 'react';
 import { Stack } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
+import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { AuthProvider } from '../context/AuthContext';
 import { DataProvider } from '../context/DataContext';
 import { ShopProvider } from '../context/ShopContext';
@@ -11,6 +13,9 @@ import { SocialProvider } from '../context/SocialContext';
 import { NotificationRuntime } from '../components/NotificationRuntime';
 import { AppNoticeModal } from '../components/AppNoticeModal';
 import { useShop } from '../context/ShopContext';
+import { useAuth } from '../context/AuthContext';
+import { CURRENT_RELEASE_NOTES } from '../constants/releaseNotes';
+import { hasSeenReleaseNotes, markReleaseNotesSeen } from '../utils/storage';
 
 function RootStatusBar() {
   const { theme } = useTheme();
@@ -29,8 +34,43 @@ function WelcomeGemRewardNotice() {
   />;
 }
 
+function ReleaseNotesNotice() {
+  const { user } = useAuth();
+  const { isLoading: isShopLoading, welcomeGemReward } = useShop();
+  const [visible, setVisible] = useState(false);
+
+  useEffect(() => {
+    let active = true;
+    setVisible(false);
+    if (!user || isShopLoading || welcomeGemReward !== null) return () => { active = false; };
+
+    void hasSeenReleaseNotes(user, CURRENT_RELEASE_NOTES.version).then((seen) => {
+      if (active && !seen) setVisible(true);
+    }).catch(() => undefined);
+
+    return () => { active = false; };
+  }, [user, isShopLoading, welcomeGemReward]);
+
+  const dismiss = () => {
+    if (!user) return;
+    setVisible(false);
+    void markReleaseNotesSeen(user, CURRENT_RELEASE_NOTES.version).catch(() => undefined);
+  };
+
+  return <AppNoticeModal
+    visible={visible}
+    title={CURRENT_RELEASE_NOTES.title}
+    message={CURRENT_RELEASE_NOTES.message}
+    changes={CURRENT_RELEASE_NOTES.changes}
+    highlight={CURRENT_RELEASE_NOTES.rewardGems ? `+${CURRENT_RELEASE_NOTES.rewardGems} GEMAS` : `VERSION ${CURRENT_RELEASE_NOTES.version}`}
+    actionLabel="A entrenar"
+    onClose={dismiss}
+  />;
+}
+
 export default function RootLayout() {
   return (
+    <GestureHandlerRootView style={{ flex: 1 }}>
     <SafeAreaProvider>
       <AuthProvider>
         <DataProvider>
@@ -40,8 +80,10 @@ export default function RootLayout() {
                 <RootStatusBar />
                 <NotificationRuntime />
                 <WelcomeGemRewardNotice />
+                <ReleaseNotesNotice />
                 <Stack screenOptions={{ headerShown: false, animation: 'fade' }}>
                 <Stack.Screen name="index" />
+                <Stack.Screen name="onboarding" options={{ animation: 'fade', gestureEnabled: false }} />
                 <Stack.Screen name="auth/update-password" options={{ animation: 'slide_from_bottom', presentation: 'modal' }} />
                 <Stack.Screen name="(tabs)" />
                 <Stack.Screen name="community/discover" options={{ animation: 'slide_from_right', presentation: 'card' }} />
@@ -94,5 +136,6 @@ export default function RootLayout() {
         </DataProvider>
       </AuthProvider>
     </SafeAreaProvider>
+    </GestureHandlerRootView>
   );
 }

@@ -9,8 +9,9 @@ import { HapticPressable } from '../../components/HapticPressable';
 import { GlassButton, GlassInput } from '../../components/UI';
 import { useData } from '../../context/DataContext';
 import { useTheme } from '../../context/ThemeContext';
-import { MesocycleStatus } from '../../types';
+import { Mesocycle, MesocycleStatus } from '../../types';
 import { generateId } from '../../utils/storage';
+import { findOverlappingMesocycle } from '../../utils/mesocycleAnalytics';
 
 const STATUS_OPTIONS: { value: MesocycleStatus; label: string }[] = [
   { value: 'draft', label: 'Borrador' },
@@ -19,7 +20,7 @@ const STATUS_OPTIONS: { value: MesocycleStatus; label: string }[] = [
   { value: 'archived', label: 'Archivado' },
 ];
 
-const buildWeeks = (durationWeeks: number) => Array.from({ length: durationWeeks }, (_, index) => ({
+const buildWeeks = (durationWeeks: number): Mesocycle['weeks'] => Array.from({ length: durationWeeks }, (_, index) => ({
   id: generateId(),
   weekNumber: index + 1,
   entries: [],
@@ -36,7 +37,7 @@ const normalizeStartDate = (value: string) => {
 
 export default function CreateMesocycleScreen() {
   const { theme } = useTheme();
-  const { addMesocycle } = useData();
+  const { addMesocycle, mesocycles } = useData();
   const [name, setName] = useState('');
   const [goal, setGoal] = useState('');
   const [status, setStatus] = useState<MesocycleStatus>('draft');
@@ -58,15 +59,22 @@ export default function CreateMesocycleScreen() {
     }
 
     try {
-      setIsSaving(true);
-      const created = await addMesocycle({
+      const normalizedStartDate = normalizeStartDate(startDate);
+      const candidate = {
         name: name.trim(),
         goal: goal.trim(),
         status,
         durationWeeks: parsedWeeks,
-        startDate: normalizeStartDate(startDate),
+        startDate: normalizedStartDate,
         weeks: buildWeeks(parsedWeeks),
-      });
+      };
+      const overlap = findOverlappingMesocycle<Mesocycle>({ ...candidate, id: '__new_mesocycle__', createdAt: '' }, mesocycles);
+      if (overlap) {
+        Alert.alert('Fechas superpuestas', `Este bloque coincide con "${overlap.name}". Elegí otra fecha o completa/cancela el bloque existente.`);
+        return;
+      }
+      setIsSaving(true);
+      const created = await addMesocycle(candidate);
       router.replace(`/mesocycle/summary/${created.id}`);
     } catch (error) {
       Alert.alert(
@@ -137,12 +145,7 @@ export default function CreateMesocycleScreen() {
             <GlassCard style={styles.section}>
               <Text style={[styles.label, { color: theme.textMuted }]}>Fecha de inicio (opcional)</Text>
               <DateTimeField value={startDate} onChange={setStartDate} mode="date" placeholder="Sin fecha definida" testID="mesocycle-create-start-date-picker" />
-              <Text style={[styles.hint, { color: theme.textMuted }]}>Elegí la fecha desde el selector para dejar el bloque listo para la planificación semanal.</Text>
-            </GlassCard>
-
-            <GlassCard style={styles.section}>
-              <Text style={[styles.sectionTitle, { color: theme.text }]}>Lo que sigue</Text>
-              <Text style={[styles.hint, { color: theme.textMuted }]}>Este slice crea el bloque base y te lleva a una vista resumen. La edición detallada de semanas y sesiones queda para el siguiente slice.</Text>
+              <Text style={[styles.hint, { color: theme.textMuted }]}>Elegí la fecha desde el selector. Al guardar validaremos que no se superponga con otro bloque vigente.</Text>
             </GlassCard>
 
             <GlassButton title="Crear mesociclo" onPress={save} disabled={isSaving} loading={isSaving} />
@@ -168,5 +171,9 @@ const styles = StyleSheet.create({
   textArea: { minHeight: 88, textAlignVertical: 'top' },
   hint: { fontSize: 13, lineHeight: 18, marginTop: 10 },
   sectionTitle: { fontSize: 16, fontWeight: '800' },
+  week: { borderTopWidth: 1, gap: 8, marginTop: 14, paddingTop: 12 },
+  weekTitle: { fontSize: 15, fontWeight: '800' },
+  routineChoices: { gap: 6 },
+  routineChoice: { borderWidth: 1, borderRadius: 10, padding: 9 },
   spacer: { height: 12 },
 });

@@ -49,6 +49,7 @@ const KEYS = {
   uidMigration: (uid: UserId) => `@gymbro/migrations/uid-ownership-v1/${uid}`,
   uidMigrationJournal: '@gymbro/migrations/uid-ownership-v1/journal',
   legacyShop: '@gymbro/shop',
+  releaseNotesSeen: (profile: UserId, version: string) => `@gymbro/release-notes/v1/${profile}/${version}`,
 };
 
 const TRAINING_CLEAN_SLATE_VERSION = 'training-clean-slate-v1';
@@ -468,6 +469,14 @@ export async function loadLegacyAlias(): Promise<LegacyAlias | null> {
   return value === 'rodaja' || value === 'brisas' ? value : null;
 }
 
+export async function hasSeenReleaseNotes(profile: UserId, version: string): Promise<boolean> {
+  return (await AsyncStorage.getItem(KEYS.releaseNotesSeen(profile, version))) === 'seen';
+}
+
+export async function markReleaseNotesSeen(profile: UserId, version: string): Promise<void> {
+  await AsyncStorage.setItem(KEYS.releaseNotesSeen(profile, version), 'seen');
+}
+
 type UidMigrationJournal = {
   version: 1;
   uid: UserId;
@@ -816,6 +825,15 @@ function normalizePlannedSessionRef(
   };
 }
 
+function normalizeRoutineSnapshot(value: unknown): Routine | undefined {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined;
+  const routine = value as Partial<Routine>;
+  if (typeof routine.id !== 'string' || !routine.id.trim() || typeof routine.name !== 'string' || !routine.name.trim()
+    || !Array.isArray(routine.muscleGroups) || !routine.muscleGroups.every((group) => typeof group === 'string')
+    || !Array.isArray(routine.exercises)) return undefined;
+  return routine as Routine;
+}
+
 function normalizePlannedSession(value: unknown, index: number): PlannedSession {
   const session = value && typeof value === 'object' && !Array.isArray(value)
     ? value as Partial<PlannedSession> & { routineId?: unknown; routineName?: unknown }
@@ -834,6 +852,7 @@ function normalizePlannedSession(value: unknown, index: number): PlannedSession 
     order: typeof session.order === 'number' && Number.isInteger(session.order) ? session.order : index + 1,
     progressionNote: typeof session.progressionNote === 'string' ? session.progressionNote : undefined,
     note: typeof session.note === 'string' ? session.note : undefined,
+    routineSnapshot: normalizeRoutineSnapshot(session.routineSnapshot),
   };
 }
 
@@ -851,6 +870,7 @@ function normalizeMesocycleEntry(value: unknown, index: number): PlannedSession 
       order: typeof candidate.order === 'number' && Number.isInteger(candidate.order) ? candidate.order : index + 1,
       progressionNote: typeof candidate.progressionNote === 'string' ? candidate.progressionNote : undefined,
       note: typeof candidate.note === 'string' ? candidate.note : undefined,
+      routineSnapshot: normalizeRoutineSnapshot(candidate.routineSnapshot),
     } : null;
   }
   return null;
@@ -1019,7 +1039,13 @@ export async function loadAttempts(profile: UserProfile): Promise<WorkoutAttempt
 function isActiveWorkoutDraft(value: unknown, owner: UserProfile): value is ActiveWorkoutDraft {
   const draft = value as Partial<ActiveWorkoutDraft> | null;
   return !!draft && draft.version === 1 && draft.owner === owner && typeof draft.attemptId === 'string' && typeof draft.routineId === 'string'
-    && Number.isFinite(draft.startedAtMs) && Number.isFinite(draft.restTimerSeconds) && !!draft.completedSets && !!draft.setValues;
+    && Number.isFinite(draft.startedAtMs) && Number.isFinite(draft.restTimerSeconds) && !!draft.completedSets && !!draft.setValues
+    && (draft.pausedAtMs === undefined || Number.isFinite(draft.pausedAtMs))
+    && (draft.pausedDurationMs === undefined || Number.isFinite(draft.pausedDurationMs))
+    && (draft.pausedRestRemainingSeconds === undefined || Number.isFinite(draft.pausedRestRemainingSeconds))
+    && (draft.routineSnapshot === undefined || (typeof draft.routineSnapshot === 'object' && draft.routineSnapshot !== null
+      && typeof draft.routineSnapshot.id === 'string' && typeof draft.routineSnapshot.name === 'string'
+      && Array.isArray(draft.routineSnapshot.exercises)));
 }
 export async function loadActiveWorkoutDraft(owner: UserProfile, nowMs = Date.now()): Promise<ActiveWorkoutDraft | null> {
   const raw = await AsyncStorage.getItem(KEYS.activeWorkout(owner));
@@ -1140,15 +1166,6 @@ export function updateAttempt(profile: UserProfile, edited: WorkoutAttempt): Pro
     }
     return current.map((attempt) => attempt.id === edited.id ? reconciled : attempt);
   });
-}
-
-export async function saveHiddenSharedRoutineIds(shareIds: string[]): Promise<void> {
-  await AsyncStorage.setItem(KEYS.hiddenSharedRoutineIds, JSON.stringify(shareIds));
-}
-
-export async function loadHiddenSharedRoutineIds(): Promise<string[]> {
-  const value = await AsyncStorage.getItem(KEYS.hiddenSharedRoutineIds);
-  return value ? JSON.parse(value) : [];
 }
 
 export async function saveShop(profile: UserProfile, state: ShopState): Promise<void> {

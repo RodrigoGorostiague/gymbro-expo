@@ -1,15 +1,18 @@
 import React, { useEffect, useState } from 'react';
-import { Tabs, Redirect } from 'expo-router';
-import { Platform, StyleSheet, View } from 'react-native';
+import { Tabs, Redirect, router } from 'expo-router';
+import { Alert, Platform, Pressable, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { BlurView } from 'expo-blur';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
+import Svg, { Circle } from 'react-native-svg';
 import { ThemePreviewBar } from '../../components/ThemePreviewBar';
 import { useAuth } from '../../context/AuthContext';
 import { useTheme } from '../../context/ThemeContext';
 import { useSocial } from '../../context/SocialContext';
 import { getCommunityBadgeCounts } from '../../services/communityBadge';
+import { useData } from '../../context/DataContext';
+import { hasActiveWorkoutReentryIntegrity } from '../../utils/activeWorkoutReentry';
 
 type TabIconName = keyof typeof Ionicons.glyphMap;
 
@@ -61,6 +64,89 @@ function TabBarBackground() {
   );
 }
 
+function ActiveWorkoutTabButton() {
+  const { theme } = useTheme();
+  const { activeWorkoutDraft, routines, mesocycles, cancelActiveWorkout } = useData();
+  const resumableDraft = hasActiveWorkoutReentryIntegrity(activeWorkoutDraft, routines, mesocycles);
+  const continueActiveWorkout = () => {
+    if (!resumableDraft) {
+      router.navigate('/train');
+      return;
+    }
+    const params: Record<string, string> = { id: activeWorkoutDraft!.routineId };
+    if (activeWorkoutDraft!.jointWorkoutId) params.jointWorkoutId = activeWorkoutDraft!.jointWorkoutId;
+    if (activeWorkoutDraft!.lineage) {
+      params.mesocycleId = activeWorkoutDraft!.lineage.mesocycleId;
+      params.weekNumber = String(activeWorkoutDraft!.lineage.weekNumber);
+      params.plannedSessionId = activeWorkoutDraft!.lineage.plannedSessionId;
+    }
+    router.navigate({ pathname: '/routine/execute/[id]', params });
+  };
+  const openMenu = () => {
+    if (!resumableDraft || !activeWorkoutDraft) return;
+    Alert.alert('Entrenamiento en curso', activeWorkoutDraft.routineSnapshot?.name ?? 'Tu entrenamiento', [
+      { text: 'Ir a Entrenar', onPress: () => router.navigate('/train') },
+      { text: 'Continuar', onPress: continueActiveWorkout },
+      {
+        text: 'Cancelar entrenamiento',
+        style: 'destructive',
+        onPress: () => void cancelActiveWorkout().catch((error) => {
+          Alert.alert('No se pudo cancelar', error instanceof Error ? error.message : 'Inténtalo nuevamente.');
+        }),
+      },
+      { text: 'Cerrar', style: 'cancel' },
+    ]);
+  };
+  const active = resumableDraft;
+  const sets = activeWorkoutDraft?.routineSnapshot?.exercises.flatMap((exercise) =>
+    exercise.sets.map((set) => `${exercise.id}-${set.id}`),
+  ) ?? [];
+  const completedSets = sets.filter((setKey) => activeWorkoutDraft?.completedSets[setKey]).length;
+  const progress = sets.length ? completedSets / sets.length : 0;
+  const ringSize = 54;
+  const ringStroke = 3;
+  const ringRadius = (ringSize - ringStroke) / 2;
+  const ringCircumference = 2 * Math.PI * ringRadius;
+
+  return (
+    <Pressable
+      accessibilityRole="button"
+      accessibilityLabel={active ? `Entrenamiento activo: ${activeWorkoutDraft?.routineSnapshot?.name ?? 'sesión en curso'}, ${completedSets} de ${sets.length} series completadas. Tocá para continuar.` : 'Entrenar'}
+      onPress={continueActiveWorkout}
+      onLongPress={openMenu}
+      style={({ pressed }) => [styles.workoutTabButton, { opacity: pressed ? 0.82 : 1 }]}
+    >
+      <LinearGradient colors={active ? [theme.accent, theme.primary] : [theme.primary, theme.accent]} style={styles.workoutTabGradient}>
+        {active ? <Svg pointerEvents="none" width={ringSize} height={ringSize} style={styles.workoutActivityRing}>
+          <Circle
+            cx={ringSize / 2}
+            cy={ringSize / 2}
+            fill="none"
+            r={ringRadius}
+            stroke="rgba(255,255,255,0.28)"
+            strokeWidth={ringStroke}
+          />
+          <Circle
+            cx={ringSize / 2}
+            cy={ringSize / 2}
+            fill="none"
+            r={ringRadius}
+            rotation="-90"
+            origin={`${ringSize / 2}, ${ringSize / 2}`}
+            stroke={theme.onPrimary}
+            strokeDasharray={ringCircumference}
+            strokeDashoffset={ringCircumference * (1 - progress)}
+            strokeLinecap="round"
+            strokeWidth={ringStroke}
+          />
+        </Svg> : null}
+        <Ionicons name={active ? 'play' : 'barbell'} size={25} color={theme.onPrimary} />
+      </LinearGradient>
+      <Text style={[styles.workoutTabLabel, { color: active ? theme.accent : theme.textMuted }]}>{active ? `${completedSets}/${sets.length}` : 'Entrenar'}</Text>
+    </Pressable>
+  );
+}
+
 export default function TabsLayout() {
   const { user, isLoading } = useAuth();
   const { theme } = useTheme();
@@ -87,6 +173,7 @@ export default function TabsLayout() {
   return (
     <View style={styles.container}>
       <Tabs
+        initialRouteName="train"
         screenOptions={{
           headerShown: false,
           tabBarBackground: () => <TabBarBackground />,
@@ -109,15 +196,6 @@ export default function TabsLayout() {
         }}
       >
         <Tabs.Screen
-          name="train"
-          options={{
-            title: 'Entrenar',
-            tabBarIcon: ({ focused }) => (
-              <TabIcon name={focused ? 'barbell' : 'barbell-outline'} focused={focused} />
-            ),
-          }}
-        />
-        <Tabs.Screen
           name="progress"
           options={{
             title: 'Progreso',
@@ -133,6 +211,13 @@ export default function TabsLayout() {
             tabBarBadge: communityBadge,
             tabBarAccessibilityLabel: communityBadge ? `Comunidad, ${communityBadge} pendientes` : 'Comunidad',
             tabBarIcon: ({ focused }) => <TabIcon name={focused ? 'people' : 'people-outline'} focused={focused} />,
+          }}
+        />
+        <Tabs.Screen
+          name="train"
+          options={{
+            title: 'Entrenar',
+            tabBarButton: () => <ActiveWorkoutTabButton />,
           }}
         />
         <Tabs.Screen
@@ -186,5 +271,30 @@ const styles = StyleSheet.create({
     width: 22,
     height: 3,
     borderRadius: 2,
+  },
+  workoutTabButton: {
+    alignItems: 'center',
+    justifyContent: 'flex-start',
+    marginTop: -26,
+    width: 76,
+  },
+  workoutTabGradient: {
+    alignItems: 'center',
+    borderColor: 'rgba(255,255,255,0.45)',
+    borderRadius: 31,
+    borderWidth: 2,
+    height: 62,
+    justifyContent: 'center',
+    overflow: 'hidden',
+    width: 62,
+  },
+  workoutActivityRing: {
+    position: 'absolute',
+  },
+  workoutTabLabel: {
+    fontSize: 10,
+    fontWeight: '900',
+    letterSpacing: 0.2,
+    marginTop: 3,
   },
 });

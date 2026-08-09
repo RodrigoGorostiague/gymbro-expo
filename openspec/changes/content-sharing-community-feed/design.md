@@ -2,7 +2,7 @@
 
 ## Technical Approach
 
-Add a Supabase-owned, no-media `workout_recaps` model and RPC command/projection boundary. The Expo client derives an approved immutable summary from an existing local `WorkoutSession`; it never uploads a session, sets, notes, local IDs, or media. Community renders only the server-authorized feed projection and refetches it on focus, refresh, retry, or authorized Realtime invalidation.
+Add a Supabase-owned, no-media `workout_recaps` model and RPC command/projection boundary. The Expo client derives an approved immutable recap from an existing local `WorkoutSession`: normalized exercises and performed sets are allowed, while private notes, local IDs, and media are not. Optional templates are separately validated as import-safe payloads. Community renders only the server-authorized feed projection and refetches it on focus, refresh, retry, or authorized Realtime invalidation.
 
 ## Architecture Decisions
 
@@ -10,7 +10,7 @@ Add a Supabase-owned, no-media `workout_recaps` model and RPC command/projection
 |---|---|---|---|
 | Persistence boundary | SQL table plus `create_workout_recap`, `delete_workout_recap`, and `list_workout_recaps` RPCs | Direct client table CRUD; Edge Function | Matches existing server-owned social projections and keeps validation/eligibility out of the client. |
 | Audience | Author plus current accepted `bro`/`partner`, excluding either-direction blocks | Public feed; cached recipient list | Eligibility is evaluated per command/page from `relationships` and `blocks`, so changes take effect on refetch. |
-| Snapshot | Reduced immutable fields and optional bounded caption | Raw `WorkoutSession`; editable post | Prevents local/private data leakage and removes edit semantics. |
+| Snapshot | Immutable approved fields, normalized performed sets, and optional import-safe templates | Raw `WorkoutSession`; editable post | Preserves useful training context without local identifiers or private data, and removes edit semantics. |
 | Pagination | Opaque base64 cursor for `(created_at DESC, id DESC)` | Offset; client filtering | Stable, duplicate-free server-authorized ordering consistent with existing RPC cursors. |
 | Realtime | RLS-authorized Postgres Changes as invalidation only | Payload rendering; offline cache | Preserves the existing `SocialContext` revision pattern without trusting event contents. |
 

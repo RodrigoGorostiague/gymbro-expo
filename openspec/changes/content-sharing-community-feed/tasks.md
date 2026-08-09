@@ -20,13 +20,13 @@ Chain strategy: size-exception
 
 | Unit | Goal | Likely PR | Focused test command | Runtime harness | Rollback boundary |
 |---|---|---|---|---|---|
-| 1 | Secure recap schema/RPCs | PR 1 exception | `npx supabase test db --local --file supabase/tests/workout_recap_feed.sql` | Two local actors exercise RPCs | Migration, policies, RPCs, publication |
+| 1 | Secure recap schema/RPCs | PR 1 exception | `npx supabase test db --local supabase/tests/workout_recap_feed.sql` | Two local actors exercise RPCs | Migration, policies, RPCs, publication |
 | 2 | Typed feed boundary and invalidation | PR 1 exception | `npm test -- tests/workoutRecapFeed.test.ts tests/socialGraph.test.ts` | Authenticated app refetch after event | Service, types, SocialContext |
 | 3 | Community composer and release proof | PR 1 exception | `npm test -- tests/workoutRecapFeed.test.ts && npx tsc --noEmit` | Two-account manual script | Community UI and feature flag |
 
 ## Phase 1: Secure Recap Contract
 
-- [ ] 1.1 RED: create `supabase/tests/workout_recap_feed.sql` cases for anonymous/non-connection/blocked/non-author denial, forbidden keys, soft delete, relationship removal, cursor ordering/invalid cursor, and Realtime RLS; run the focused pgTAP command.
+- [ ] 1.1 RED: create `supabase/tests/workout_recap_feed.sql` cases for anonymous/non-connection/blocked/non-author denial, forbidden local IDs and private fields, immutable performed sets, import-safe templates, engagement authorization, soft delete, relationship removal, cursor ordering/invalid cursor, and Realtime RLS; run the focused pgTAP command.
 - [ ] 1.2 Create `supabase/migrations/20260801000000_workout_recap_feed.sql`: immutable allowlisted table, indexes, RLS/publication, and protected create/delete/list RPCs with accepted `bro`/`partner` and either-block checks.
 - [ ] 1.3 GREEN: make all pgTAP cases pass; prove list returns only the approved projection, clamps 1–50, and returns no protected data for malformed cursors.
 

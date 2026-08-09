@@ -92,13 +92,13 @@ function appScreenHeaderMock() {
 
 function exercisePickerMock() {
   return {
-  ExercisePicker: ({ visible }: any) => React.createElement('ExercisePicker', { visible }),
+  ExercisePicker: (props: any) => React.createElement('ExercisePicker', props),
   };
 }
 
 function muscleGroupSelectorMock() {
   return {
-  MuscleGroupSelector: ({ value }: any) => React.createElement('MuscleGroupSelector', { value }),
+  MuscleGroupSelector: (props: any) => React.createElement('MuscleGroupSelector', props),
   };
 }
 
@@ -166,6 +166,7 @@ export function resetRuntimeHarness() {
   currentTheme = baseTheme;
   currentData = {};
   mockAlert.alert.mockReset();
+  mockRouter.navigate.mockReset();
   mockRouter.push.mockReset();
   mockRouter.replace.mockReset();
   mockRouter.back.mockReset();

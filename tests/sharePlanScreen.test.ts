@@ -138,13 +138,13 @@ describe('plan share recipients', () => {
   });
 
   test('renders received plan sender identity with the supplied theme, avatar, and content kind', async () => {
-    social.listReceivedPrivatePlanShareRequests.mockResolvedValue([{ id: 'share-1', senderAlias: 'Theme athlete', senderAvatarId: 'capigirl', senderThemeId: 'moon', contentKind: 'mesocycle', createdAt: '2026-08-02T00:00:00.000Z', snapshot: { routines: [], mesocycles: [], mesocycle: { id: 'mesocycle-1', name: 'Strength block', durationWeeks: 4, weeks: [], status: 'draft', goal: '', createdAt: '2026-08-02T00:00:00.000Z' } } }]);
+    social.listReceivedPrivatePlanShareRequests.mockResolvedValue([{ id: 'share-1', senderAlias: 'Theme athlete', senderAvatarId: 'capigirl', senderThemeId: 'moon', contentKind: 'mesocycle', createdAt: '2026-08-02T00:00:00.000Z', snapshot: { routines: [], mesocycles: [], mesocycle: { id: 'mesocycle-1', name: 'Strength block', durationWeeks: 4, weeks: [{ id: 'week-1', weekNumber: 1, entries: [{ id: 'session-1', ref: { routineId: 'routine-1', routineName: 'Upper', source: 'local' }, order: 1 }, { id: 'rest-1', kind: 'rest' }] }], status: 'draft', goal: 'Fuerza máxima', createdAt: '2026-08-02T00:00:00.000Z' } } }]);
     let tree: TestRenderer.ReactTestRenderer;
 
     await act(async () => { tree = TestRenderer.create(React.createElement(PlanInboxScreen)); });
 
     expect(tree!.root.find((node) => String(node.type) === 'LinearGradient').props.colors).toEqual(['#9FA8DA', '#C5CAE9', '#5C6BC0']);
     expect(tree!.root.find((node) => String(node.type) === 'ProfileAvatar').props.avatarId).toBe('capigirl');
-    expect(tree!.root.findAll((node) => String(node.type) === 'Text').map((node) => node.children.join(''))).toEqual(expect.arrayContaining(['Theme athlete', 'MESOCICLO', 'Strength block']));
+    expect(tree!.root.findAll((node) => String(node.type) === 'Text').map((node) => node.children.join(''))).toEqual(expect.arrayContaining(['Theme athlete', 'MESOCICLO', 'Strength block', 'Estructura del mesociclo', 'Objetivo: Fuerza máxima', 'Semana 1: Upper · Descanso']));
   });
 });

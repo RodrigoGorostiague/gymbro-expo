@@ -14,11 +14,12 @@ import { DualLoginFooter } from '../components/login/DualLoginFooter';
 import { DualLoginHeader } from '../components/login/DualLoginHeader';
 import { AuthMode, LoginFormPanel } from '../components/login/LoginFormPanel';
 import { useAuth } from '../context/AuthContext';
-import { useLoginThemes } from '../hooks/useLoginThemes';
+import { LOGIN_THEMES } from '../constants/loginBrand';
+import { getOwnOnboarding } from '../services/onboarding';
 
 export default function LoginScreen() {
   const { user, isLoading, authError, login, register, sendPasswordReset } = useAuth();
-  const loginThemes = useLoginThemes();
+  const loginThemes = LOGIN_THEMES;
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [mode, setMode] = useState<AuthMode>('signIn');
@@ -26,9 +27,10 @@ export default function LoginScreen() {
   const [feedback, setFeedback] = useState<{ tone: 'error' | 'success'; message: string } | null>(null);
 
   useEffect(() => {
-    if (!isLoading && user) {
-      router.replace('/(tabs)/train');
-    }
+    if (isLoading || !user) return;
+    void getOwnOnboarding().then((onboarding) => {
+      router.replace(onboarding.completed ? '/(tabs)/train' : '/onboarding');
+    }).catch(() => router.replace('/(tabs)/train'));
   }, [user, isLoading]);
 
   const changeMode = (nextMode: AuthMode) => {
@@ -79,7 +81,6 @@ export default function LoginScreen() {
             <DualLoginHeader
               rodaja={loginThemes.rodaja}
               brisas={loginThemes.brisas}
-              activeProfile={null}
             />
 
             <LoginFormPanel

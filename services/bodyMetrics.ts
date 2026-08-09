@@ -1,11 +1,11 @@
-import { BodyMetric } from '../types';
+import { AnthropometricMetricType, AnthropometricUnit, BodyMetric } from '../types';
 import { supabase, supabaseConfigurationError } from './supabase';
 
 type BodyMetricRow = {
   id: string;
-  metric_type: 'body_weight';
+  metric_type: AnthropometricMetricType;
   value: number | string;
-  unit: 'kg';
+  unit: AnthropometricUnit;
   measured_at: string;
   source: 'manual';
   notes: string | null;
@@ -39,11 +39,11 @@ export async function loadBodyMetrics(owner: string): Promise<BodyMetric[]> {
   return ((data ?? []) as BodyMetricRow[]).map((row) => toMetric(row, owner));
 }
 
-export async function recordBodyWeight(owner: string, input: { value: number; measuredAt: string; notes?: string }): Promise<BodyMetric> {
+export async function recordBodyMetric(owner: string, input: { metricType: AnthropometricMetricType; value: number; unit: AnthropometricUnit; measuredAt: string; notes?: string }): Promise<BodyMetric> {
   const { data, error } = await requireClient().rpc('record_body_metric', {
-    metric_type_input: 'body_weight',
+    metric_type_input: input.metricType,
     value_input: input.value,
-    unit_input: 'kg',
+    unit_input: input.unit,
     measured_at_input: input.measuredAt,
     notes_input: input.notes ?? null,
   });
@@ -51,4 +51,8 @@ export async function recordBodyWeight(owner: string, input: { value: number; me
   const row = (data as BodyMetricRow[] | null)?.[0];
   if (!row) throw new Error('No recibimos la medición guardada.');
   return toMetric(row, owner);
+}
+
+export function recordBodyWeight(owner: string, input: { value: number; measuredAt: string; notes?: string }): Promise<BodyMetric> {
+  return recordBodyMetric(owner, { ...input, metricType: 'body_weight', unit: 'kg' });
 }

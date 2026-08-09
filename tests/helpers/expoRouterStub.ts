@@ -11,6 +11,7 @@ const staticRouteModules = {
 } as const;
 
 export const router = {
+  navigate: vi.fn(),
   push: vi.fn(),
   replace: vi.fn(),
   back: vi.fn(),

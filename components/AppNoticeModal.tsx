@@ -7,6 +7,7 @@ export function AppNoticeModal({
   visible,
   title,
   message,
+  changes = [],
   highlight,
   actionLabel = 'Entendido',
   onClose,
@@ -14,6 +15,7 @@ export function AppNoticeModal({
   visible: boolean;
   title: string;
   message: string;
+  changes?: readonly string[];
   highlight?: string;
   actionLabel?: string;
   onClose: () => void;
@@ -27,6 +29,7 @@ export function AppNoticeModal({
           {highlight ? <View style={[styles.highlight, { backgroundColor: theme.primary }]}><Text style={[styles.highlightText, { color: theme.onPrimary }]}>{highlight}</Text></View> : null}
           <Text accessibilityRole="header" style={[styles.title, { color: theme.text }]}>{title}</Text>
           <Text style={[styles.message, { color: theme.textMuted }]}>{message}</Text>
+          {changes.length ? <View style={styles.changes}>{changes.map((change) => <View key={change} style={styles.change}><Text style={[styles.changeBullet, { color: theme.primary }]}>•</Text><Text style={[styles.changeText, { color: theme.textMuted }]}>{change}</Text></View>)}</View> : null}
           <HapticPressable accessibilityRole="button" accessibilityLabel={actionLabel} onPress={onClose} style={[styles.action, { backgroundColor: theme.primary }]}>
             <Text style={[styles.actionText, { color: theme.onPrimary }]}>{actionLabel}</Text>
           </HapticPressable>
@@ -43,6 +46,10 @@ const styles = StyleSheet.create({
   highlightText: { fontSize: 22, fontWeight: '900', letterSpacing: 0.5 },
   title: { fontSize: 24, fontWeight: '900', textAlign: 'center' },
   message: { fontSize: 16, lineHeight: 23, textAlign: 'center' },
+  changes: { alignSelf: 'stretch', gap: 8 },
+  change: { flexDirection: 'row', gap: 8 },
+  changeBullet: { fontSize: 18, fontWeight: '900', lineHeight: 22 },
+  changeText: { flex: 1, fontSize: 14, lineHeight: 21 },
   action: { alignItems: 'center', borderRadius: 14, marginTop: 4, paddingHorizontal: 24, paddingVertical: 13, width: '100%' },
   actionText: { fontSize: 16, fontWeight: '900' },
 });

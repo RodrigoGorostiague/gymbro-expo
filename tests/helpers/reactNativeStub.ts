@@ -43,14 +43,16 @@ export function __resetAppState() {
 }
 
 export const Dimensions = { get: () => ({ width: 390, height: 844 }) };
-export const FlatList = ({ data, renderItem, keyExtractor, ...props }: any) => React.createElement(
+export const FlatList = ({ data, renderItem, keyExtractor, ListHeaderComponent, ListFooterComponent, ...props }: any) => React.createElement(
   'FlatList',
   props,
+  ListHeaderComponent,
   (data ?? []).map((item: any, index: number) => {
     const child = renderItem({ item, index });
     const key = keyExtractor ? keyExtractor(item, index) : index;
     return React.createElement(React.Fragment, { key }, child);
   }),
+  ListFooterComponent,
 );
 export const KeyboardAvoidingView = createHost('KeyboardAvoidingView');
 export const Modal = createHost('Modal');

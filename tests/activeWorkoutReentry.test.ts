@@ -6,7 +6,7 @@ import RoutinesScreen from '../app/(tabs)/routines';
 import EditRoutineScreen from '../app/routine/[id]';
 import MesocycleSummaryScreen from '../app/mesocycle/summary/[id]';
 import ExecuteRoutineScreen from '../app/routine/execute/[id]';
-import { matchesActiveWorkout } from '../utils/activeWorkoutReentry';
+import { hasActiveWorkoutReentryIntegrity, matchesActiveWorkout } from '../utils/activeWorkoutReentry';
 import { __emitAppState } from './helpers/reactNativeStub';
 
 vi.mock('react-native-url-polyfill/auto', () => ({}));
@@ -34,6 +34,16 @@ describe('active workout re-entry', () => {
     ['rejects a different planned session', { ...draft, lineage }, { owner: 'rodaja' as const, routineId: routineA.id, lineage: { ...lineage, plannedSessionId: 's2' } }, false],
   ])('%s', (_name, activeDraft, target, expected) => {
     expect(matchesActiveWorkout(activeDraft, target)).toBe(expected);
+  });
+
+  test.each([
+    ['accepts a standalone draft with an existing routine', draft, [routineA], [], true],
+    ['rejects a draft whose routine was deleted', draft, [], [], false],
+    ['accepts an exactly matching planned session', { ...draft, lineage }, [routineA], [mesocycle], true],
+    ['rejects missing lineage entries', { ...draft, lineage }, [routineA], [{ ...mesocycle, weeks: [] }], false],
+    ['rejects lineage pointing at another routine', { ...draft, lineage }, [routineA], [{ ...mesocycle, weeks: [{ ...mesocycle.weeks[0], entries: [{ ...mesocycle.weeks[0].entries[0], ref: { ...mesocycle.weeks[0].entries[0].ref, routineId: routineB.id } }] }] }], false],
+  ])('%s', (_name, activeDraft, routines, mesocycles, expected) => {
+    expect(hasActiveWorkoutReentryIntegrity(activeDraft, routines, mesocycles)).toBe(expected);
   });
 
   test('offers Continue only for the matching routine from Training and detail', () => {
@@ -73,10 +83,165 @@ describe('active workout re-entry', () => {
     setMockParams({ id: routineA.id, mesocycleId: lineage.mesocycleId, weekNumber: '1', plannedSessionId: lineage.plannedSessionId });
     setMockData({ getRoutine: vi.fn(() => routineA), mesocycles: [mesocycle], activeWorkoutDraft: { ...draft, lineage: { ...lineage, plannedSessionId: 'other' } }, addAttempt: vi.fn(), startActiveWorkout: vi.fn(), updateActiveWorkout: vi.fn(), cancelActiveWorkout: vi.fn() });
     const screen = render(React.createElement(ExecuteRoutineScreen));
-    expect(findButton(screen.root, 'Iniciar entrenamiento')).toBeTruthy();
+    expect(findButton(screen.root, 'Continuar entrenamiento en curso')).toBeTruthy();
   });
 
-  test('keeps the mounted rest countdown moving while persistence is still pending', async () => {
+  test('clears the matching draft and presents a safe training fallback when the routine is unavailable', async () => {
+    const clearActiveWorkoutIfMatches = vi.fn(async () => undefined);
+    setMockParams({ id: routineA.id });
+    setMockData({ getRoutine: vi.fn(() => undefined), mesocycles: [], activeWorkoutDraft: draft, clearActiveWorkoutIfMatches, addAttempt: vi.fn(), startActiveWorkout: vi.fn(), updateActiveWorkout: vi.fn(), cancelActiveWorkout: vi.fn() });
+
+    const screen = render(React.createElement(ExecuteRoutineScreen));
+    expect(findText(screen.root, 'Entrenamiento no disponible')).toBeTruthy();
+    expect(mockRouter.back).not.toHaveBeenCalled();
+    await vi.waitFor(() => expect(clearActiveWorkoutIfMatches).toHaveBeenCalledWith({ owner: 'rodaja', routineId: routineA.id }));
+    press(findButton(screen.root, 'Volver a entrenar'));
+    expect(mockRouter.replace).toHaveBeenCalledWith('/(tabs)/train');
+  });
+
+  test('does not start a second draft when another workout is active and offers its continuation', () => {
+    const startActiveWorkout = vi.fn();
+    setMockParams({ id: routineB.id });
+    setMockData({ getRoutine: vi.fn(() => routineB), mesocycles: [], activeWorkoutDraft: draft, addAttempt: vi.fn(), startActiveWorkout, updateActiveWorkout: vi.fn(), cancelActiveWorkout: vi.fn() });
+
+    const screen = render(React.createElement(ExecuteRoutineScreen));
+    press(findButton(screen.root, 'Continuar entrenamiento en curso'));
+
+    expect(startActiveWorkout).not.toHaveBeenCalled();
+    expect(mockRouter.replace).toHaveBeenCalledWith({ pathname: '/routine/execute/[id]', params: { id: routineA.id } });
+  });
+
+  test('catches a rejected start and ignores a second tap while the first start is pending', async () => {
+    let rejectStart!: (error: Error) => void;
+    const startActiveWorkout = vi.fn(() => new Promise<void>((_resolve, reject) => { rejectStart = reject; }));
+    setMockParams({ id: routineA.id });
+    setMockData({ getRoutine: vi.fn(() => routineA), mesocycles: [], activeWorkoutDraft: null, addAttempt: vi.fn(), startActiveWorkout, updateActiveWorkout: vi.fn(), cancelActiveWorkout: vi.fn() });
+
+    const screen = render(React.createElement(ExecuteRoutineScreen));
+    const start = findButton(screen.root, 'Iniciar entrenamiento');
+    press(start);
+    press(start);
+    expect(startActiveWorkout).toHaveBeenCalledTimes(1);
+
+    rejectStart(new Error('Ya hay un entrenamiento activo para este perfil.'));
+    await vi.waitFor(() => expect(mockAlert.alert).toHaveBeenCalledWith('No se pudo iniciar el entrenamiento', 'Ya hay un entrenamiento activo para este perfil.'));
+  });
+
+  test('restores the joint session from the active workout draft when the route is reopened', () => {
+    setMockParams({ id: routineA.id });
+    setMockData({ getRoutine: vi.fn(() => routineA), mesocycles: [], activeWorkoutDraft: { ...draft, jointWorkoutId: 'joint-1' }, addAttempt: vi.fn(), startActiveWorkout: vi.fn(), updateActiveWorkout: vi.fn(), cancelActiveWorkout: vi.fn() });
+    const screen = render(React.createElement(ExecuteRoutineScreen));
+    expect(screen.root.find((node) => node.props.accessibilityLabel === 'Mostrar entrenamiento conjunto')).toBeTruthy();
+  });
+
+  test('joins the shared workout when an active draft is updated from a notification', () => {
+    setMockParams({ id: routineA.id });
+    setMockData({ getRoutine: vi.fn(() => routineA), mesocycles: [], activeWorkoutDraft: draft, addAttempt: vi.fn(), startActiveWorkout: vi.fn(), updateActiveWorkout: vi.fn(), cancelActiveWorkout: vi.fn() });
+    const screen = render(React.createElement(ExecuteRoutineScreen));
+
+    setMockData({ getRoutine: vi.fn(() => routineA), mesocycles: [], activeWorkoutDraft: { ...draft, jointWorkoutId: 'joint-1' }, addAttempt: vi.fn(), startActiveWorkout: vi.fn(), updateActiveWorkout: vi.fn(), cancelActiveWorkout: vi.fn() });
+    act(() => { screen.update(React.createElement(ExecuteRoutineScreen)); });
+
+    expect(mockRouter.setParams).toHaveBeenCalledWith({ jointWorkoutId: 'joint-1' });
+  });
+
+  test('keeps exercise addition collapsed at the end until a parent group is selected', () => {
+    const routineWithSet = {
+      ...routineA,
+      exercises: [{ id: 'exercise-1', name: 'Press', muscleGroups: ['pecho'], variant: 'bar', sets: [{ id: 'set-1', tipo: 1 as const, weight: 10, reps: 8 }] }],
+    };
+    const catalogExercise = { id: 'catalog-1', name: 'Aperturas', muscleGroups: ['pecho'], variant: 'mancuerna', defaultSets: [] };
+    const updateActiveWorkout = vi.fn();
+    setMockParams({ id: routineWithSet.id });
+    setMockData({
+      getRoutine: vi.fn(() => routineWithSet), mesocycles: [], exercises: [catalogExercise], definitions: [],
+      activeWorkoutDraft: { ...draft, routineId: routineWithSet.id }, addAttempt: vi.fn(), startActiveWorkout: vi.fn(),
+      updateActiveWorkout, cancelActiveWorkout: vi.fn(), refreshActiveWorkoutTiming: vi.fn(),
+    });
+
+    const screen = render(React.createElement(ExecuteRoutineScreen));
+    press(screen.root.find((node) => node.props.accessibilityLabel === 'Agregar ejercicio'));
+    const picker = screen.root.find((node) => (node.type as any) === 'ExercisePicker');
+    expect(picker.props.visible).toBe(true);
+    expect(picker.props.catalogMode).toBe(true);
+    act(() => { picker.props.onSelect(catalogExercise); });
+
+    expect(updateActiveWorkout).toHaveBeenCalledWith(expect.objectContaining({
+      routineSnapshot: expect.objectContaining({ exercises: expect.arrayContaining([expect.objectContaining({ name: 'Aperturas' })]) }),
+    }));
+  });
+
+   test('keeps the operational workout status sticky above the exercise list', () => {
+    const routineWithSet = {
+      ...routineA,
+      exercises: [{ id: 'exercise-1', name: 'Press', muscleGroups: ['pecho'], variant: 'bar', sets: [{ id: 'set-1', tipo: 1 as const, weight: 10, reps: 8 }] }],
+    };
+    setMockParams({ id: routineWithSet.id });
+    setMockData({
+      getRoutine: vi.fn(() => routineWithSet), mesocycles: [], exercises: [], definitions: [],
+      activeWorkoutDraft: { ...draft, routineId: routineWithSet.id }, addAttempt: vi.fn(), startActiveWorkout: vi.fn(),
+      updateActiveWorkout: vi.fn(), cancelActiveWorkout: vi.fn(), refreshActiveWorkoutTiming: vi.fn(),
+    });
+
+    const screen = render(React.createElement(ExecuteRoutineScreen));
+    const lists = screen.root.findAll((node) => (node.type as any) === 'FlatList');
+
+     expect(lists).toHaveLength(1);
+     expect(lists[0].props.contentContainerStyle).toEqual(expect.objectContaining({ paddingBottom: 120 }));
+     expect(lists[0].props.stickyHeaderIndices).toEqual([0]);
+     expect(findText(screen.root, 'Cronómetro')).toBeTruthy();
+     expect(findText(screen.root, 'Series: 0/1')).toBeTruthy();
+     expect(screen.root.find((node) => node.props.accessibilityLabel === 'Mostrar entrenamiento conjunto')).toBeTruthy();
+    expect(screen.root.find((node) => node.props.accessibilityLabel === 'Agregar ejercicio')).toBeTruthy();
+     expect(screen.root.findAll((node) => (node.type as any) === 'ScrollView')).toHaveLength(0);
+   });
+
+   test('expands joint training from the sticky community control', async () => {
+     const routineWithSet = {
+       ...routineA,
+       exercises: [{ id: 'exercise-1', name: 'Press', muscleGroups: ['pecho'], variant: 'bar', sets: [{ id: 'set-1', tipo: 1 as const, weight: 10, reps: 8 }] }],
+     };
+     setMockParams({ id: routineWithSet.id });
+     setMockData({
+       getRoutine: vi.fn(() => routineWithSet), mesocycles: [], exercises: [], definitions: [],
+       activeWorkoutDraft: { ...draft, routineId: routineWithSet.id }, addAttempt: vi.fn(), startActiveWorkout: vi.fn(),
+       updateActiveWorkout: vi.fn(), cancelActiveWorkout: vi.fn(), refreshActiveWorkoutTiming: vi.fn(),
+     });
+
+     const screen = render(React.createElement(ExecuteRoutineScreen));
+     press(screen.root.find((node) => node.props.accessibilityLabel === 'Mostrar entrenamiento conjunto'));
+
+     expect(screen.root.find((node) => node.props.accessibilityLabel === 'Ocultar entrenamiento conjunto').props.accessibilityState).toEqual({ expanded: true });
+     expect(findText(screen.root, 'Entrenamiento conjunto')).toBeTruthy();
+     await vi.waitFor(() => expect(findText(screen.root, 'Nadie de tu círculo está entrenando ahora.')).toBeTruthy());
+   });
+
+   test('pauses both persisted timers before opening the workout decision menu', async () => {
+     const routineWithSet = {
+       ...routineA,
+       exercises: [{ id: 'exercise-1', name: 'Press', muscleGroups: ['pecho'], variant: 'bar', sets: [{ id: 'set-1', tipo: 1 as const, weight: 10, reps: 8 }] }],
+     };
+     const updateActiveWorkout = vi.fn();
+     setMockParams({ id: routineWithSet.id });
+     setMockData({
+       getRoutine: vi.fn(() => routineWithSet), mesocycles: [], exercises: [], definitions: [],
+       activeWorkoutDraft: { ...draft, routineId: routineWithSet.id, restEndsAtMs: Date.now() + 30_000 }, addAttempt: vi.fn(), startActiveWorkout: vi.fn(),
+       updateActiveWorkout, cancelActiveWorkout: vi.fn(), refreshActiveWorkoutTiming: vi.fn(),
+     });
+
+     const screen = render(React.createElement(ExecuteRoutineScreen));
+     press(screen.root.find((node) => node.props.accessibilityLabel === 'Pausar entrenamiento'));
+
+     await vi.waitFor(() => expect(updateActiveWorkout).toHaveBeenCalledWith(expect.objectContaining({
+       pausedAtMs: expect.any(Number),
+       pausedRestRemainingSeconds: expect.any(Number),
+       restEndsAtMs: undefined,
+     })));
+     await vi.waitFor(() => expect(screen.root.find((node) => (node.type as any) === 'Modal').props.visible).toBe(true));
+     expect(findText(screen.root, 'Entrenamiento pausado')).toBeTruthy();
+   });
+
+   test('keeps the mounted rest countdown moving while persistence is still pending and shows one completion badge', async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date('2026-07-30T20:00:00.000Z'));
     const routineWithSet = {
@@ -105,7 +270,7 @@ describe('active workout re-entry', () => {
     const inputs = screen.root.findAll((node) => (node.type as any) === 'GlassInput');
     changeText(inputs[0], '10');
     changeText(inputs[1], '8');
-    press(screen.root.find((node) => (node.type as any) === 'HapticPressable'));
+    press(screen.root.findAll((node) => (node.type as any) === 'HapticPressable').find((node) => node.props.accessibilityLabel === undefined)!);
     expect(findText(screen.root, '00:03')).toBeTruthy();
     expect(vi.getTimerCount()).toBeGreaterThan(0);
 
@@ -116,13 +281,11 @@ describe('active workout re-entry', () => {
 
     act(() => { vi.advanceTimersByTime(2_000); });
     act(() => { __emitAppState('active'); });
-    expect(mockAlert.alert).toHaveBeenCalledTimes(1);
-    expect(mockAlert.alert).toHaveBeenCalledWith(
-      'Descanso terminado',
-      'Continúa con la próxima serie.',
-      [{ text: 'Entendido' }],
-    );
-  });
+     expect(mockAlert.alert).not.toHaveBeenCalled();
+     expect(findText(screen.root, 'Descanso terminado')).toBeTruthy();
+     press(screen.root.find((node) => node.props.accessibilityLabel === 'Cerrar aviso de descanso'));
+     expect(findText(screen.root, 'Descanso terminado')).toBeUndefined();
+   });
 
   test('reopens a completed set so its values can be corrected and reconfirmed', () => {
     const routineWithSet = {
@@ -151,7 +314,7 @@ describe('active workout re-entry', () => {
     const inputs = screen.root.findAll((node) => (node.type as any) === 'GlassInput');
     changeText(inputs[0], '10');
     changeText(inputs[1], '8');
-    press(screen.root.find((node) => (node.type as any) === 'HapticPressable'));
+    press(screen.root.findAll((node) => (node.type as any) === 'HapticPressable').find((node) => node.props.accessibilityLabel === undefined)!);
 
     expect(inputs[0].props.editable).toBe(false);
     press(screen.root.find((node) => node.props.accessibilityLabel === 'Editar Serie 1'));

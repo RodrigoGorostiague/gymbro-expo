@@ -2,9 +2,9 @@
   "expo": {
     "name": "GymBro",
     "slug": "GymBro",
-    "version": "1.0.0",
+    "version": "0.4.0",
     "orientation": "portrait",
-    "icon": "./assets/icon.png",
+    "icon": "./assets/gymbro-icon.png",
     "userInterfaceStyle": "dark",
     "scheme": "gymbro",
     "ios": {
@@ -12,16 +12,12 @@
     },
     "android": {
       "package": "com.wagiri.gymbro",
-      "adaptiveIcon": {
-        "backgroundColor": "#1A0A00",
-        "foregroundImage": "./assets/android-icon-foreground.png",
-        "backgroundImage": "./assets/android-icon-background.png",
-        "monochromeImage": "./assets/android-icon-monochrome.png"
-      },
+      "googleServicesFile": "./google-services.json",
+      "icon": "./assets/gymbro-icon.png",
       "predictiveBackGestureEnabled": false
     },
     "web": {
-      "favicon": "./assets/favicon.png",
+      "favicon": "./assets/gymbro-icon.png",
       "bundler": "metro"
     },
     "plugins": [
@@ -31,13 +27,18 @@
         "expo-notifications",
         {
           "icon": "./assets/notification-icon.png",
-          "color": "#FF69B4",
-          "defaultChannel": "partner_messages",
-          "sounds": []
+          "color": "#FF9700",
+          "defaultChannel": "social_v2",
+          "sounds": [
+            "./assets/sounds/notification_social.wav"
+          ]
         }
       ],
       "expo-font",
-      "expo-secure-store"
+      "expo-secure-store",
+      "expo-audio",
+      "expo-asset",
+      "@react-native-community/datetimepicker"
     ],
     "extra": {
       "firebaseApiKey": "AIzaSyDx1ndii4iuEpNJi171VqNJmet-61el06M",

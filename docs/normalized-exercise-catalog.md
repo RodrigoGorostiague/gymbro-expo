@@ -66,3 +66,26 @@ npm run catalog:reset -- \
   /home/rodaja/Descargas/catalogo_ejercicios_gym.xlsx \
   /home/rodaja/Descargas/taxonomia_grupos_musculares.xlsx
 ```
+
+## Linked Remote Append
+
+Use the append command for a workbook containing new exercises only. It never deletes or updates existing catalog rows. Before inserting, it dumps the linked remote public schema to `/home/rodaja/gymbro-ledger-backups`, validates that every exercise ID is new, resolves the workbook muscle labels against the remote taxonomy, and checks catalog integrity in the same transaction.
+
+```bash
+npm run catalog:append -- \
+  /home/rodaja/Descargas/catalogo_ejercicios_gym_v1_1.xlsx
+```
+
+Use `--dry-run` to validate the workbook locally without creating a backup or querying the remote database.
+
+## Catalog Relevance Synchronization
+
+Use this command only for the approved v1.1 relevance workbook. It validates both the exercise and exercise-muscle worksheets, creates a fresh public-data backup for each selected target, and replaces associations only for the workbook exercise IDs in one transaction. The local target inserts missing exercises but does not alter existing exercise attributes; the remote target fails unless every target exercise attribute already exactly matches the workbook.
+
+```bash
+npm run catalog:sync-relevance -- \
+  /home/rodaja/Descargas/GymBro/catalogo_ejercicios_gym_v1_1_relevancias_corregido.xlsx \
+  --target both
+```
+
+Use `--target local` or `--target remote` for a single destination, or `--dry-run` to validate both worksheet schemas without a backup or database query. Backups are written outside the repository to `/home/rodaja/gymbro-ledger-backups`.

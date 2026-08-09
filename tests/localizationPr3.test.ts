@@ -12,17 +12,14 @@ const sources = [
   'constants/kiss.ts',
   'constants/shopThemes.ts',
   'constants/welcome.ts',
-  'context/KissContext.tsx',
   'context/DataContext.tsx',
-  'context/ShareContext.tsx',
   'context/ShopContext.tsx',
-  'services/shareSync.ts',
   'types/index.ts',
   'utils/storage.ts',
   'utils/workoutAttempts.ts',
 ].map((path) => readFileSync(resolve(root, path), 'utf8')).join('\n');
 
-describe('PR3 Spanish shop, partner, sharing, and final copy audit', () => {
+describe('PR3 Spanish shop, partner, and final copy audit', () => {
   test('contains no reviewed English or regional interface copy', () => {
     const forbidden = [
       'Unexpected error while creating the shared routine',
@@ -40,10 +37,10 @@ describe('PR3 Spanish shop, partner, sharing, and final copy audit', () => {
     for (const copy of forbidden) expect(sources).not.toContain(copy);
   });
 
-  test('preserves profiles, theme IDs, share states, routes, and parser behavior', () => {
+  test('preserves profiles, theme IDs, routes, and parser behavior', () => {
     for (const value of [
       "'rodaja'", "'brisas'", "id: 'white'", "id: 'black'",
-      "status: 'pending' as const", "'routine_share'", "'profile-rodaja'",
+      "'profile-rodaja'",
     ]) expect(sources).toContain(value);
   });
 });

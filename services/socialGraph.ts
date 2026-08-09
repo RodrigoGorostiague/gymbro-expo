@@ -1,5 +1,4 @@
 import { supabase, supabaseConfigurationError } from './supabase';
-import { FunctionsHttpError } from '@supabase/supabase-js';
 import { AvatarId, avatarIdOrDefault } from '../constants/avatars';
 
 export type ProfileCategories = Record<string, string>;
@@ -13,8 +12,13 @@ export type OwnProfile = Omit<PublicProfile, 'presentationThemeId'> & {
   shareRoutineTemplate: boolean;
   shareMesocycleTemplate: boolean;
   sharePerformedSetDetails: boolean;
+  shareSocialActivity: boolean;
+  shareSocialProgress: boolean;
+  shareSocialConsistency: boolean;
+  shareSocialStatistics: boolean;
+  shareSocialMuscleDistribution: boolean;
 };
-export type OwnProfileSave = Omit<OwnProfile, 'uid' | 'avatarId' | 'shareRoutineTemplate' | 'shareMesocycleTemplate' | 'sharePerformedSetDetails'> & Partial<Pick<OwnProfile, 'avatarId' | 'shareRoutineTemplate' | 'shareMesocycleTemplate' | 'sharePerformedSetDetails'>>;
+export type OwnProfileSave = Omit<OwnProfile, 'uid' | 'avatarId' | 'shareRoutineTemplate' | 'shareMesocycleTemplate' | 'sharePerformedSetDetails' | 'shareSocialActivity' | 'shareSocialProgress' | 'shareSocialConsistency' | 'shareSocialStatistics' | 'shareSocialMuscleDistribution'> & Partial<Pick<OwnProfile, 'avatarId' | 'shareRoutineTemplate' | 'shareMesocycleTemplate' | 'sharePerformedSetDetails' | 'shareSocialActivity' | 'shareSocialProgress' | 'shareSocialConsistency' | 'shareSocialStatistics' | 'shareSocialMuscleDistribution'>>;
 export type GraphSummary = {
   targetId: string;
   relationshipKind?: RelationshipKind | null;
@@ -22,6 +26,14 @@ export type GraphSummary = {
   outgoingRequest?: boolean;
   incomingRequest?: boolean;
   blocked?: boolean;
+};
+export type MuscleDistributionEntry = { id: string; label: string; value: number };
+export type SocialProfileInsights = {
+  activity?: { lastCompletedAt: string | null };
+  progress?: { level: number; rank: string };
+  consistency?: { workoutsLast28Days: number; activeWeeksLast90Days: number };
+  statistics?: { workoutsLast90Days: number; completedExercisesLast90Days: number };
+  muscleDistribution?: MuscleDistributionEntry[];
 };
 export type GraphCommand =
   | { command: 'sendRequest'; targetId: string; relationshipKind: RelationshipKind }
@@ -52,6 +64,12 @@ function requireClient() {
 
 export function normalizeAliasPrefix(value: string): string {
   return value.trim().normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLocaleLowerCase();
+}
+
+/** Creates the private profile projection required by social and reward services. */
+export async function bootstrapOwnProfile(): Promise<void> {
+  const { error } = await requireClient().rpc('ensure_own_profile', {});
+  if (error) throw new Error(error.message);
 }
 
 function asPage(data: unknown): { profiles: PublicProfile[]; nextCursor: string | null } {
@@ -106,35 +124,36 @@ export function getBlockedUsersPage(cursor: string | null = null) {
 }
 
 export async function getOwnProfile(): Promise<OwnProfile | null> {
-  const { data, error } = await requireClient().from('profiles').select('id, alias, avatar_id, categories, category_visibility, auto_share_completed_workouts, share_routine_template, share_mesocycle_template, share_performed_set_details').maybeSingle();
+  const { data, error } = await requireClient().rpc('get_own_profile', {});
   if (error) throw new Error(error.message);
   if (!data) return null;
-  return { uid: data.id, alias: data.alias, avatarId: avatarIdOrDefault(data.avatar_id), categories: stringRecord(data.categories), categoryVisibility: booleanRecord(data.category_visibility), autoShareCompletedWorkouts: booleanOrDefault(data.auto_share_completed_workouts), shareRoutineTemplate: booleanOrDefault(data.share_routine_template), shareMesocycleTemplate: booleanOrDefault(data.share_mesocycle_template), sharePerformedSetDetails: booleanOrDefault(data.share_performed_set_details) };
+  const profile = data as Record<string, unknown>;
+  return { uid: String(profile.id), alias: String(profile.alias), avatarId: avatarIdOrDefault(profile.avatar_id), categories: stringRecord(profile.categories), categoryVisibility: booleanRecord(profile.category_visibility), autoShareCompletedWorkouts: booleanOrDefault(profile.auto_share_completed_workouts), shareRoutineTemplate: booleanOrDefault(profile.share_routine_template), shareMesocycleTemplate: booleanOrDefault(profile.share_mesocycle_template), sharePerformedSetDetails: booleanOrDefault(profile.share_performed_set_details), shareSocialActivity: booleanOrDefault(profile.share_social_activity), shareSocialProgress: booleanOrDefault(profile.share_social_progress), shareSocialConsistency: booleanOrDefault(profile.share_social_consistency), shareSocialStatistics: booleanOrDefault(profile.share_social_statistics), shareSocialMuscleDistribution: booleanOrDefault(profile.share_social_muscle_distribution) };
 }
 
 export async function saveOwnProfile(profile: OwnProfileSave): Promise<void> {
-  const { data: auth, error: authError } = await requireClient().auth.getUser();
-  if (authError || !auth.user) throw new Error('Authentication is required to save a profile.');
-  const { error } = await requireClient().from('profiles').upsert({
-    id: auth.user.id,
-    alias: profile.alias.trim(),
-    avatar_id: avatarIdOrDefault(profile.avatarId),
-    categories: profile.categories,
-    category_visibility: profile.categoryVisibility,
-    auto_share_completed_workouts: profile.autoShareCompletedWorkouts,
-    share_routine_template: profile.shareRoutineTemplate ?? true,
-    share_mesocycle_template: profile.shareMesocycleTemplate ?? true,
-    share_performed_set_details: profile.sharePerformedSetDetails ?? true,
+  const { error } = await requireClient().rpc('save_own_profile', {
+    profile_input: {
+      alias: profile.alias.trim(),
+      avatar_id: avatarIdOrDefault(profile.avatarId),
+      categories: profile.categories,
+      category_visibility: profile.categoryVisibility,
+      auto_share_completed_workouts: profile.autoShareCompletedWorkouts,
+      share_routine_template: profile.shareRoutineTemplate ?? true,
+      share_mesocycle_template: profile.shareMesocycleTemplate ?? true,
+      share_performed_set_details: profile.sharePerformedSetDetails ?? true,
+      share_social_activity: profile.shareSocialActivity ?? true,
+      share_social_progress: profile.shareSocialProgress ?? true,
+      share_social_consistency: profile.shareSocialConsistency ?? true,
+      share_social_statistics: profile.shareSocialStatistics ?? true,
+      share_social_muscle_distribution: profile.shareSocialMuscleDistribution ?? true,
+    },
   });
   if (error) throw new Error(error.message);
 }
 
 export async function syncOwnPresentationTheme(themeId: string | null): Promise<void> {
-  const { data: auth, error: authError } = await requireClient().auth.getUser();
-  if (authError || !auth.user) return;
-  const { error } = await requireClient().from('profiles')
-    .update({ presentation_theme_id: themeId })
-    .eq('id', auth.user.id);
+  const { error } = await requireClient().rpc('update_own_presentation_theme', { theme_id: themeId });
   if (error) throw new Error(error.message);
 }
 
@@ -150,21 +169,72 @@ export async function getGraphSummary(targetId: string): Promise<GraphSummary> {
   return data as GraphSummary;
 }
 
-export async function runGraphCommand(command: GraphCommand): Promise<GraphSummary> {
-  const { data, error } = await requireClient().functions.invoke('social-graph', { body: command });
-  if (error instanceof FunctionsHttpError) {
-    let safeMessage: string | null = null;
-    try {
-      const body = await error.context.json() as { message?: unknown };
-      if (typeof body.message === 'string') safeMessage = body.message;
-    } catch {
-      // Fall back to the SDK error if the response body is not valid JSON.
-    }
-    if (safeMessage) throw new Error(safeMessage);
-  }
+function nonNegativeInteger(value: unknown): number {
+  return typeof value === 'number' && Number.isInteger(value) && value >= 0 ? value : 0;
+}
+
+export async function getSocialProfileInsights(targetId: string): Promise<SocialProfileInsights> {
+  const { data, error } = await requireClient().rpc('get_social_profile_insights', { target: targetId });
   if (error) throw new Error(error.message);
-  if (!data?.summary) throw new Error('The relationship action did not return a summary.');
-  return data.summary as GraphSummary;
+  return asSocialProfileInsights(data);
+}
+
+function asSocialProfileInsights(data: unknown): SocialProfileInsights {
+  const source = data && typeof data === 'object' && !Array.isArray(data) ? data as Record<string, unknown> : {};
+  const asObject = (value: unknown) => value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : null;
+  const activity = asObject(source.activity); const progress = asObject(source.progress); const consistency = asObject(source.consistency); const statistics = asObject(source.statistics);
+  return {
+    ...(activity ? { activity: { lastCompletedAt: typeof activity.last_completed_at === 'string' ? activity.last_completed_at : null } } : {}),
+    ...(progress && typeof progress.level === 'number' && typeof progress.rank === 'string' ? { progress: { level: progress.level, rank: progress.rank } } : {}),
+    ...(consistency ? { consistency: { workoutsLast28Days: nonNegativeInteger(consistency.workouts_last_28_days), activeWeeksLast90Days: nonNegativeInteger(consistency.active_weeks_last_90_days) } } : {}),
+    ...(statistics ? { statistics: { workoutsLast90Days: nonNegativeInteger(statistics.workouts_last_90_days), completedExercisesLast90Days: nonNegativeInteger(statistics.completed_exercises_last_90_days) } } : {}),
+    ...(Array.isArray(source.muscle_distribution) ? { muscleDistribution: source.muscle_distribution.flatMap((entry): MuscleDistributionEntry[] => { const value = asObject(entry); return value && typeof value.id === 'string' && typeof value.label === 'string' ? [{ id: value.id, label: value.label, value: nonNegativeInteger(value.value) }] : []; }) } : {}),
+  };
+}
+
+export async function getSocialProfileInsightsBatch(targetIds: readonly string[]): Promise<Record<string, SocialProfileInsights>> {
+  const targets = [...new Set(targetIds)].filter(Boolean).slice(0, 50);
+  if (!targets.length) return {};
+  const { data, error } = await requireClient().rpc('list_social_profile_insights', { targets });
+  if (error) throw new Error(error.message);
+  const source = data && typeof data === 'object' && !Array.isArray(data) ? data as Record<string, unknown> : {};
+  return Object.fromEntries(Object.entries(source).map(([id, insight]) => [id, asSocialProfileInsights(insight)]));
+}
+
+function graphCommandRpc(command: GraphCommand): [string, Record<string, unknown>] {
+  if (command.command === 'sendRequest') return ['graph_send_request', { target: command.targetId, requested_kind: command.relationshipKind }];
+  if (command.command === 'respondRequest') return ['graph_respond_request', { requester_input: command.targetId, accepted: command.accepted }];
+  if (command.command === 'cancelRequest') return ['graph_cancel_request', { target: command.targetId }];
+  if (command.command === 'downgradePartner') return ['graph_downgrade_partner', { target: command.targetId }];
+  if (command.command === 'block') return ['graph_block', { target: command.targetId }];
+  return ['graph_unblock', { target: command.targetId }];
+}
+
+function graphCommandError(message: string | undefined): string {
+  const errors: Record<string, string> = {
+    'relationship already exists': 'Esta transición de relación no está disponible.',
+    'relationship transition unavailable': 'Esta transición de relación no está disponible.',
+    'request already pending': 'Ya hay una solicitud pendiente entre ustedes.',
+    'request unavailable': 'La solicitud ya no está disponible.',
+    'partner relationship unavailable': 'La relación ya no está disponible.',
+    'block unavailable': 'El bloqueo ya no está disponible.',
+    'graph action blocked': 'No podés realizar esta acción con este perfil.',
+    'profile unavailable': 'Este perfil ya no está disponible.',
+    'self graph actions are not allowed': 'Esta acción no está disponible.',
+    'self block is not allowed': 'Esta acción no está disponible.',
+    'each account can have only one Partner': 'Una de las dos cuentas ya tiene un Partner.',
+  };
+  return errors[message ?? ''] ?? 'No se pudo completar la acción. Inténtalo de nuevo.';
+}
+
+export async function runGraphCommand(command: GraphCommand): Promise<GraphSummary> {
+  const client = requireClient();
+  const [rpc, args] = graphCommandRpc(command);
+  const { error } = await client.rpc(rpc, args);
+  if (error) throw new Error(graphCommandError(error.message));
+  const { data, error: summaryError } = await client.rpc('graph_summary', { target: command.targetId });
+  if (summaryError || !data) throw new Error('No se pudo completar la acción. Inténtalo de nuevo.');
+  return data as GraphSummary;
 }
 
 /**

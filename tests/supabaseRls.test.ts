@@ -2,7 +2,7 @@ import { existsSync, readFileSync } from 'node:fs';
 import { describe, expect, test, vi } from 'vitest';
 
 const client = vi.hoisted(() => ({
-  functions: { invoke: vi.fn() },
+  rpc: vi.fn(),
   auth: { getSession: vi.fn() },
   realtime: { setAuth: vi.fn() },
   channel: vi.fn(),
@@ -48,17 +48,15 @@ describe('Supabase social authorization boundary', () => {
   });
 
   test('uses the trusted command boundary instead of direct graph-table writes', async () => {
-    client.functions.invoke.mockResolvedValue({
-      data: { summary: { targetId: 'safe-target', relationshipKind: 'bro' } },
-      error: null,
-    });
+    client.rpc
+      .mockResolvedValueOnce({ data: null, error: null })
+      .mockResolvedValueOnce({ data: { targetId: 'safe-target', relationshipKind: 'bro' }, error: null });
 
     await expect(runGraphCommand({ command: 'sendRequest', targetId: 'safe-target', relationshipKind: 'bro' })).resolves.toEqual({
       targetId: 'safe-target',
       relationshipKind: 'bro',
     });
-    expect(client.functions.invoke).toHaveBeenCalledWith('social-graph', {
-      body: { command: 'sendRequest', targetId: 'safe-target', relationshipKind: 'bro' },
-    });
+    expect(client.rpc).toHaveBeenNthCalledWith(1, 'graph_send_request', { target: 'safe-target', requested_kind: 'bro' });
+    expect(client.rpc).toHaveBeenNthCalledWith(2, 'graph_summary', { target: 'safe-target' });
   });
 });

@@ -1,6 +1,7 @@
 import React, { createContext, useContext, useEffect, useState } from 'react';
 import { UserId } from '../types';
 import { supabase, supabaseConfigurationError, subscribeToSupabaseAppState } from '../services/supabase';
+import { bootstrapOwnProfile } from '../services/socialGraph';
 import { loadLegacyAlias, migrateLegacyAliasToUid } from '../utils/storage';
 
 interface AuthContextValue {
@@ -20,6 +21,13 @@ interface AuthContextValue {
 
 const AuthContext = createContext<AuthContextValue | null>(null);
 
+function authErrorMessage(error: unknown): string {
+  const message = error instanceof Error ? error.message : 'No se pudo restaurar la sesión.';
+  return message.includes('JWT issued at future')
+    ? 'La fecha y hora del dispositivo no coinciden con el servidor. Activá la fecha y hora automáticas y volvé a iniciar sesión.'
+    : message;
+}
+
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<UserId | null>(null);
   const [userEmail, setUserEmail] = useState<string | null>(null);
@@ -38,11 +46,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
     const applySession = async (session: { user: { id: string; email?: string | null } } | null) => {
       if (!session) {
-        if (active) { setUser(null); setUserEmail(null); }
+        if (active) { setUser(null); setUserEmail(null); setAuthError(null); }
         return;
       }
       await migrateLegacyAliasToUid(legacyAlias, session.user.id);
-      if (active) { setUser(session.user.id); setUserEmail(session.user.email ?? null); }
+      await bootstrapOwnProfile();
+      if (active) { setUser(session.user.id); setUserEmail(session.user.email ?? null); setAuthError(null); }
     };
 
     const initialize = async () => {
@@ -53,7 +62,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         await applySession(data.session);
         if (active) setAuthError(null);
       } catch (error) {
-        if (active) setAuthError(error instanceof Error ? error.message : 'No se pudo restaurar la sesión.');
+        if (active) setAuthError(authErrorMessage(error));
       } finally {
         if (active) setIsLoading(false);
       }
@@ -61,7 +70,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
     void initialize();
     const { data: { subscription } } = client.auth.onAuthStateChange((_event, session) => {
-      void applySession(session);
+      void applySession(session).catch((error) => {
+        if (active) setAuthError(authErrorMessage(error));
+      });
     });
     const unsubscribeAppState = subscribeToSupabaseAppState();
     return () => {

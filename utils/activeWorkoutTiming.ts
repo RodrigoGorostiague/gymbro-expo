@@ -14,11 +14,17 @@ export function reconcileActiveWorkoutTiming(
   draft: ActiveWorkoutDraft,
   nowMs: number,
 ): ActiveWorkoutTiming {
-  if (nowMs >= draft.startedAtMs + ACTIVE_WORKOUT_EXPIRY_MS) {
+  const pausedDurationMs = Math.max(0, draft.pausedDurationMs ?? 0);
+  const currentPauseMs = draft.pausedAtMs ? Math.max(0, nowMs - draft.pausedAtMs) : 0;
+  const effectiveNowMs = nowMs - pausedDurationMs - currentPauseMs;
+  if (effectiveNowMs >= draft.startedAtMs + ACTIVE_WORKOUT_EXPIRY_MS) {
     return { draft: null, elapsedSeconds: 0, restRemainingSeconds: 0, isResting: false, cleanup: 'remove-draft' };
   }
 
-  const elapsedSeconds = Math.max(0, Math.floor((nowMs - draft.startedAtMs) / 1000));
+  const elapsedSeconds = Math.max(0, Math.floor((effectiveNowMs - draft.startedAtMs) / 1000));
+  if (draft.pausedAtMs) {
+    return { draft, elapsedSeconds, restRemainingSeconds: Math.max(0, draft.pausedRestRemainingSeconds ?? 0), isResting: (draft.pausedRestRemainingSeconds ?? 0) > 0, cleanup: 'none' };
+  }
   if (!draft.restEndsAtMs || draft.restEndsAtMs > nowMs) {
     const restRemainingSeconds = draft.restEndsAtMs ? Math.ceil((draft.restEndsAtMs - nowMs) / 1000) : 0;
     return { draft, elapsedSeconds, restRemainingSeconds, isResting: restRemainingSeconds > 0, cleanup: 'none' };

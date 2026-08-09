@@ -10,7 +10,7 @@ import {
 import { PARTNER_PROFILE } from '../constants/kiss';
 import { subscribeToEquippedThemes, syncEquippedTheme } from '../services/themeSync';
 import { UserProfile } from '../types';
-import { claimWelcomeGemReward, purchaseRewardTheme, RewardWallet, updateRewardWalletPreferences } from '../services/rewardWallet';
+import { claimPendingReleaseGemRewards, claimWelcomeGemReward, loadRewardWallet, purchaseRewardTheme, RewardWallet, updateRewardWalletPreferences } from '../services/rewardWallet';
 import { useAuth } from './AuthContext';
 import { useData } from './DataContext';
 import { syncOwnPresentationTheme } from '../services/socialGraph';
@@ -92,15 +92,22 @@ export function ShopProvider({ children }: { children: React.ReactNode }) {
     walletRequestRef.current = request;
     let active = true;
     setIsLoading(true);
-    void claimWelcomeGemReward().then(({ wallet: loaded, claimed }) => {
-      if (!active || walletRequestRef.current !== request) return;
-      setShop(loaded);
-      setWelcomeGemReward(claimed ? 250 : null);
-      syncEquippedTheme(user, loaded.equippedThemeId);
-      void syncOwnPresentationTheme(loaded.equippedThemeId).catch(() => undefined);
-    }).finally(() => {
-      if (active && walletRequestRef.current === request) setIsLoading(false);
-    });
+    void (async () => {
+      try {
+        const { claimed } = await claimWelcomeGemReward().catch(() => ({ claimed: false }));
+        const release = await claimPendingReleaseGemRewards().catch(() => null);
+        const loaded = release?.wallet ?? await loadRewardWallet();
+        if (!active || walletRequestRef.current !== request) return;
+        setShop(loaded);
+        setWelcomeGemReward(claimed ? 250 : null);
+        syncEquippedTheme(user, loaded.equippedThemeId);
+        void syncOwnPresentationTheme(loaded.equippedThemeId).catch(() => undefined);
+      } catch {
+        // Keep the safe empty wallet until a future dependency change retries the claim.
+      } finally {
+        if (active && walletRequestRef.current === request) setIsLoading(false);
+      }
+    })();
     return () => {
       active = false;
     };

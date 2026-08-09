@@ -71,3 +71,14 @@ export async function unregisterNotificationDeviceToken(token: string): Promise<
   });
   if (error) throw new Error(error.message);
 }
+
+export async function subscribeToNotificationInboxChanges(onChange: () => void): Promise<() => void> {
+  const instance = client();
+  const { data, error } = await instance.auth.getSession();
+  if (error) throw new Error(error.message);
+  if (!data.session) return () => undefined;
+  await instance.realtime.setAuth(data.session.access_token);
+  const channel = instance.channel(`notification-inbox:${data.session.user.id}`);
+  channel.on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'notification_inbox' }, onChange).subscribe();
+  return () => { void instance.removeChannel(channel); };
+}

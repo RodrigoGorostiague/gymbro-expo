@@ -10,6 +10,7 @@ import {
 import { LinearGradient } from 'expo-linear-gradient';
 import { HapticPressable } from './HapticPressable';
 import { useTheme } from '../context/ThemeContext';
+import type { AppTheme } from '../types';
 
 interface GlassButtonProps {
   title: string;
@@ -17,6 +18,7 @@ interface GlassButtonProps {
   variant?: 'primary' | 'secondary' | 'danger';
   disabled?: boolean;
   loading?: boolean;
+  theme?: AppTheme;
 }
 
 export function GlassButton({
@@ -25,12 +27,14 @@ export function GlassButton({
   variant = 'primary',
   disabled,
   loading,
+  theme: themeOverride,
 }: GlassButtonProps) {
-  const { theme, dualThemes, isCombined } = useTheme();
+  const { theme: activeTheme, dualThemes, isCombined } = useTheme();
+  const theme = themeOverride ?? activeTheme;
 
   if (variant === 'primary') {
     const colors = (
-      isCombined && dualThemes
+      !themeOverride && isCombined && dualThemes
         ? [dualThemes.rodaja.primary, dualThemes.brisas.primary]
         : [theme.primary, theme.accent]
     ) as [string, string];

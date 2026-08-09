@@ -1,5 +1,5 @@
 import type { AvatarId } from '../constants/avatars';
-import { CommunityActivityPage, CommunityRankUpActivity, ExperienceProgress, TrainingRank } from '../types';
+import { CommunityActivity, CommunityActivityKind, CommunityActivityPage, CommunityRankUpActivity, ExperienceProgress, TrainingRank } from '../types';
 import { supabase, supabaseConfigurationError } from './supabase';
 
 const ranks: readonly TrainingRank[] = ['Principiante', 'Intermedio', 'Avanzado', 'GymBro', 'GymRat', 'G-Boom', 'Alfa', 'Sigma'];
@@ -11,6 +11,10 @@ function requireClient() {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return !!value && typeof value === 'object' && !Array.isArray(value);
+}
+
+function isMilestoneValue(value: unknown): value is string | number {
+  return typeof value === 'string' || (typeof value === 'number' && Number.isFinite(value));
 }
 
 export function asExperienceProgress(value: unknown): ExperienceProgress | null {
@@ -35,20 +39,24 @@ export async function loadExperienceProgress(): Promise<ExperienceProgress> {
   return progress;
 }
 
-function asActivity(value: unknown): CommunityRankUpActivity | null {
-  if (!isRecord(value) || value.kind !== 'rank_up' || typeof value.id !== 'string'
-    || typeof value.author_alias !== 'string' || typeof value.created_at !== 'string' || !isRecord(value.payload)
-    || !Number.isInteger(value.payload.level) || !ranks.includes(value.payload.rank as TrainingRank)) return null;
-  return {
+const activityKinds: readonly CommunityActivityKind[] = ['rank_up', 'personal_record', 'mesocycle_completed', 'mesocycle_perfect_week', 'weekly_goal', 'weekly_streak', 'first_joint_workout', 'joint_workout_completed', 'weekly_volume_record', 'monthly_volume_record', 'monthly_consistency', 'muscle_balance_improved'];
+
+function asActivity(value: unknown): CommunityActivity | null {
+  if (!isRecord(value) || typeof value.kind !== 'string' || !activityKinds.includes(value.kind as CommunityActivityKind)
+    || typeof value.id !== 'string' || typeof value.author_alias !== 'string' || typeof value.created_at !== 'string' || !isRecord(value.payload)) return null;
+  const identity = {
     id: value.id,
-    kind: 'rank_up',
     authorAlias: value.author_alias,
     authorAvatarId: (typeof value.author_avatar_id === 'string' ? value.author_avatar_id : 'capybara-athlete') as AvatarId,
     authorThemeId: typeof value.author_theme_id === 'string' ? value.author_theme_id : null,
-    level: value.payload.level as number,
-    rank: value.payload.rank as TrainingRank,
     createdAt: value.created_at,
   };
+  if (value.kind === 'rank_up') {
+    if (!Number.isInteger(value.payload.level) || !ranks.includes(value.payload.rank as TrainingRank)) return null;
+    return { ...identity, kind: 'rank_up', level: value.payload.level as number, rank: value.payload.rank as TrainingRank };
+  }
+  const payload = Object.fromEntries(Object.entries(value.payload).filter((entry): entry is [string, string | number] => isMilestoneValue(entry[1])));
+  return { ...identity, kind: value.kind as Exclude<CommunityActivityKind, 'rank_up'>, payload };
 }
 
 export async function getCommunityActivities(cursor: string | null = null): Promise<CommunityActivityPage> {

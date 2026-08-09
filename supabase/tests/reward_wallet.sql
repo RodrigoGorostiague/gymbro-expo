@@ -1,5 +1,5 @@
 begin;
-select plan(23);
+select plan(38);
 
 insert into auth.users (id, instance_id, aud, role, email, encrypted_password, email_confirmed_at, raw_app_meta_data, raw_user_meta_data, created_at, updated_at)
 values ('40000000-0000-0000-0000-000000000001', '00000000-0000-0000-0000-000000000000', 'authenticated', 'authenticated', 'wallet@example.com', '', now(), '{}', '{}', now(), now()),
@@ -27,6 +27,7 @@ select is((public.finalize_training_attempt(pg_temp.test_attempt('perfect', 10))
 select ok(not exists(select 1 from public.reward_ledger_entries where owner_id = public.require_actor() and kind = 'weekly_goal'), 'weekly target waits for three completed routines');
 
 select lives_ok($$select public.finalize_training_attempt(pg_temp.test_attempt('plan-one', 10, '{"mesocycleId":"meso-1","weekNumber":1,"plannedSessionId":"plan-1"}'::jsonb))$$, 'first planned completion is accepted');
+select is(public.finalize_training_attempt(pg_temp.test_attempt('plan-one-retry', 10, '{"mesocycleId":"meso-1","weekNumber":1,"plannedSessionId":"plan-1"}'::jsonb)) -> 'attempt' ->> 'id', 'plan-one', 'a different-id retry returns the original planned-session attempt');
 select ok(exists(select 1 from public.reward_ledger_entries where owner_id = public.require_actor() and kind = 'weekly_goal'), 'weekly target grants once after three completed routines');
 select lives_ok($$select public.finalize_training_attempt(pg_temp.test_attempt('plan-two', 10, '{"mesocycleId":"meso-1","weekNumber":1,"plannedSessionId":"plan-2"}'::jsonb))$$, 'second planned completion reaches mesocycle milestones');
 select lives_ok($$select public.finalize_training_attempt(pg_temp.test_attempt('extra-one', 10)); select public.finalize_training_attempt(pg_temp.test_attempt('extra-two', 10))$$, 'additional completions are accepted after the weekly target');
@@ -41,6 +42,20 @@ select is((public.claim_welcome_gem_reward() ->> 'claimed')::boolean, true, 'wel
 select is((public.claim_welcome_gem_reward() ->> 'claimed')::boolean, false, 'welcome gift retry does not grant again');
 select is((select count(*) from public.reward_ledger_entries where owner_id = public.require_actor() and kind = 'welcome_gift'), 1::bigint, 'welcome gift has one ledger entry');
 select is((select amount from public.reward_ledger_entries where owner_id = public.require_actor() and kind = 'welcome_gift'), 250, 'welcome gift amount is fixed');
+select is((public.claim_release_0_2_0_gem_reward() ->> 'claimed')::boolean, true, 'release gift is granted once');
+select is((public.claim_release_0_2_0_gem_reward() ->> 'claimed')::boolean, false, 'release gift retry does not grant again');
+select is((select count(*) from public.reward_ledger_entries where owner_id = public.require_actor() and kind = 'release_gift'), 1::bigint, 'release gift has one ledger entry');
+select is((select amount from public.reward_ledger_entries where owner_id = public.require_actor() and kind = 'release_gift'), 50, 'release gift amount is fixed');
+select is((public.claim_release_0_3_0_gem_reward() ->> 'claimed')::boolean, true, '0.3.0 release gift is granted once');
+select is((public.claim_release_0_3_0_gem_reward() ->> 'claimed')::boolean, false, '0.3.0 release gift retry does not grant again');
+select is((select count(*) from public.reward_ledger_entries where owner_id = public.require_actor() and idempotency_key = 'release:0.3.0:50-gems'), 1::bigint, '0.3.0 release gift has one ledger entry');
+select is((select amount from public.reward_ledger_entries where owner_id = public.require_actor() and idempotency_key = 'release:0.3.0:50-gems'), 50, '0.3.0 release gift amount is fixed');
+select is((public.claim_pending_release_gem_rewards() ->> 'claimed')::boolean, true, 'pending release campaigns grant the new 0.4.0 gift');
+select is((public.claim_pending_release_gem_rewards() ->> 'claimed')::boolean, false, 'pending release campaigns do not duplicate ledgered gifts');
+select is((select count(*) from public.reward_ledger_entries where owner_id = public.require_actor() and idempotency_key = 'release:0.4.0:100-gems'), 1::bigint, '0.4.0 release gift has one ledger entry');
+select is((select amount from public.reward_ledger_entries where owner_id = public.require_actor() and idempotency_key = 'release:0.4.0:100-gems'), 100, '0.4.0 release gift amount is fixed');
+select lives_ok($$select public.purchase_reward_theme('arena')$$, 'new catalog themes can be purchased');
+select ok((public.load_reward_wallet() -> 'purchasedThemeIds') ? 'arena', 'new theme purchase is persisted in the authoritative wallet');
 
 select * from finish();
 rollback;

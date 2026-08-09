@@ -10,10 +10,16 @@ describe('shop theme collection', () => {
       .not.toContainEqual(expect.objectContaining({ rarity: 'exclusive' }));
   });
 
-  test('offers 24 new themes with clear rarity bands', () => {
+  test('offers 27 new themes with clear rarity bands', () => {
     expect(getThemesByRarity('common')).toHaveLength(19);
-    expect(getThemesByRarity('rare')).toHaveLength(15);
+    expect(getThemesByRarity('rare')).toHaveLength(18);
     expect(getThemesByRarity('exclusive')).toHaveLength(5);
+  });
+
+  test('offers rare football themes at their intended prices', () => {
+    expect(getShopTheme('boca')).toMatchObject({ name: 'Boca Juniors', price: 700, rarity: 'rare', category: 'special' });
+    expect(getShopTheme('river')).toMatchObject({ name: 'River Plate', price: 850, rarity: 'rare', category: 'special' });
+    expect(getShopTheme('seleccion-argentina')).toMatchObject({ name: 'Selección Argentina', price: 1000, rarity: 'rare', category: 'special' });
   });
 
   test('reserves animated set celebrations for exclusive themes', () => {

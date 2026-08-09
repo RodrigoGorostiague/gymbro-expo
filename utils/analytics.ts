@@ -54,12 +54,13 @@ function localDay(date: Date, offset: number): Date {
   return new Date(date.getFullYear(), date.getMonth(), date.getDate() + offset);
 }
 
-export function getDefaultComparisonPeriods(now: Date = new Date()): ComparisonPeriods {
-  const currentStart = localDay(now, -6);
+export function getDefaultComparisonPeriods(now: Date = new Date(), periodDays = 7): ComparisonPeriods {
+  const days = Math.max(1, Math.floor(periodDays));
+  const currentStart = localDay(now, -(days - 1));
   const currentEnd = localDay(now, 1);
   return {
     current: { start: currentStart, end: currentEnd },
-    previous: { start: localDay(currentStart, -7), end: currentStart },
+    previous: { start: localDay(currentStart, -days), end: currentStart },
   };
 }
 
@@ -79,8 +80,9 @@ export function selectCoreProgressSignals(
   attempts: readonly WorkoutAttempt[],
   owner: UserProfile,
   now: Date = new Date(),
+  periodDays = 7,
 ): CoreProgressSignals {
-  const periods = getDefaultComparisonPeriods(now);
+  const periods = getDefaultComparisonPeriods(now, periodDays);
   const current = { ...emptySignals() };
   const previous = { ...emptySignals() };
 
@@ -196,9 +198,10 @@ export function selectExercisePerformance(
   exerciseId: string | null,
   now: Date = new Date(),
   chartLimit = 8,
+  periodDays = 7,
 ): { state: AdvancedDataState; partitions: readonly PerformancePartition[] } {
   if (exerciseId === null) return { state: 'unknown', partitions: [] };
-  const periods = getDefaultComparisonPeriods(now);
+  const periods = getDefaultComparisonPeriods(now, periodDays);
   const grouped = new Map<string, { mode: ExerciseLoadMode; unit: LoadUnit; points: PerformancePoint[] }>();
   let matched = false;
   for (const attempt of attempts) {
@@ -256,8 +259,9 @@ export function selectWeightedExposure(
   attempts: readonly WorkoutAttempt[],
   owner: UserProfile,
   now: Date = new Date(),
+  periodDays = 7,
 ) {
-  const periods = getDefaultComparisonPeriods(now);
+  const periods = getDefaultComparisonPeriods(now, periodDays);
   const result: Record<'current' | 'previous', Partial<Record<MuscleGroup, number>>> = { current: {}, previous: {} };
   for (const attempt of attempts) {
     if (attempt.owner !== owner) continue;
@@ -287,9 +291,10 @@ export function selectRoutineDetails(
   owner: UserProfile,
   routineId: string | null,
   now: Date = new Date(),
+  periodDays = 7,
 ) {
   if (routineId === null) return { state: 'unknown' as const, current: null, previous: null };
-  const periods = getDefaultComparisonPeriods(now);
+  const periods = getDefaultComparisonPeriods(now, periodDays);
   const summarize = (start: Date, end: Date) => {
     const values = attempts.filter((attempt) => attempt.owner === owner && attempt.routineId === routineId
       && new Date(attempt.completedAt) >= start && new Date(attempt.completedAt) < end);

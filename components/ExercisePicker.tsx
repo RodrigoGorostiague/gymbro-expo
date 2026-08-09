@@ -1,9 +1,9 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useLayoutEffect, useMemo, useState } from 'react';
 import { Modal, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useData } from '../context/DataContext';
 import { useTheme } from '../context/ThemeContext';
 import { Exercise, MuscleGroup } from '../types';
-import { muscleGroupLabel } from '../utils/catalogMuscleGroups';
+import { isSelectableMuscleParent, muscleGroupLabel } from '../utils/catalogMuscleGroups';
 import { GlassCard } from './GlassCard';
 import { HapticPressable } from './HapticPressable';
 import { GlassButton } from './UI';
@@ -11,6 +11,8 @@ import { GlassButton } from './UI';
 interface ExercisePickerProps {
   exercises: Exercise[];
   routineMuscleGroups: MuscleGroup[];
+  /** Shows the whole catalog and its visible parent-group filters. */
+  catalogMode?: boolean;
   visible: boolean;
   onClose: () => void;
   onSelect: (exercise: Exercise) => void;
@@ -19,35 +21,50 @@ interface ExercisePickerProps {
 export function ExercisePicker({
   exercises,
   routineMuscleGroups,
+  catalogMode = false,
   visible,
   onClose,
   onSelect,
 }: ExercisePickerProps) {
   const { theme } = useTheme();
   const { catalogMuscleGroups = [], filterCatalogExercises } = useData();
-  const [filter, setFilter] = useState<MuscleGroup | null>(routineMuscleGroups[0] ?? null);
+  const catalogAvailableGroups = useMemo(
+    () => catalogMuscleGroups.filter(isSelectableMuscleParent).map((group) => group.id),
+    [catalogMuscleGroups],
+  );
+  const availableGroups = catalogMode ? catalogAvailableGroups : routineMuscleGroups;
+  const [filter, setFilter] = useState<MuscleGroup | null>(catalogMode ? null : routineMuscleGroups[0] ?? null);
   const [filteredExercises, setFilteredExercises] = useState<Exercise[]>(exercises);
   const [isLoading, setIsLoading] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
   const activeFilter =
-    filter && !routineMuscleGroups.includes(filter) ? routineMuscleGroups[0] ?? null : filter;
+    filter && !availableGroups.includes(filter) ? (catalogMode ? null : routineMuscleGroups[0] ?? null) : filter;
+
+  useLayoutEffect(() => {
+    if (visible) setIsLoading(true);
+  }, [activeFilter, availableGroups, exercises, visible]);
 
   useEffect(() => {
-    if (filter && !routineMuscleGroups.includes(filter)) {
-      setFilter(routineMuscleGroups[0] ?? null);
+    if (!visible) return;
+    if (filter && !availableGroups.includes(filter)) {
+      setFilter(catalogMode ? null : routineMuscleGroups[0] ?? null);
     }
-  }, [filter, routineMuscleGroups]);
+  }, [availableGroups, catalogMode, filter, routineMuscleGroups, visible]);
 
   useEffect(() => {
+    if (!visible) return;
     let active = true;
     const load = async () => {
       setLoadError(null);
-      if (!activeFilter && routineMuscleGroups.length === 0) {
-        if (active) setFilteredExercises(exercises);
+      if (!activeFilter && availableGroups.length === 0) {
+        if (active) {
+          setFilteredExercises(exercises);
+          setIsLoading(false);
+        }
         return;
       }
       setIsLoading(true);
-      const groupIds = activeFilter ? [activeFilter] : routineMuscleGroups;
+      const groupIds = activeFilter ? [activeFilter] : availableGroups;
       const matches = await Promise.all(groupIds.map((groupId) => filterCatalogExercises(groupId, 'all_roles')));
       if (!active) return;
       const canonicalById = new Map(exercises.map((exercise) => [exercise.id, exercise]));
@@ -63,18 +80,18 @@ export function ExercisePicker({
       setIsLoading(false);
     });
     return () => { active = false; };
-  }, [activeFilter, exercises, filterCatalogExercises, routineMuscleGroups]);
+  }, [activeFilter, availableGroups, exercises, filterCatalogExercises, visible]);
 
   const groupLabel = (id: string) => muscleGroupLabel(catalogMuscleGroups, id);
 
   return (
     <Modal visible={visible} animationType="slide" transparent onRequestClose={onClose}>
       <View style={styles.overlay}>
-        <GlassCard style={styles.card}>
+        <GlassCard fill style={styles.card}>
           <Text style={[styles.title, { color: theme.text }]}>Agregar ejercicio</Text>
-          <Text style={[styles.subtitle, { color: theme.textMuted }]}>El catálogo respeta los grupos padre seleccionados para esta rutina.</Text>
+          <Text style={[styles.subtitle, { color: theme.textMuted }]}>{catalogMode ? 'Explorá el catálogo completo por grupos musculares padre.' : 'El catálogo respeta los grupos padre seleccionados para esta rutina.'}</Text>
 
-          {routineMuscleGroups.length > 0 ? (
+          {availableGroups.length > 0 ? (
             <ScrollView style={styles.filtersWrap} showsVerticalScrollIndicator={false} contentContainerStyle={styles.filters}>
               <HapticPressable
                 onPress={() => setFilter(null)}
@@ -90,7 +107,7 @@ export function ExercisePicker({
                   Todos los grupos
                 </Text>
               </HapticPressable>
-              {routineMuscleGroups.map((group) => {
+              {availableGroups.map((group) => {
                 const selected = activeFilter === group;
                 return (
                   <HapticPressable
@@ -115,11 +132,16 @@ export function ExercisePicker({
 
           <ScrollView style={styles.list} contentContainerStyle={styles.listContent}>
             {isLoading ? (
-              <Text style={{ color: theme.textMuted }}>Buscando ejercicios compatibles...</Text>
+              <View accessibilityLabel="Cargando ejercicios" style={styles.skeletonList}>
+                {[0, 1, 2].map((index) => <View key={index} style={[styles.skeletonRow, { borderColor: theme.glassBorder }]}>
+                  <View style={[styles.skeletonTitle, { backgroundColor: theme.glassBorder }]} />
+                  <View style={[styles.skeletonMeta, { backgroundColor: theme.glassBorder }]} />
+                </View>)}
+              </View>
             ) : loadError ? (
               <View style={styles.errorState}>
                 <Text style={{ color: theme.textMuted }}>{loadError}</Text>
-                <HapticPressable onPress={() => setFilter((current) => current ? null : routineMuscleGroups[0] ?? null)}>
+                <HapticPressable onPress={() => setFilter((current) => current ? null : availableGroups[0] ?? null)}>
                   <Text style={[styles.link, { color: theme.primary }]}>Reintentar</Text>
                 </HapticPressable>
               </View>
@@ -166,7 +188,7 @@ const styles = StyleSheet.create({
     padding: 16,
   },
   card: {
-    maxHeight: '85%',
+    height: '85%',
   },
   title: {
     fontSize: 22,
@@ -195,7 +217,7 @@ const styles = StyleSheet.create({
     paddingVertical: 8,
   },
   list: {
-    maxHeight: 320,
+    flex: 1,
   },
   listContent: {
     gap: 10,
@@ -227,6 +249,10 @@ const styles = StyleSheet.create({
   errorState: {
     gap: 10,
   },
+  skeletonList: { gap: 10 },
+  skeletonRow: { borderRadius: 16, borderWidth: 1, gap: 10, padding: 14 },
+  skeletonTitle: { borderRadius: 5, height: 20, opacity: 0.55, width: '58%' },
+  skeletonMeta: { borderRadius: 4, height: 13, opacity: 0.35, width: '78%' },
   spacer: {
     height: 10,
   },

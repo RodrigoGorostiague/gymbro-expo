@@ -51,6 +51,14 @@ describe('workout timestamp recovery', () => {
     });
   });
 
+  test('freezes elapsed and rest while paused, then excludes the pause from expiry', () => {
+    const paused = { ...draft, pausedAtMs: 11_000, pausedDurationMs: 2_000, pausedRestRemainingSeconds: 30, restEndsAtMs: undefined };
+    expect(reconcileActiveWorkoutTiming(paused, 31_000)).toMatchObject({ elapsedSeconds: 8, restRemainingSeconds: 30, isResting: true });
+    const resumed = { ...paused, pausedAtMs: undefined, pausedDurationMs: 22_000, pausedRestRemainingSeconds: undefined, restEndsAtMs: 62_000 };
+    expect(reconcileActiveWorkoutTiming(resumed, 32_000)).toMatchObject({ elapsedSeconds: 9, restRemainingSeconds: 30, isResting: true });
+    expect(reconcileActiveWorkoutTiming(resumed, draft.startedAtMs + ACTIVE_WORKOUT_EXPIRY_MS + 22_000 - 1).draft).not.toBeNull();
+  });
+
   test('emits foreground refreshes and removes lifecycle listeners', () => {
     const refreshActiveWorkoutTiming = vi.fn();
     const subscription = AppState.addEventListener('change', (state) => {

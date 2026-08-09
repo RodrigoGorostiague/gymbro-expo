@@ -16,6 +16,16 @@ export interface PlannedSessionAdherence {
 }
 export interface MesocycleWeekAdherence { weekNumber: number; plannedSessions: number; completedSessions: number; sessionStates: PlannedSessionAdherence[]; }
 export interface MesocycleAdherence { plannedSessions: number; completedSessions: number; weeks: MesocycleWeekAdherence[]; }
+export interface MesocycleMuscleProgress { plannedSets: number; completedSets: number; repetitions: number; volume: number; }
+export interface MesocycleExerciseProgress { name: string; firstLoad: number | null; lastLoad: number | null; firstReps: number | null; lastReps: number | null; firstVolume: number; lastVolume: number; points: Array<{ at: string; load: number; reps: number; volume: number }>; }
+export interface MesocycleTrainingProgress {
+  plannedEffectiveSets: number;
+  completedEffectiveSets: number;
+  repetitions: number;
+  volume: number;
+  muscles: Record<string, MesocycleMuscleProgress>;
+  exercises: MesocycleExerciseProgress[];
+}
 export type MesocycleDayGuidance =
   | { state: 'pre-start' | 'unplanned' | 'completed' }
   | { state: 'rest'; entryId: string; weekNumber: number }
@@ -23,6 +33,28 @@ export type MesocycleDayGuidance =
   | null;
 
 const isRoutine = (entry: MesocycleEntry): entry is PlannedSession => !('kind' in entry && entry.kind === 'rest');
+
+export function snapshotPlannedRoutine(routine: Routine): Routine {
+  return {
+    ...routine,
+    muscleGroups: [...routine.muscleGroups],
+    exercises: routine.exercises.map((exercise) => ({
+      ...exercise,
+      muscleGroups: [...(exercise.muscleGroups ?? [])],
+      attribution: exercise.attribution ? {
+        primary: exercise.attribution.primary,
+        secondary: [...exercise.attribution.secondary],
+        ...(exercise.attribution.weights ? { weights: { ...exercise.attribution.weights } } : {}),
+      } : undefined,
+      catalog: exercise.catalog ? {
+        movementPattern: exercise.catalog.movementPattern,
+        equipment: exercise.catalog.equipment,
+        muscleParticipations: exercise.catalog.muscleParticipations.map((participation) => ({ ...participation })),
+      } : undefined,
+      sets: (exercise.sets ?? []).map((set) => ({ ...set })),
+    })),
+  };
+}
 export function deriveFirstEntryStartDate(entries: readonly MesocycleEntry[], today = new Date()): string | undefined {
   if (!entries.length) return undefined;
   const year = today.getFullYear();
@@ -140,7 +172,8 @@ const progressFromAttempt = (plannedSessionId: string, attempt: WorkoutAttempt):
     authoritativeAttemptId: attempt.id,
   };
 };
-export function deriveMesocycleAdherence(mesocycle: Mesocycle, attempts: readonly WorkoutAttempt[] = []): MesocycleAdherence {
+
+function latestMesocycleAttempts(mesocycle: Mesocycle, attempts: readonly WorkoutAttempt[]): Map<string, WorkoutAttempt> {
   const latest = new Map<string, WorkoutAttempt>();
   attempts.forEach((attempt) => {
     if (!validLineage(attempt) || attempt.lineage.mesocycleId !== mesocycle.id) return;
@@ -148,6 +181,73 @@ export function deriveMesocycleAdherence(mesocycle: Mesocycle, attempts: readonl
     const current = latest.get(key);
     if (!current || attempt.completedAt > current.completedAt || (attempt.completedAt === current.completedAt && attempt.id > current.id)) latest.set(key, attempt);
   });
+  return latest;
+}
+
+function participationWeights(exercise: Routine['exercises'][number] | WorkoutAttempt['exercises'][number]): Array<{ id: string; weight: number }> {
+  const catalog = 'catalog' in exercise ? exercise.catalog?.muscleParticipations : undefined;
+  if (catalog?.length) return catalog.map((item) => ({ id: item.muscleGroupId, weight: item.relevance }));
+  if (!exercise.attribution) return [];
+  return [
+    { id: exercise.attribution.primary, weight: exercise.attribution.weights?.[exercise.attribution.primary] ?? 1 },
+    ...exercise.attribution.secondary.map((id) => ({ id, weight: exercise.attribution?.weights?.[id] ?? 0.4 })),
+  ];
+}
+
+/** Uses one authoritative attempt per planned calendar slot, never the reusable routine identity. */
+export function deriveMesocycleTrainingProgress(mesocycle: Mesocycle, attempts: readonly WorkoutAttempt[] = [], routines: readonly Routine[] = []): MesocycleTrainingProgress {
+  const latest = latestMesocycleAttempts(mesocycle, attempts);
+  const routinesById = new Map(routines.map((routine) => [routine.id, routine]));
+  const result: MesocycleTrainingProgress = { plannedEffectiveSets: 0, completedEffectiveSets: 0, repetitions: 0, volume: 0, muscles: {}, exercises: [] };
+  const exposures = new Map<string, Array<{ at: string; name: string; load: number; reps: number; volume: number }>>();
+  const addMuscle = (id: string, planned = 0, completed = 0, repetitions = 0, volume = 0) => {
+    const item = result.muscles[id] ?? { plannedSets: 0, completedSets: 0, repetitions: 0, volume: 0 };
+    item.plannedSets += planned; item.completedSets += completed; item.repetitions += repetitions; item.volume += volume;
+    result.muscles[id] = item;
+  };
+
+  for (const { weekNumber, entry } of flattenMesocycleEntries(mesocycle)) {
+    if (!isRoutine(entry)) continue;
+    const routine = entry.routineSnapshot ?? routinesById.get(entry.ref.routineId);
+    if (routine) for (const exercise of routine.exercises) {
+      const effective = (exercise.sets ?? []).filter((set) => set.tipo !== 'C').length;
+      result.plannedEffectiveSets += effective;
+      for (const participation of participationWeights(exercise)) addMuscle(participation.id, effective * participation.weight);
+    }
+    const attempt = latest.get(lineageKey(mesocycle.id, weekNumber, entry.id));
+    if (!attempt) continue;
+    for (const exercise of attempt.exercises) {
+      let exerciseVolume = 0; let exerciseReps = 0; let maxLoad = 0;
+      let completed = 0;
+      for (const { plan, result: set } of exercise.sets) {
+        if (!plan || !set) continue;
+        if (plan.type === 'C' || !set.performed || !set.performance || !isValidPerformance(set.performance)) continue;
+        completed += 1;
+        const load = set.performance.mode === 'external-load'
+          ? set.performance.load * (set.performance.unit === 'lb' ? 0.45359237 : 1)
+          : 0;
+        const volume = load * set.performance.reps;
+        exerciseReps += set.performance.reps; exerciseVolume += volume; maxLoad = Math.max(maxLoad, load);
+      }
+      result.completedEffectiveSets += completed; result.repetitions += exerciseReps; result.volume += exerciseVolume;
+      for (const participation of participationWeights(exercise)) addMuscle(participation.id, 0, completed * participation.weight, exerciseReps * participation.weight, exerciseVolume * participation.weight);
+      if (completed) {
+        const key = exercise.exerciseId ?? exercise.recordedName;
+        const values = exposures.get(key) ?? [];
+        values.push({ at: attempt.completedAt, name: exercise.recordedName, load: maxLoad, reps: exerciseReps, volume: exerciseVolume });
+        exposures.set(key, values);
+      }
+    }
+  }
+  result.exercises = [...exposures.values()].map((values) => {
+    const sorted = values.sort((left, right) => left.at.localeCompare(right.at));
+    const first = sorted[0]; const last = sorted.at(-1)!;
+    return { name: last.name, firstLoad: first.load || null, lastLoad: last.load || null, firstReps: first.reps || null, lastReps: last.reps || null, firstVolume: first.volume, lastVolume: last.volume, points: sorted.map(({ at, load, reps, volume }) => ({ at, load, reps, volume })) };
+  }).sort((left, right) => right.lastVolume - left.lastVolume);
+  return result;
+}
+export function deriveMesocycleAdherence(mesocycle: Mesocycle, attempts: readonly WorkoutAttempt[] = []): MesocycleAdherence {
+  const latest = latestMesocycleAttempts(mesocycle, attempts);
   const weeks = mesocycle.weeks.map((week) => {
     const sessionStates = week.entries.filter(isRoutine).map((entry) => {
       const attempt = latest.get(lineageKey(mesocycle.id, week.weekNumber, entry.id));
@@ -197,4 +297,4 @@ export function buildMesocycleDraft(mesocycle: Mesocycle): Mesocycle {
   return { ...mesocycle, weeks: Array.from({ length: Math.max(mesocycle.durationWeeks, 1) }, (_, index) => byNumber.get(index + 1) ?? { id: generateId(), weekNumber: index + 1, entries: [] }) };
 }
 export function countPlannedSessions(mesocycle: Mesocycle): number { return flattenMesocycleEntries(mesocycle).filter(({ entry }) => isRoutine(entry)).length; }
-export function clonePlannedWeekEntries(entries: readonly MesocycleEntry[]): MesocycleEntry[] { return entries.map((entry, index) => isRoutine(entry) ? { ...entry, id: generateId(), order: index + 1, ref: { ...entry.ref } } : { ...entry, id: generateId() }); }
+export function clonePlannedWeekEntries(entries: readonly MesocycleEntry[]): MesocycleEntry[] { return entries.map((entry, index) => isRoutine(entry) ? { ...entry, id: generateId(), order: index + 1, ref: { ...entry.ref }, ...(entry.routineSnapshot ? { routineSnapshot: snapshotPlannedRoutine(entry.routineSnapshot) } : {}) } : { ...entry, id: generateId() }); }

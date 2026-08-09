@@ -87,7 +87,7 @@ describe('DataProvider catalog library integration', () => {
     storage.data.set('@gymbro/catalog-library/v2/brisas', JSON.stringify({ ...library(), owner: 'brisas' }));
   });
 
-  test('wipes local training state and hydrates the remote normalized catalog', async () => {
+  test('hydrates the remote normalized catalog without a broad local runtime wipe', async () => {
     let current: ReturnType<typeof useData> | undefined;
     const Probe = () => { current = useData(); return null; };
 
@@ -99,7 +99,7 @@ describe('DataProvider catalog library integration', () => {
     expect(current?.catalogMuscleGroups).toHaveLength(1);
     expect(current?.routines).toEqual([]);
     expect(trainingState.import).not.toHaveBeenCalled();
-    expect(storage.data.has('@gymbro/catalog-library/v2/rodaja')).toBe(false);
+    expect(storage.data.has('@gymbro/catalog-library/v2/rodaja')).toBe(true);
   });
 
   test('rejects a recipient-mismatched import before it can publish state', async () => {
@@ -205,7 +205,7 @@ describe('DataProvider catalog library integration', () => {
     expect(current?.dataState).toBe('error');
   });
 
-  test('imports definitions before deleting catalog-library and journal source keys', async () => {
+  test('imports definitions without running a broad local runtime wipe', async () => {
     const order: string[] = [];
     const definition = {
       id: 'custom:rodaja:press', source: { kind: 'custom', owner: 'rodaja', originId: 'press' }, name: 'Press',
@@ -229,9 +229,29 @@ describe('DataProvider catalog library integration', () => {
 
     await act(async () => { TestRenderer.create(React.createElement(DataProvider, null, React.createElement(Probe))); });
 
-    expect(order).toEqual(['import:start', 'import:resolved', 'deleted']);
-    expect(storage.data.has('@gymbro/catalog-library/v2/rodaja')).toBe(false);
-    expect(storage.data.has('@gymbro/catalog-library/v2/journal')).toBe(false);
+    expect(order).toEqual(['import:start', 'import:resolved']);
+    expect(storage.data.has('@gymbro/catalog-library/v2/rodaja')).toBe(true);
+    expect(storage.data.has('@gymbro/catalog-library/v2/journal')).toBe(true);
     expect(current?.dataState).toBe('ready');
+  });
+
+  test('quarantines an orphaned remote draft before it reaches context consumers', async () => {
+    trainingState.value = {
+      definitions: [], attempts: [], sessions: [],
+      activeWorkoutDraft: {
+        version: 1, owner: 'rodaja', attemptId: 'orphan-attempt', routineId: 'deleted-routine',
+        startedAtMs: 1, restTimerSeconds: 90, completedSets: {}, setValues: {},
+      },
+    };
+    trainingState.load.mockResolvedValue(trainingState.value);
+    storage.data.set('@gymbro/active-workout/v1/rodaja', JSON.stringify(trainingState.value.activeWorkoutDraft));
+    let current: ReturnType<typeof useData> | undefined;
+    const Probe = () => { current = useData(); return null; };
+
+    await act(async () => { TestRenderer.create(React.createElement(DataProvider, null, React.createElement(Probe))); });
+
+    expect(current?.activeWorkoutDraft).toBeNull();
+    await vi.waitFor(() => expect(trainingState.save).toHaveBeenCalledWith({ activeWorkoutDraft: null }));
+    await vi.waitFor(() => expect(storage.data.has('@gymbro/active-workout/v1/rodaja')).toBe(false));
   });
 });

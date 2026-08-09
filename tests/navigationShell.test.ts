@@ -46,6 +46,7 @@ import CommunityScreen from '../app/(tabs)/community';
 import MoreScreen from '../app/(tabs)/more';
 
 const rootLayout = readFileSync(resolve(import.meta.dirname, '../app/_layout.tsx'), 'utf8');
+const tabsLayout = readFileSync(resolve(import.meta.dirname, '../app/(tabs)/_layout.tsx'), 'utf8');
 
 describe('navigation shell', () => {
   beforeEach(() => {
@@ -60,8 +61,10 @@ describe('navigation shell', () => {
     const screens = tree!.root.findAll((node) => String(node.type) === 'TabsScreen');
     const primary = screens.filter((node) => node.props.options?.href !== null);
 
-    expect(primary.map((node) => node.props.name)).toEqual(['train', 'progress', 'community', 'profile', 'more']);
-    expect(primary.map((node) => node.props.options.title)).toEqual(['Entrenar', 'Progreso', 'Comunidad', 'Perfil', 'Más']);
+    expect(primary.map((node) => node.props.name)).toEqual(['progress', 'community', 'train', 'profile', 'more']);
+    expect(primary.map((node) => node.props.options.title)).toEqual(['Progreso', 'Comunidad', 'Entrenar', 'Perfil', 'Más']);
+    const train = primary.find((node) => node.props.name === 'train')!;
+    expect(train.props.options.tabBarButton).toBeTypeOf('function');
     expect(screens.filter((node) => node.props.options?.href === null).map((node) => node.props.name)).toEqual(expect.arrayContaining(['mesocycles/index', 'routines/index', 'exercises/index', 'social', 'shop']));
   });
 
@@ -87,6 +90,18 @@ describe('navigation shell', () => {
 
     expect(community.props.options.tabBarBadge).toBe(7);
     expect(community.props.options.tabBarAccessibilityLabel).toBe('Comunidad, 7 pendientes');
+  });
+
+  test('keeps cancellation available from the active workout long-press menu', () => {
+    expect(tabsLayout).toContain("text: 'Cancelar entrenamiento'");
+    expect(tabsLayout).toContain('cancelActiveWorkout().catch');
+  });
+
+  test('renders active-workout progress from completed series around the central control', () => {
+    expect(tabsLayout).toContain("import Svg, { Circle } from 'react-native-svg'");
+    expect(tabsLayout).toContain('const completedSets = sets.filter');
+    expect(tabsLayout).toContain('strokeDashoffset={ringCircumference * (1 - progress)}');
+    expect(tabsLayout).toContain('`${completedSets}/${sets.length}`');
   });
 
   test('uses the recap feed as the Community tab default', async () => {

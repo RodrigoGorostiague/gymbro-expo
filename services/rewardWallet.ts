@@ -9,6 +9,7 @@ export type RewardWallet = {
 };
 
 export type WelcomeGemReward = { claimed: boolean; wallet: RewardWallet };
+export type ReleaseGemReward = { claimed: boolean; wallet: RewardWallet };
 
 function requireClient() {
   if (!supabase) throw new Error(supabaseConfigurationError ?? 'La billetera remota no está configurada.');
@@ -30,6 +31,10 @@ function isWelcomeGemReward(value: unknown): value is WelcomeGemReward {
   return typeof reward.claimed === 'boolean' && isWallet(reward.wallet);
 }
 
+function isReleaseGemReward(value: unknown): value is ReleaseGemReward {
+  return isWelcomeGemReward(value);
+}
+
 async function walletRpc(name: string, args: Record<string, unknown> = {}): Promise<RewardWallet> {
   const { data, error } = await requireClient().rpc(name, args);
   if (error) throw new Error(`No se pudo actualizar la billetera: ${error.message}`);
@@ -47,6 +52,13 @@ export async function claimWelcomeGemReward(): Promise<WelcomeGemReward> {
   const { data, error } = await requireClient().rpc('claim_welcome_gem_reward', {});
   if (error) throw new Error(`No se pudo acreditar el regalo de bienvenida: ${error.message}`);
   if (!isWelcomeGemReward(data)) throw new Error('El regalo de bienvenida tiene un formato inválido.');
+  return data;
+}
+
+export async function claimPendingReleaseGemRewards(): Promise<ReleaseGemReward> {
+  const { data, error } = await requireClient().rpc('claim_pending_release_gem_rewards', {});
+  if (error) throw new Error(`No se pudo acreditar el regalo de la versión: ${error.message}`);
+  if (!isReleaseGemReward(data)) throw new Error('El regalo de la versión tiene un formato inválido.');
   return data;
 }
 

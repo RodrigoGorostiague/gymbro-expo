@@ -25,7 +25,7 @@ import {
   isValidPerformance,
   validateAttribution,
 } from '../utils/workoutAttempts';
-import { deriveMesocycleAdherence, deriveMesocycleScheduleProjection, deriveScheduleDateLabel } from '../utils/mesocycles';
+import { deriveMesocycleAdherence, deriveMesocycleScheduleProjection, deriveMesocycleTrainingProgress, deriveScheduleDateLabel, snapshotPlannedRoutine } from '../utils/mesocycles';
 
 const captureRoutine: Routine = {
   id: 'routine-1', name: 'Original routine', muscleGroups: ['pecho'], createdAt: '2026-01-01T00:00:00Z',
@@ -363,5 +363,32 @@ describe('workout attempt contracts', () => {
     expect(edited.completion).toBe(attempt.completion);
     expect(edited.reward).toBe(attempt.reward);
     expect(() => applySessionEdits(attempt, { ...session, routineId: 'changed' })).toThrow('inmutable');
+  });
+
+  test('keeps the planned routine snapshot stable and uses only the latest session attempt for muscle progress', () => {
+    const snapshot = snapshotPlannedRoutine(captureRoutine);
+    captureRoutine.exercises[0].sets[1].weight = 99;
+    expect(snapshot.exercises[0].sets[1].weight).toBe(20);
+    const mesocycle: Mesocycle = {
+      ...adherenceMesocycle,
+      weeks: [{ ...adherenceMesocycle.weeks[0], entries: [{
+        ...adherenceMesocycle.weeks[0].entries[0],
+        routineSnapshot: snapshot,
+      }] }],
+    };
+    const older = createWorkoutAttempt({ id: 'older', owner: 'rodaja', routine: snapshot, completedAt: '2026-07-20T10:00:00Z', durationSeconds: 60, restTimerSeconds: 30, lineage, results: { 'routine-exercise:failure': { performed: true, reps: 8, load: 25 } } });
+    const latest = createWorkoutAttempt({ id: 'latest', owner: 'rodaja', routine: snapshot, completedAt: '2026-07-21T10:00:00Z', durationSeconds: 60, restTimerSeconds: 30, lineage, results: { 'routine-exercise:failure': { performed: true, reps: 10, load: 30 } } });
+
+    const progress = deriveMesocycleTrainingProgress(mesocycle, [older, latest], [captureRoutine]);
+    expect(progress).toMatchObject({ plannedEffectiveSets: 1, completedEffectiveSets: 1, repetitions: 10, volume: 300 });
+    expect(progress.muscles.pecho).toMatchObject({ plannedSets: 1, completedSets: 1, repetitions: 10, volume: 300 });
+  });
+
+  test('converts pound-based external load to kilograms before deriving volume', () => {
+    const attempt = createWorkoutAttempt({ id: 'pounds', owner: 'rodaja', routine: captureRoutine, completedAt: '2026-07-21T10:00:00Z', durationSeconds: 60, restTimerSeconds: 30, lineage, results: { 'routine-exercise:failure': { performed: true, reps: 10, load: 100 } } });
+    const pounds = { ...attempt, exercises: attempt.exercises.map((exercise) => ({ ...exercise, sets: exercise.sets.map((set) => set.result.performance ? { ...set, result: { ...set.result, performance: { ...set.result.performance, unit: 'lb' as const } } } : set) })) };
+
+    const progress = deriveMesocycleTrainingProgress(adherenceMesocycle, [pounds], [captureRoutine]);
+    expect(progress.volume).toBeCloseTo(453.59237);
   });
 });

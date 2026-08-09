@@ -105,6 +105,9 @@ function isDraft(value: unknown): value is ActiveWorkoutDraft {
     && isNonEmptyString(value.attemptId) && isNonEmptyString(value.routineId)
     && Number.isFinite(value.startedAtMs) && Number.isFinite(value.restTimerSeconds)
     && isRecord(value.completedSets) && isRecord(value.setValues)
+    && (value.routineSnapshot === undefined || (isRecord(value.routineSnapshot)
+      && isNonEmptyString(value.routineSnapshot.id) && isNonEmptyString(value.routineSnapshot.name)
+      && Array.isArray(value.routineSnapshot.exercises)))
     && (value.restEndsAtMs === undefined || Number.isFinite(value.restEndsAtMs));
 }
 

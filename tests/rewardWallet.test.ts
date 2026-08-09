@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, test, vi } from 'vitest';
 const rpc = vi.hoisted(() => vi.fn());
 vi.mock('../services/supabase', () => ({ supabase: { rpc }, supabaseConfigurationError: null }));
 
-import { claimWelcomeGemReward, loadRewardWallet, purchaseRewardTheme, receiptTotal, updateRewardWalletPreferences } from '../services/rewardWallet';
+import { claimPendingReleaseGemRewards, claimWelcomeGemReward, loadRewardWallet, purchaseRewardTheme, receiptTotal, updateRewardWalletPreferences } from '../services/rewardWallet';
 
 const wallet = { balance: 25, purchasedThemeIds: ['white'], equippedThemeId: 'white', combineWithPartner: false };
 
@@ -34,6 +34,12 @@ describe('remote reward wallet boundary', () => {
     rpc.mockResolvedValueOnce({ data: { claimed: true, wallet: { ...wallet, balance: 275 } }, error: null });
     await expect(claimWelcomeGemReward()).resolves.toEqual({ claimed: true, wallet: { ...wallet, balance: 275 } });
     expect(rpc).toHaveBeenCalledWith('claim_welcome_gem_reward', {});
+  });
+
+  test('claims all pending release rewards through one server-owned RPC', async () => {
+    rpc.mockResolvedValueOnce({ data: { claimed: true, wallet: { ...wallet, balance: 225 } }, error: null });
+    await expect(claimPendingReleaseGemRewards()).resolves.toEqual({ claimed: true, wallet: { ...wallet, balance: 225 } });
+    expect(rpc).toHaveBeenCalledWith('claim_pending_release_gem_rewards', {});
   });
 
   test('totals only positive server receipt entries', () => {

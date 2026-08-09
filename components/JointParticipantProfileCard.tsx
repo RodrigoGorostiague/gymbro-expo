@@ -11,11 +11,12 @@ const statusPresentation = {
   declined: { label: 'Declinó', palette: { primary: '#7F1D1D', accent: '#EF4444', secondary: '#450A0A' } },
 } as const;
 
-export function JointParticipantProfileCard({ participant, children, onPress, selected = false }: {
+export function JointParticipantProfileCard({ participant, children, onPress, selected = false, compact = false }: {
   participant: JointParticipant;
   children?: React.ReactNode;
   onPress?: () => void;
   selected?: boolean;
+  compact?: boolean;
 }) {
   const { theme } = useTheme();
   const fixedStatus = statusPresentation[participant.status as 'invited' | 'declined'];
@@ -25,6 +26,14 @@ export function JointParticipantProfileCard({ participant, children, onPress, se
     secondary: theme.secondary,
   };
   const badge = fixedStatus?.label ?? (participant.status === 'completed' ? 'Completó' : 'Activo');
+
+  if (compact) {
+    return <View accessibilityLabel={`Participante ${participant.alias}: ${badge}`} style={[styles.compact, { backgroundColor: palette.primary, borderColor: palette.accent }]}>
+      <ProfileAvatar avatarId={participant.avatarId} size={28} borderColor="#fff" />
+      <Text numberOfLines={1} style={styles.compactAlias}>{participant.alias}</Text>
+      <Text style={[styles.compactBadge, { backgroundColor: palette.secondary }]}>{badge}</Text>
+    </View>;
+  }
 
   const content = <>
       <View style={[styles.banner, { backgroundColor: palette.primary, borderColor: palette.accent }]}>
@@ -48,6 +57,9 @@ const styles = StyleSheet.create({
   card: { borderRadius: 14, borderWidth: 1, gap: 10, overflow: 'hidden' },
   selectableCard: { width: '100%' },
   selectedCard: { borderWidth: 3 },
+  compact: { alignItems: 'center', borderRadius: 999, borderWidth: 1, flexDirection: 'row', gap: 5, maxWidth: 150, paddingHorizontal: 6, paddingVertical: 5 },
+  compactAlias: { color: '#fff', flexShrink: 1, fontSize: 12, fontWeight: '800' },
+  compactBadge: { color: '#fff', borderRadius: 999, fontSize: 9, fontWeight: '900', overflow: 'hidden', paddingHorizontal: 5, paddingVertical: 2, textTransform: 'uppercase' },
   banner: { alignItems: 'center', borderBottomWidth: 1, flexDirection: 'row', gap: 10, padding: 12 },
   copy: { flex: 1, gap: 5 },
   alias: { color: '#fff', fontSize: 18, fontWeight: '900' },

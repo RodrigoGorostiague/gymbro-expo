@@ -5,8 +5,9 @@ import { beforeEach, describe, expect, test, vi } from 'vitest';
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
 
 const social = vi.hoisted(() => ({
-  getProfile: vi.fn().mockResolvedValue({ uid: 'member-2', alias: 'Alex', categories: {} }),
+  getProfile: vi.fn().mockResolvedValue({ uid: 'member-2', alias: 'Alex', categories: {}, presentationThemeId: null }),
   getSummary: vi.fn(),
+  getProfileInsights: vi.fn().mockResolvedValue({}),
   getProfilePlanLibrary: vi.fn().mockResolvedValue({ routines: [], mesocycles: [] }),
   command: vi.fn().mockResolvedValue({ targetId: 'member-2' }),
   realtimeRevision: 0,
@@ -27,9 +28,11 @@ vi.mock('../context/SocialContext', () => ({ useSocial: () => social }));
 vi.mock('../context/ThemeContext', () => ({ useTheme: () => ({ theme: { text: '#111', textMuted: '#666', success: '#0a0' } }) }));
 vi.mock('../components/AppNavBar', () => ({ AppNavBar: () => null }));
 vi.mock('../components/ProfileAvatar', () => ({ ProfileAvatar: () => null }));
+vi.mock('../components/ExperienceProgressCard', () => ({ ExperienceProgressCard: () => null }));
+vi.mock('../components/MuscleDistributionRadar', () => ({ MuscleDistributionRadar: () => null }));
 vi.mock('../components/GlassCard', async () => {
   const ReactModule = await import('react');
-  return { GlassCard: ({ children }: { children: React.ReactNode }) => ReactModule.createElement('GlassCard', null, children), ThemeBackground: ({ children }: { children: React.ReactNode }) => ReactModule.createElement('ThemeBackground', null, children) };
+  return { GlassCard: ({ children, ...props }: { children: React.ReactNode } & Record<string, unknown>) => ReactModule.createElement('GlassCard', props, children), ThemeBackground: ({ children, ...props }: { children: React.ReactNode } & Record<string, unknown>) => ReactModule.createElement('ThemeBackground', props, children) };
 });
 vi.mock('../components/UI', async () => {
   const ReactModule = await import('react');
@@ -42,6 +45,17 @@ const buttons = (tree: TestRenderer.ReactTestRenderer) => tree.root.findAll((nod
 
 describe('relationship transition actions', () => {
   beforeEach(() => { vi.clearAllMocks(); });
+
+  test('renders a view-shaped skeleton while the profile is loading', async () => {
+    social.getProfile.mockImplementationOnce(() => new Promise(() => undefined));
+    social.getSummary.mockImplementationOnce(() => new Promise(() => undefined));
+    let tree: TestRenderer.ReactTestRenderer;
+
+    await act(async () => { tree = TestRenderer.create(React.createElement(PublicProfileScreen)); });
+
+    expect(tree!.root.find((node) => node.props.accessibilityLabel === 'Cargando perfil')).toBeTruthy();
+    expect(tree!.root.findAll((node) => String(node.type) === 'Text').map((node) => node.children.join(''))).not.toContain('Cargando perfil...');
+  });
 
   test('requires an explicit kind for new invitations', async () => {
     social.getSummary.mockResolvedValue({ targetId: 'member-2' });
@@ -99,5 +113,37 @@ describe('relationship transition actions', () => {
 
     expect(social.getProfilePlanLibrary).toHaveBeenCalledWith('member-2');
     expect(tree!.root.findAll((node) => String(node.type) === 'Text').map((node) => node.children.join(''))).toEqual(expect.arrayContaining(['Planificación', 'Upper', 'Strength block']));
+  });
+
+  test('renders only the safe social insight aggregates for an accepted connection', async () => {
+    social.getSummary.mockResolvedValue({ targetId: 'member-2', relationshipKind: 'bro' });
+    social.getProfileInsights.mockResolvedValue({ muscleDistribution: [{ id: 'GM-001', label: 'Pecho', value: 5 }], statistics: { workoutsLast90Days: 4, completedExercisesLast90Days: 10 } });
+    let tree: TestRenderer.ReactTestRenderer;
+    await act(async () => { tree = TestRenderer.create(React.createElement(PublicProfileScreen)); });
+    expect(social.getProfileInsights).toHaveBeenCalledWith('member-2');
+    expect(tree!.root.findAll((node) => String(node.type) === 'Text').map((node) => node.children.join(''))).toEqual(expect.arrayContaining(['Distribución muscular', '4', '10']));
+  });
+
+  test('applies a connected athlete presentation theme to the complete detail surface', async () => {
+    social.getProfile.mockResolvedValue({ uid: 'member-2', alias: 'Alex', categories: { trainingStyle: 'Fuerza' }, presentationThemeId: 'sakura' });
+    social.getSummary.mockResolvedValue({ targetId: 'member-2', relationshipKind: 'bro' });
+    let tree: TestRenderer.ReactTestRenderer;
+    await act(async () => { tree = TestRenderer.create(React.createElement(PublicProfileScreen)); });
+
+    expect(tree!.root.find((node) => String(node.type) === 'ThemeBackground').props.theme.id).toBe('sakura');
+    expect(tree!.root.findAll((node) => String(node.type) === 'GlassCard')).toEqual(expect.arrayContaining([
+      expect.objectContaining({ props: expect.objectContaining({ theme: expect.objectContaining({ id: 'sakura' }) }) }),
+    ]));
+    expect(buttons(tree!).find((button) => button.props.title === 'Solicitar upgrade a Partner')!.props.theme.id).toBe('sakura');
+  });
+
+  test('stretches the hero profile card to the container width', async () => {
+    social.getSummary.mockResolvedValue({ targetId: 'member-2' });
+    let tree: TestRenderer.ReactTestRenderer;
+    await act(async () => { tree = TestRenderer.create(React.createElement(PublicProfileScreen)); });
+
+    expect(tree!.root.findAll((node) => String(node.type) === 'GlassCard')[0].props.style).toEqual(
+      expect.arrayContaining([expect.objectContaining({ alignSelf: 'stretch' })]),
+    );
   });
 });

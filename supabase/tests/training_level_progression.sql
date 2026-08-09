@@ -71,7 +71,7 @@ select is((public.finalize_training_attempt(pg_temp.test_xp_attempt('weekly-cap'
 select throws_ok($$select * from public.experience_progress$$, '42501', null, 'authenticated clients cannot directly read XP progress');
 
 select set_config('request.jwt.claim.sub', '50000000-0000-0000-0000-000000000002', true);
-select is_empty($$select jsonb_array_elements(public.list_community_activities() -> 'activities')$$, 'level changes inside the same rank do not publish activities');
+select is_empty($$select activity.value from jsonb_array_elements(public.list_community_activities() -> 'activities') activity(value) where activity.value ->> 'kind' = 'rank_up'$$, 'level changes inside the same rank do not publish rank activities');
 select throws_ok($$select * from public.community_activities$$, '42501', null, 'community activities have no direct authenticated reads');
 
 set local role postgres;
@@ -82,9 +82,9 @@ set local role authenticated;
 select set_config('request.jwt.claim.sub', '50000000-0000-0000-0000-000000000001', true);
 select lives_ok($$select public.finalize_training_attempt(pg_temp.test_xp_attempt('rank-boundary', 10, 45))$$, 'crossing into a new rank finalizes');
 select set_config('request.jwt.claim.sub', '50000000-0000-0000-0000-000000000002', true);
-select is((public.list_community_activities() -> 'activities' -> 0 ->> 'kind'), 'rank_up', 'connected viewer receives a generic rank-up activity');
-select is((public.list_community_activities() -> 'activities' -> 0 -> 'payload' ->> 'level')::integer, 5, 'rank-up activity records the new level');
-select is((public.list_community_activities() -> 'activities' -> 0 -> 'payload' ->> 'rank'), 'Intermedio', 'rank-up activity records the crossed rank');
+select is((select activity.value ->> 'kind' from jsonb_array_elements(public.list_community_activities() -> 'activities') activity(value) where activity.value ->> 'kind' = 'rank_up'), 'rank_up', 'connected viewer receives a generic rank-up activity');
+select is((select (activity.value -> 'payload' ->> 'level')::integer from jsonb_array_elements(public.list_community_activities() -> 'activities') activity(value) where activity.value ->> 'kind' = 'rank_up'), 5, 'rank-up activity records the new level');
+select is((select activity.value -> 'payload' ->> 'rank' from jsonb_array_elements(public.list_community_activities() -> 'activities') activity(value) where activity.value ->> 'kind' = 'rank_up'), 'Intermedio', 'rank-up activity records the crossed rank');
 select is(
   (public.list_community_activities() -> 'activities' -> 0) - 'id' - 'kind' - 'payload' - 'created_at' - 'author_alias',
   '{"author_avatar_id":"capybara-athlete","author_theme_id":"violeta"}'::jsonb,

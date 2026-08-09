@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, test, vi } from 'vitest';
 const storage = vi.hoisted(() => { const data = new Map<string, string>(); const failures = new Map<string, number>(); return { data, failures, getItem: vi.fn(async (key: string) => data.get(key) ?? null), getAllKeys: vi.fn(async () => [...data.keys()]), setItem: vi.fn(async (key: string, value: string) => { if ((failures.get(key) ?? 0) > 0) { failures.set(key, (failures.get(key) ?? 1) - 1); throw new Error('write failed'); } data.set(key, value); }), removeItem: vi.fn(async (key: string) => { data.delete(key); }), multiRemove: vi.fn(async (keys: readonly string[]) => { keys.forEach((key) => data.delete(key)); }) }; });
 vi.mock('@react-native-async-storage/async-storage', () => ({ default: storage }));
-import { commitCatalogLibraryImport, deleteCatalogLibraryDefinition, loadActiveWorkoutDraft, loadCatalogLibrary, loadMesocycles, removeActiveWorkoutDraftIfMatches, resetLegacyMesocycleStorage, saveActiveWorkoutDraft, saveMesocycles } from '../utils/storage';
+import { commitCatalogLibraryImport, deleteCatalogLibraryDefinition, hasSeenReleaseNotes, loadActiveWorkoutDraft, loadCatalogLibrary, loadMesocycles, markReleaseNotesSeen, removeActiveWorkoutDraftIfMatches, resetLegacyMesocycleStorage, saveActiveWorkoutDraft, saveMesocycles } from '../utils/storage';
 const subject = { id: 'm1', name: 'Block', goal: '', status: 'draft' as const, durationWeeks: 1, createdAt: '', weeks: [{ id: 'w1', weekNumber: 1, entries: [{ id: 'p1', ref: { routineId: 'r1', routineName: 'Upper', source: 'local' as const }, order: 1 }, { id: 'rest', kind: 'rest' as const }] }] };
 beforeEach(() => { storage.data.clear(); storage.failures.clear(); vi.clearAllMocks(); });
 describe('mesocycle reset', () => {
@@ -13,6 +13,19 @@ describe('active workout drafts', () => {
   const draft = { version: 1 as const, owner: 'rodaja' as const, attemptId: 'a', routineId: 'r', startedAtMs: 1, restTimerSeconds: 0, completedSets: {}, setValues: {} };
   test('ignores and quarantines malformed owner drafts', async () => { storage.data.set('@gymbro/active-workout/v1/rodaja', JSON.stringify({ owner: 'brisas' })); await expect(loadActiveWorkoutDraft('rodaja')).resolves.toBeNull(); expect(storage.data.has('@gymbro/active-workout/v1/rodaja')).toBe(false); });
   test('stores drafts by owner', async () => { await saveActiveWorkoutDraft(draft); await expect(loadActiveWorkoutDraft('rodaja', 1)).resolves.toEqual(draft); });
+  test('round-trips the optional session prescription while accepting legacy drafts without one', async () => {
+    const routineSnapshot = { id: 'r', name: 'Session-only', muscleGroups: ['pecho'], createdAt: '', exercises: [{ id: 'exercise', name: 'Press', muscleGroups: ['pecho'], variant: 'bar', sets: [{ id: 'set', tipo: 1, weight: 20, reps: 8 }] }] };
+    await saveActiveWorkoutDraft({ ...draft, routineSnapshot });
+    await expect(loadActiveWorkoutDraft('rodaja', 1)).resolves.toMatchObject({ routineSnapshot });
+    storage.data.set('@gymbro/active-workout/v1/rodaja', JSON.stringify(draft));
+    await expect(loadActiveWorkoutDraft('rodaja', 1)).resolves.toEqual(draft);
+  });
+  test('round-trips optional pause metadata while retaining legacy version-1 compatibility', async () => {
+    await saveActiveWorkoutDraft({ ...draft, pausedAtMs: 10_000, pausedDurationMs: 4_000, pausedRestRemainingSeconds: 30 });
+    await expect(loadActiveWorkoutDraft('rodaja', 20_000)).resolves.toMatchObject({ pausedAtMs: 10_000, pausedDurationMs: 4_000, pausedRestRemainingSeconds: 30 });
+    storage.data.set('@gymbro/active-workout/v1/rodaja', JSON.stringify(draft));
+    await expect(loadActiveWorkoutDraft('rodaja', 1)).resolves.toEqual(draft);
+  });
   test('persists a cleared expired rest deadline and removes an exactly expired draft', async () => {
     await saveActiveWorkoutDraft({ ...draft, startedAtMs: 1_000, restEndsAtMs: 999 });
     await expect(loadActiveWorkoutDraft('rodaja', 1_000)).resolves.toEqual({ ...draft, startedAtMs: 1_000 });
@@ -23,6 +36,16 @@ describe('active workout drafts', () => {
     await saveActiveWorkoutDraft({ ...draft, attemptId: 'replacement' });
     await expect(removeActiveWorkoutDraftIfMatches('rodaja', 'expired')).resolves.toBe(false);
     await expect(loadActiveWorkoutDraft('rodaja', 1)).resolves.toMatchObject({ attemptId: 'replacement' });
+  });
+});
+
+describe('release notes', () => {
+  test('records acknowledgement separately for every user and app version', async () => {
+    await expect(hasSeenReleaseNotes('rodaja', '0.1.0')).resolves.toBe(false);
+    await markReleaseNotesSeen('rodaja', '0.1.0');
+    await expect(hasSeenReleaseNotes('rodaja', '0.1.0')).resolves.toBe(true);
+    await expect(hasSeenReleaseNotes('brisas', '0.1.0')).resolves.toBe(false);
+    await expect(hasSeenReleaseNotes('rodaja', '0.1.1')).resolves.toBe(false);
   });
 });
 
