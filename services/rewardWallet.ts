@@ -4,6 +4,8 @@ import { supabase, supabaseConfigurationError } from './supabase';
 export type RewardWallet = {
   balance: number;
   purchasedThemeIds: string[];
+  purchasedFrameIds: string[];
+  purchasedTitleIds: string[];
   equippedThemeId: string | null;
   combineWithPartner: boolean;
 };
@@ -21,6 +23,8 @@ function isWallet(value: unknown): value is RewardWallet {
   const wallet = value as Record<string, unknown>;
   return Number.isInteger(wallet.balance) && (wallet.balance as number) >= 0
     && Array.isArray(wallet.purchasedThemeIds) && wallet.purchasedThemeIds.every((id) => typeof id === 'string')
+    && Array.isArray(wallet.purchasedFrameIds) && wallet.purchasedFrameIds.every((id) => typeof id === 'string')
+    && Array.isArray(wallet.purchasedTitleIds) && wallet.purchasedTitleIds.every((id) => typeof id === 'string')
     && (wallet.equippedThemeId === null || typeof wallet.equippedThemeId === 'string')
     && typeof wallet.combineWithPartner === 'boolean';
 }
@@ -44,6 +48,7 @@ async function walletRpc(name: string, args: Record<string, unknown> = {}): Prom
 
 export const loadRewardWallet = () => walletRpc('load_reward_wallet');
 export const purchaseRewardTheme = (themeId: string) => walletRpc('purchase_reward_theme', { theme_id_input: themeId });
+export const purchaseRewardFrame = (frameId: string) => walletRpc('purchase_reward_profile_frame', { frame_id_input: frameId });
 export const updateRewardWalletPreferences = (equippedThemeId: string | null, combineWithPartner: boolean) => (
   walletRpc('update_reward_wallet_preferences', { equipped_theme_id_input: equippedThemeId, combine_with_partner_input: combineWithPartner })
 );

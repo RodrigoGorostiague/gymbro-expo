@@ -5,7 +5,7 @@ import { defineConfig } from 'vitest/config';
 const rootDir = fileURLToPath(new URL('.', import.meta.url));
 
 export default defineConfig({
-  assetsInclude: ['**/*.wav'],
+  assetsInclude: ['**/*.wav', '**/*.png', '**/*.jpeg'],
   resolve: {
     alias: {
       'expo-router': resolve(rootDir, 'tests/helpers/expoRouterStub.ts'),

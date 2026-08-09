@@ -9,6 +9,17 @@ export type ReleaseNotes = {
 // Add a new entry here whenever the visible app version changes.
 export const RELEASE_NOTES: readonly ReleaseNotes[] = [
   {
+    version: '0.4.1',
+    title: 'Gracias por ser Alfa User',
+    message: 'Celebramos que estés construyendo GymBro con nosotros. Como agradecimiento por ser parte de esta alfa, te regalamos 150 gemas y desbloqueamos tu marco y título Alfa User.',
+    changes: [
+      'Marco exclusivo Alfa User para personalizar tu perfil.',
+      'Título Alfa User para mostrar que sos parte de esta etapa.',
+      '150 gemas adicionales como agradecimiento por entrenar con nosotros.',
+    ],
+    rewardGems: 150,
+  },
+  {
     version: '0.4.0',
     title: 'Tu progreso tiene una nueva dimensión',
     message: 'Gracias por construir GymBro con nosotros. Esta alfa sigue evolucionando para que cada entrenamiento, logro y conexión cuenten.',

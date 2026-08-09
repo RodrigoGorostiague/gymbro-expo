@@ -1,11 +1,12 @@
 import { supabase, supabaseConfigurationError } from './supabase';
 import { AvatarId, avatarIdOrDefault } from '../constants/avatars';
+import { ProfileFrameId, ProfileTitleId, profileFrameIdOrDefault, profileTitleIdOrDefault } from '../constants/profileFrames';
 
 export type ProfileCategories = Record<string, string>;
 export type ProfileVisibility = Record<string, boolean>;
 export type RelationshipStatus = 'discover' | 'bro' | 'partner' | 'incoming_request' | 'outgoing_request';
 export type RelationshipKind = 'bro' | 'partner';
-export type PublicProfile = { uid: string; alias: string; avatarId: AvatarId; categories: ProfileCategories; presentationThemeId: string | null; relationshipStatus?: RelationshipStatus; requestedKind?: RelationshipKind };
+export type PublicProfile = { uid: string; alias: string; avatarId: AvatarId; frameId: ProfileFrameId; titleId: ProfileTitleId | null; categories: ProfileCategories; presentationThemeId: string | null; relationshipStatus?: RelationshipStatus; requestedKind?: RelationshipKind };
 export type OwnProfile = Omit<PublicProfile, 'presentationThemeId'> & {
   categoryVisibility: ProfileVisibility;
   autoShareCompletedWorkouts: boolean;
@@ -18,7 +19,7 @@ export type OwnProfile = Omit<PublicProfile, 'presentationThemeId'> & {
   shareSocialStatistics: boolean;
   shareSocialMuscleDistribution: boolean;
 };
-export type OwnProfileSave = Omit<OwnProfile, 'uid' | 'avatarId' | 'shareRoutineTemplate' | 'shareMesocycleTemplate' | 'sharePerformedSetDetails' | 'shareSocialActivity' | 'shareSocialProgress' | 'shareSocialConsistency' | 'shareSocialStatistics' | 'shareSocialMuscleDistribution'> & Partial<Pick<OwnProfile, 'avatarId' | 'shareRoutineTemplate' | 'shareMesocycleTemplate' | 'sharePerformedSetDetails' | 'shareSocialActivity' | 'shareSocialProgress' | 'shareSocialConsistency' | 'shareSocialStatistics' | 'shareSocialMuscleDistribution'>>;
+export type OwnProfileSave = Omit<OwnProfile, 'uid' | 'avatarId' | 'frameId' | 'titleId' | 'shareRoutineTemplate' | 'shareMesocycleTemplate' | 'sharePerformedSetDetails' | 'shareSocialActivity' | 'shareSocialProgress' | 'shareSocialConsistency' | 'shareSocialStatistics' | 'shareSocialMuscleDistribution'> & Partial<Pick<OwnProfile, 'avatarId' | 'frameId' | 'titleId' | 'shareRoutineTemplate' | 'shareMesocycleTemplate' | 'sharePerformedSetDetails' | 'shareSocialActivity' | 'shareSocialProgress' | 'shareSocialConsistency' | 'shareSocialStatistics' | 'shareSocialMuscleDistribution'>>;
 export type GraphSummary = {
   targetId: string;
   relationshipKind?: RelationshipKind | null;
@@ -87,6 +88,8 @@ function asPage(data: unknown): { profiles: PublicProfile[]; nextCursor: string 
         uid: String(value.id ?? value.uid),
         alias: String(value.alias),
         avatarId: avatarIdOrDefault(value.avatar_id ?? value.avatarId),
+        frameId: profileFrameIdOrDefault(value.equipped_frame_id ?? value.frameId),
+        titleId: value.equipped_title_id === null || value.titleId === null ? null : profileTitleIdOrDefault(value.equipped_title_id ?? value.titleId),
         categories: (value.categories ?? {}) as ProfileCategories,
         presentationThemeId: typeof value.presentation_theme_id === 'string' ? value.presentation_theme_id : typeof value.presentationThemeId === 'string' ? value.presentationThemeId : null,
         ...(typeof relationshipStatus === 'string' ? { relationshipStatus: relationshipStatus as RelationshipStatus } : {}),
@@ -128,7 +131,7 @@ export async function getOwnProfile(): Promise<OwnProfile | null> {
   if (error) throw new Error(error.message);
   if (!data) return null;
   const profile = data as Record<string, unknown>;
-  return { uid: String(profile.id), alias: String(profile.alias), avatarId: avatarIdOrDefault(profile.avatar_id), categories: stringRecord(profile.categories), categoryVisibility: booleanRecord(profile.category_visibility), autoShareCompletedWorkouts: booleanOrDefault(profile.auto_share_completed_workouts), shareRoutineTemplate: booleanOrDefault(profile.share_routine_template), shareMesocycleTemplate: booleanOrDefault(profile.share_mesocycle_template), sharePerformedSetDetails: booleanOrDefault(profile.share_performed_set_details), shareSocialActivity: booleanOrDefault(profile.share_social_activity), shareSocialProgress: booleanOrDefault(profile.share_social_progress), shareSocialConsistency: booleanOrDefault(profile.share_social_consistency), shareSocialStatistics: booleanOrDefault(profile.share_social_statistics), shareSocialMuscleDistribution: booleanOrDefault(profile.share_social_muscle_distribution) };
+  return { uid: String(profile.id), alias: String(profile.alias), avatarId: avatarIdOrDefault(profile.avatar_id), frameId: profileFrameIdOrDefault(profile.equipped_frame_id), titleId: profile.equipped_title_id === null ? null : profileTitleIdOrDefault(profile.equipped_title_id), categories: stringRecord(profile.categories), categoryVisibility: booleanRecord(profile.category_visibility), autoShareCompletedWorkouts: booleanOrDefault(profile.auto_share_completed_workouts), shareRoutineTemplate: booleanOrDefault(profile.share_routine_template), shareMesocycleTemplate: booleanOrDefault(profile.share_mesocycle_template), sharePerformedSetDetails: booleanOrDefault(profile.share_performed_set_details), shareSocialActivity: booleanOrDefault(profile.share_social_activity), shareSocialProgress: booleanOrDefault(profile.share_social_progress), shareSocialConsistency: booleanOrDefault(profile.share_social_consistency), shareSocialStatistics: booleanOrDefault(profile.share_social_statistics), shareSocialMuscleDistribution: booleanOrDefault(profile.share_social_muscle_distribution) };
 }
 
 export async function saveOwnProfile(profile: OwnProfileSave): Promise<void> {
@@ -136,6 +139,8 @@ export async function saveOwnProfile(profile: OwnProfileSave): Promise<void> {
     profile_input: {
       alias: profile.alias.trim(),
       avatar_id: avatarIdOrDefault(profile.avatarId),
+      equipped_frame_id: profileFrameIdOrDefault(profile.frameId),
+      equipped_title_id: profile.titleId === null ? null : profileTitleIdOrDefault(profile.titleId),
       categories: profile.categories,
       category_visibility: profile.categoryVisibility,
       auto_share_completed_workouts: profile.autoShareCompletedWorkouts,
@@ -158,9 +163,9 @@ export async function syncOwnPresentationTheme(themeId: string | null): Promise<
 }
 
 export async function getPublicProfile(uid: string): Promise<PublicProfile | null> {
-  const { data, error } = await requireClient().from('public_profiles').select('id, alias, avatar_id, categories, presentation_theme_id').eq('id', uid).maybeSingle();
+  const { data, error } = await requireClient().from('public_profiles').select('id, alias, avatar_id, equipped_frame_id, equipped_title_id, categories, presentation_theme_id').eq('id', uid).maybeSingle();
   if (error) throw new Error(error.message);
-  return data ? { uid: data.id, alias: data.alias, avatarId: avatarIdOrDefault(data.avatar_id), categories: stringRecord(data.categories), presentationThemeId: typeof data.presentation_theme_id === 'string' ? data.presentation_theme_id : null } : null;
+  return data ? { uid: data.id, alias: data.alias, avatarId: avatarIdOrDefault(data.avatar_id), frameId: profileFrameIdOrDefault(data.equipped_frame_id), titleId: data.equipped_title_id === null ? null : profileTitleIdOrDefault(data.equipped_title_id), categories: stringRecord(data.categories), presentationThemeId: typeof data.presentation_theme_id === 'string' ? data.presentation_theme_id : null } : null;
 }
 
 export async function getGraphSummary(targetId: string): Promise<GraphSummary> {

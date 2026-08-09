@@ -11,6 +11,7 @@ import { useSocial } from '../../context/SocialContext';
 import { useTheme } from '../../context/ThemeContext';
 import type { GraphSummary, PublicProfile, SocialProfileInsights } from '../../services/socialGraph';
 import { ProfileAvatar } from '../../components/ProfileAvatar';
+import { ProfileTitleBadge } from '../../components/ProfileTitleBadge';
 import { getShopTheme } from '../../constants/shopThemes';
 import type { AppTheme, ProfilePlanLibrary } from '../../types';
 
@@ -122,7 +123,7 @@ export default function PublicProfileScreen() {
       <GlassCard theme={profileTheme} style={[styles.hero, connected && { backgroundColor: palette.primary, borderColor: palette.accent }]}>
         <View style={styles.heroRow}>
           <View style={[styles.heroAvatarShell, { borderColor: connected ? `${palette.onPrimary}4D` : theme.primary, backgroundColor: connected ? 'rgba(255,255,255,0.14)' : theme.glass }]}>
-            <ProfileAvatar avatarId={profile.avatarId} size={92} borderColor={connected ? palette.onPrimary : theme.primary} />
+            <ProfileAvatar avatarId={profile.avatarId} frameId={profile.frameId} level={insights?.progress?.level} size={92} borderColor={connected ? palette.onPrimary : theme.primary} />
           </View>
           <View style={styles.heroCopy}>
             <View style={styles.heroMetaRow}>
@@ -131,14 +132,15 @@ export default function PublicProfileScreen() {
                 <Text style={[styles.heroBadgeText, { color: connected ? palette.onPrimary : theme.textMuted }]}>{connected ? summary?.relationshipKind === 'partner' ? 'Partner' : 'Bro' : 'Comunidad'}</Text>
               </View>
             </View>
+            <ProfileTitleBadge titleId={profile.titleId} />
             <Text style={[styles.heroSubtitle, { color: connected ? 'rgba(255,255,255,0.82)' : theme.textMuted }]}>
               {connected ? completedAtLabel(insights?.activity?.lastCompletedAt ?? null) : 'Perfil publico de la comunidad de GymBro.'}
             </Text>
           </View>
         </View>
       </GlassCard>
-      {Object.entries(profile.categories).length ? <GlassCard theme={profileTheme}>{Object.entries(profile.categories).map(([key, value]) => <View key={key} style={styles.category}><Text style={{ color: palette.textMuted }}>{key}</Text><Text style={{ color: palette.text }}>{value}</Text></View>)}</GlassCard> : null}
-      {connected && insights?.progress ? <GlassCard theme={profileTheme} style={{ borderColor: palette.accent }}><ExperienceProgressCard progress={{ level: insights.progress.level, rank: insights.progress.rank as any, xpIntoLevel: 0, xpForNextLevel: 1, totalXp: 0 }} theme={palette} title="Rango de entrenamiento" /></GlassCard> : null}
+      {Object.entries(profile.categories).filter(([key]) => key !== 'trainingStyle').length ? <GlassCard theme={profileTheme}>{Object.entries(profile.categories).filter(([key]) => key !== 'trainingStyle').map(([key, value]) => <View key={key} style={styles.category}><Text style={{ color: palette.textMuted }}>{key}</Text><Text style={{ color: palette.text }}>{value}</Text></View>)}</GlassCard> : null}
+      {connected && insights?.progress ? <GlassCard theme={profileTheme} style={{ borderColor: palette.accent }}><ExperienceProgressCard progress={{ level: insights.progress.level, rank: insights.progress.rank as any, xpIntoLevel: 0, xpForNextLevel: 1, totalXp: 0 }} frameId={profile.frameId} theme={palette} title="Rango de entrenamiento" /></GlassCard> : null}
       {connected && insights?.muscleDistribution ? <GlassCard theme={profileTheme} style={{ borderColor: palette.accent }}><Text accessibilityRole="header" style={[styles.sectionTitle, { color: palette.primary }]}>Distribución muscular</Text><Text style={[styles.sectionSubtitle, { color: palette.textMuted }]}>Ejercicios completados en los últimos 90 días.</Text><MuscleDistributionRadar data={insights.muscleDistribution} palette={palette} /></GlassCard> : null}
       {connected && (insights?.activity || insights?.consistency || insights?.statistics) ? <GlassCard theme={profileTheme}><Text accessibilityRole="header" style={[styles.sectionTitle, { color: palette.text }]}>Estado de entrenamiento</Text>{insights.activity ? <Text style={[styles.activity, { color: palette.textMuted }]}>{completedAtLabel(insights.activity.lastCompletedAt)}</Text> : null}<View style={styles.stats}>{insights.consistency ? <><InsightStat theme={palette} value={insights.consistency.workoutsLast28Days} label="sesiones / 28 días" /><InsightStat theme={palette} value={insights.consistency.activeWeeksLast90Days} label="semanas activas" /></> : null}{insights.statistics ? <><InsightStat theme={palette} value={insights.statistics.workoutsLast90Days} label="sesiones / 90 días" /><InsightStat theme={palette} value={insights.statistics.completedExercisesLast90Days} label="ejercicios" /></> : null}</View></GlassCard> : null}
       {connected && planLibrary ? <GlassCard theme={profileTheme}><Text accessibilityRole="header" style={[styles.sectionTitle, { color: palette.text }]}>Planificación</Text>{planLibrary.routines.map((routine) => <View key={routine.id} style={[styles.planItem, { borderTopColor: palette.glassBorder }]}><Text style={[styles.planKind, { color: palette.primary }]}>Rutina</Text><Text style={{ color: palette.text }}>{routine.name}</Text></View>)}{planLibrary.mesocycles.map((mesocycle) => <View key={mesocycle.id} style={[styles.planItem, { borderTopColor: palette.glassBorder }]}><Text style={[styles.planKind, { color: palette.primary }]}>Mesociclo</Text><Text style={{ color: palette.text }}>{mesocycle.name}</Text></View>)}{!planLibrary.routines.length && !planLibrary.mesocycles.length ? <Text style={{ color: palette.textMuted }}>No hay planes compartidos.</Text> : null}</GlassCard> : null}

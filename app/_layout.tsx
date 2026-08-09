@@ -1,6 +1,7 @@
 import 'react-native-gesture-handler';
 import 'react-native-reanimated';
 import React, { useEffect, useState } from 'react';
+import { View } from 'react-native';
 import { Stack } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
@@ -14,8 +15,11 @@ import { NotificationRuntime } from '../components/NotificationRuntime';
 import { AppNoticeModal } from '../components/AppNoticeModal';
 import { useShop } from '../context/ShopContext';
 import { useAuth } from '../context/AuthContext';
+import { useSocial } from '../context/SocialContext';
 import { CURRENT_RELEASE_NOTES } from '../constants/releaseNotes';
 import { hasSeenReleaseNotes, markReleaseNotesSeen } from '../utils/storage';
+import { ProfileAvatar } from '../components/ProfileAvatar';
+import { ProfileTitleBadge } from '../components/ProfileTitleBadge';
 
 function RootStatusBar() {
   const { theme } = useTheme();
@@ -36,6 +40,7 @@ function WelcomeGemRewardNotice() {
 
 function ReleaseNotesNotice() {
   const { user } = useAuth();
+  const { ownProfile } = useSocial();
   const { isLoading: isShopLoading, welcomeGemReward } = useShop();
   const [visible, setVisible] = useState(false);
 
@@ -63,6 +68,11 @@ function ReleaseNotesNotice() {
     message={CURRENT_RELEASE_NOTES.message}
     changes={CURRENT_RELEASE_NOTES.changes}
     highlight={CURRENT_RELEASE_NOTES.rewardGems ? `+${CURRENT_RELEASE_NOTES.rewardGems} GEMAS` : `VERSION ${CURRENT_RELEASE_NOTES.version}`}
+    version={CURRENT_RELEASE_NOTES.version}
+    celebration={<View accessibilityLabel="Vista previa Alfa User" style={{ alignItems: 'center', gap: 4 }}>
+      <ProfileAvatar avatarId={ownProfile?.avatarId} frameId="alfa-user" size={92} borderColor="#FBBF24" />
+      <ProfileTitleBadge titleId="alfa-user" size={42} />
+    </View>}
     actionLabel="A entrenar"
     onClose={dismiss}
   />;

@@ -8,6 +8,7 @@ import { GlassCard, ThemeBackground } from '../../../components/GlassCard';
 import { GlassButton, GlassInput } from '../../../components/UI';
 import { WorkoutRecapAnalysis } from '../../../components/WorkoutRecapAnalysis';
 import { ProfileAvatar } from '../../../components/ProfileAvatar';
+import { ProfileTitleBadge } from '../../../components/ProfileTitleBadge';
 import { useAuth } from '../../../context/AuthContext';
 import { useData } from '../../../context/DataContext';
 import { useSocial } from '../../../context/SocialContext';
@@ -129,9 +130,10 @@ export default function WorkoutRecapDetailScreen() {
           {recap ? (
             <>
               <LinearGradient colors={[authorTheme.primary, authorTheme.accent, authorTheme.secondary]} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={styles.hero}>
-                <ProfileAvatar avatarId={recap.authorAvatarId} size={58} borderColor="rgba(255,255,255,0.8)" />
+                <ProfileAvatar avatarId={recap.authorAvatarId} frameId={recap.authorFrameId} size={58} borderColor="rgba(255,255,255,0.8)" />
                 <View style={styles.heroCopy}>
                   <Text style={styles.author}>{recap.authorAlias}</Text>
+                  <ProfileTitleBadge titleId={recap.authorTitleId} />
                   <Text style={styles.heroMeta}>{recap.isAuthor ? 'Tu entrenamiento analizado' : 'Entrenamiento compartido'} · {formatRelativeTime(recap.completedAt, Date.now())}</Text>
                 </View>
                 <Text style={styles.heroKind}>{recap.mesocycleAvailable ? 'MESOCICLO' : 'RUTINA'}</Text>

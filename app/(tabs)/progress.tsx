@@ -11,6 +11,7 @@ import { EmptyFilter, EntityPanel, FilterChip } from '../../components/progress/
 import { useData } from '../../context/DataContext';
 import { useAuth } from '../../context/AuthContext';
 import { useTheme } from '../../context/ThemeContext';
+import { useSocial } from '../../context/SocialContext';
 import { MuscleGroup } from '../../types';
 import { muscleGroupLabel } from '../../utils/catalogMuscleGroups';
 import { ExperienceProgressCard } from '../../components/ExperienceProgressCard';
@@ -45,6 +46,7 @@ function isHistorySession(value: unknown): value is WorkoutSession {
 export default function ProgressScreen() {
   const { theme } = useTheme();
   const { user } = useAuth();
+  const { ownProfile } = useSocial();
   const { exercises, routines, sessions, attempts, experienceProgress, quarantinedSessionCount, resolveQuarantine, dataState, dataError, retryData, catalogMuscleGroups = [] } = useData();
   const [scope, setScope] = useState<Scope>('overview');
   const [filterId, setFilterId] = useState<string | null>(null);
@@ -87,7 +89,7 @@ export default function ProgressScreen() {
             <Text style={[styles.heroTitle, { color: theme.text }]}>{dataState !== 'ready' ? 'Preparando tus períodos de progreso' : activity.current.attempts === 0 ? 'Todavía no hay actividad en este período' : `${core.current.attempts} sesiones de entrenamiento y ${core.current.validSets} series válidas`}</Text>
             <Text style={[styles.body, { color: theme.textMuted }]}>{dataState === 'ready' ? `Comparado con ${formatPeriod(core.periods.previous.start, core.periods.previous.end)}. Las señales se muestran por separado.` : 'No mostraremos afirmaciones hasta terminar de cargar tus datos.'}</Text>
           </GlassCard>
-          <GlassCard><ExperienceProgressCard progress={experienceProgress} theme={theme} title="Nivel y próximos hitos" /></GlassCard>
+          <GlassCard><ExperienceProgressCard progress={experienceProgress} frameId={ownProfile?.frameId} theme={theme} title="Nivel y próximos hitos" /></GlassCard>
 
           <View accessibilityRole="tablist" style={styles.periodRow}>{PERIODS.map((item) => <HapticPressable key={item.value} accessibilityRole="tab" accessibilityState={{ selected: periodDays === item.value }} accessibilityLabel={`Período ${item.label}`} onPress={() => { setPeriodDays(item.value); setChartRevision((current) => current + 1); }} style={[styles.period, { borderColor: theme.glassBorder, backgroundColor: periodDays === item.value ? theme.secondary : theme.glass }]}><Text style={{ color: periodDays === item.value ? theme.onPrimary : theme.text, fontWeight: '800' }}>{item.label}</Text></HapticPressable>)}</View>
 

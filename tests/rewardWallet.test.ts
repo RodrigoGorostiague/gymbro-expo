@@ -3,9 +3,9 @@ import { beforeEach, describe, expect, test, vi } from 'vitest';
 const rpc = vi.hoisted(() => vi.fn());
 vi.mock('../services/supabase', () => ({ supabase: { rpc }, supabaseConfigurationError: null }));
 
-import { claimPendingReleaseGemRewards, claimWelcomeGemReward, loadRewardWallet, purchaseRewardTheme, receiptTotal, updateRewardWalletPreferences } from '../services/rewardWallet';
+import { claimPendingReleaseGemRewards, claimWelcomeGemReward, loadRewardWallet, purchaseRewardFrame, purchaseRewardTheme, receiptTotal, updateRewardWalletPreferences } from '../services/rewardWallet';
 
-const wallet = { balance: 25, purchasedThemeIds: ['white'], equippedThemeId: 'white', combineWithPartner: false };
+const wallet = { balance: 25, purchasedThemeIds: ['white'], purchasedFrameIds: [], purchasedTitleIds: [], equippedThemeId: 'white', combineWithPartner: false };
 
 describe('remote reward wallet boundary', () => {
   beforeEach(() => vi.clearAllMocks());
@@ -20,6 +20,12 @@ describe('remote reward wallet boundary', () => {
     rpc.mockResolvedValueOnce({ data: { ...wallet, balance: 13, purchasedThemeIds: ['white', 'black'] }, error: null });
     await expect(purchaseRewardTheme('black')).resolves.toMatchObject({ balance: 13 });
     expect(rpc).toHaveBeenCalledWith('purchase_reward_theme', { theme_id_input: 'black' });
+  });
+
+  test('uses the separate server-owned frame inventory purchase RPC', async () => {
+    rpc.mockResolvedValueOnce({ data: { ...wallet, balance: 13, purchasedFrameIds: ['shop-heavy-duty'] }, error: null });
+    await expect(purchaseRewardFrame('shop-heavy-duty')).resolves.toMatchObject({ purchasedFrameIds: ['shop-heavy-duty'] });
+    expect(rpc).toHaveBeenCalledWith('purchase_reward_profile_frame', { frame_id_input: 'shop-heavy-duty' });
   });
 
   test('persists presentation preferences remotely', async () => {

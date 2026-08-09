@@ -66,6 +66,8 @@ export async function listReceivedPrivatePlanShareRequests(): Promise<PrivatePla
       id: row.id,
       senderAlias: row.senderAlias,
       senderAvatarId: avatarIdOrDefault(row.senderAvatarId),
+      senderFrameId: typeof row.senderFrameId === 'string' ? row.senderFrameId : undefined,
+      senderTitleId: typeof row.senderTitleId === 'string' ? row.senderTitleId : undefined,
       senderThemeId: typeof row.senderThemeId === 'string' ? row.senderThemeId : null,
       contentKind: row.contentKind,
       createdAt: row.createdAt,

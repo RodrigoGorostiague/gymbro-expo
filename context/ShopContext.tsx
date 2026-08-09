@@ -10,14 +10,17 @@ import {
 import { PARTNER_PROFILE } from '../constants/kiss';
 import { subscribeToEquippedThemes, syncEquippedTheme } from '../services/themeSync';
 import { UserProfile } from '../types';
-import { claimPendingReleaseGemRewards, claimWelcomeGemReward, loadRewardWallet, purchaseRewardTheme, RewardWallet, updateRewardWalletPreferences } from '../services/rewardWallet';
+import { claimPendingReleaseGemRewards, claimWelcomeGemReward, loadRewardWallet, purchaseRewardFrame, purchaseRewardTheme, RewardWallet, updateRewardWalletPreferences } from '../services/rewardWallet';
 import { useAuth } from './AuthContext';
 import { useData } from './DataContext';
 import { syncOwnPresentationTheme } from '../services/socialGraph';
+import { PROFILE_FRAMES } from '../constants/profileFrames';
 
 const DEFAULT_SHOP: RewardWallet = {
   balance: 0,
   purchasedThemeIds: [],
+  purchasedFrameIds: [],
+  purchasedTitleIds: [],
   equippedThemeId: null,
   combineWithPartner: false,
 };
@@ -25,6 +28,7 @@ const DEFAULT_SHOP: RewardWallet = {
 interface ShopContextValue {
   gems: number;
   purchasedThemeIds: string[];
+  purchasedFrameIds: string[];
   equippedThemeId: string | null;
   selfEquippedThemeId: string | null;
   partnerEquippedThemeId: string | null;
@@ -32,6 +36,7 @@ interface ShopContextValue {
   previewThemeId: string | null;
   isLoading: boolean;
   purchaseTheme: (themeId: string) => Promise<boolean>;
+  purchaseFrame: (frameId: string) => Promise<boolean>;
   equipTheme: (themeId: string) => void;
   unequipTheme: () => void;
   setCombineWithPartner: (value: boolean) => void;
@@ -197,11 +202,27 @@ export function ShopProvider({ children }: { children: React.ReactNode }) {
     [shop, equipTheme, endPreview, user],
   );
 
+  const purchaseFrame = useCallback(async (frameId: string): Promise<boolean> => {
+    const frame = PROFILE_FRAMES.find((candidate) => candidate.id === frameId);
+    if (!frame || frame.kind !== 'shop') return false;
+    if (shop.purchasedFrameIds.includes(frameId)) return true;
+    try {
+      const next = await purchaseRewardFrame(frameId);
+      setShop(next);
+      Alert.alert('Compra exitosa', `Desbloqueaste el marco "${frame.label}".`);
+      return true;
+    } catch (error) {
+      Alert.alert('No se pudo comprar', error instanceof Error ? error.message : 'Inténtalo nuevamente.');
+      return false;
+    }
+  }, [shop.purchasedFrameIds]);
+
   return (
     <ShopContext.Provider
       value={{
         gems: shop.balance,
         purchasedThemeIds: shop.purchasedThemeIds,
+        purchasedFrameIds: shop.purchasedFrameIds,
         equippedThemeId: shop.equippedThemeId,
         selfEquippedThemeId: shop.equippedThemeId,
         partnerEquippedThemeId,
@@ -209,6 +230,7 @@ export function ShopProvider({ children }: { children: React.ReactNode }) {
         previewThemeId,
         isLoading,
         purchaseTheme,
+        purchaseFrame,
         equipTheme,
         unequipTheme,
         setCombineWithPartner,

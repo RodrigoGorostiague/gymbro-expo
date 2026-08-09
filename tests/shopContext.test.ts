@@ -5,7 +5,7 @@ import { beforeEach, describe, expect, test, vi } from 'vitest';
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
 
 const data = vi.hoisted(() => ({ attempts: [] as any[] }));
-const wallet = vi.hoisted(() => ({ claim: vi.fn(), claimRelease: vi.fn(), load: vi.fn() }));
+const wallet = vi.hoisted(() => ({ claim: vi.fn(), claimRelease: vi.fn(), load: vi.fn(), purchaseFrame: vi.fn() }));
 const themeSync = vi.hoisted(() => ({ subscribe: vi.fn(() => () => undefined), sync: vi.fn() }));
 const presentation = vi.hoisted(() => ({ sync: vi.fn(async () => undefined) }));
 
@@ -16,6 +16,7 @@ vi.mock('../services/rewardWallet', () => ({
   claimPendingReleaseGemRewards: wallet.claimRelease,
   loadRewardWallet: wallet.load,
   purchaseRewardTheme: vi.fn(),
+  purchaseRewardFrame: wallet.purchaseFrame,
   updateRewardWalletPreferences: vi.fn(),
 }));
 vi.mock('../services/themeSync', () => ({
@@ -26,7 +27,7 @@ vi.mock('../services/socialGraph', () => ({ syncOwnPresentationTheme: presentati
 
 import { ShopProvider, useShop } from '../context/ShopContext';
 
-const emptyWallet = { balance: 0, purchasedThemeIds: [], equippedThemeId: null, combineWithPartner: false };
+const emptyWallet = { balance: 0, purchasedThemeIds: [], purchasedFrameIds: [], purchasedTitleIds: [], equippedThemeId: null, combineWithPartner: false };
 const deferred = <T,>() => {
   let resolve!: (value: T) => void;
   const promise = new Promise<T>((done) => { resolve = done; });

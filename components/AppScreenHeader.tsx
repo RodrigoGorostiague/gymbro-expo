@@ -37,7 +37,7 @@ export function AppScreenHeader({ title, subtitle, trailing }: AppScreenHeaderPr
       <View style={styles.main}>
         <View style={styles.badgeRow}>
           <View style={[styles.badge, { backgroundColor: theme.glass, borderColor: theme.primary }]}>
-            <ProfileAvatar avatarId={ownProfile?.avatarId} size={26} borderColor={theme.primary} />
+            <ProfileAvatar avatarId={ownProfile?.avatarId} frameId={ownProfile?.frameId} size={26} borderColor={theme.primary} />
             <Text style={[styles.badgeText, { color: theme.primary }]}>{ownProfile?.alias ?? userEmail ?? 'Atleta'}</Text>
           </View>
           <View style={[styles.badgeLine, { backgroundColor: theme.primary }]} />

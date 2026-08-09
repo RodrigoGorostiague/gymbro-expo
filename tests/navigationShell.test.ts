@@ -24,7 +24,7 @@ vi.mock('@expo/vector-icons', async () => {
 vi.mock('../context/AuthContext', () => ({ useAuth: () => ({ user: 'member-1', isLoading: false }) }));
 vi.mock('../context/ThemeContext', () => ({ useTheme: () => ({ theme: { primary: '#00f', accent: '#0ff', text: '#111', textMuted: '#666', glass: '#eee', glassBorder: '#ddd', blurTint: 'light', tabBarBackground: '#fff' } }) }));
 vi.mock('../context/DataContext', () => ({ useData: () => ({ sessions: [], ensureRecapPublicationKey: vi.fn(), catalogMuscleGroups: [] }) }));
-vi.mock('../context/ShopContext', () => ({ useShop: () => ({ gems: 0, purchasedThemeIds: [], equippedThemeId: null, previewThemeId: null, purchaseTheme: vi.fn(), equipTheme: vi.fn(), unequipTheme: vi.fn(), startPreview: vi.fn() }) }));
+vi.mock('../context/ShopContext', () => ({ useShop: () => ({ gems: 0, purchasedThemeIds: [], purchasedFrameIds: [], equippedThemeId: null, previewThemeId: null, purchaseTheme: vi.fn(), purchaseFrame: vi.fn(), equipTheme: vi.fn(), unequipTheme: vi.fn(), startPreview: vi.fn() }) }));
 vi.mock('../context/SocialContext', () => ({ useSocial: () => social }));
 vi.mock('../services/workoutRecapFeed', () => ({ recapInputFromSession: vi.fn() }));
 vi.mock('../services/communityBadge', () => ({ getCommunityBadgeCounts: communityBadge.get }));

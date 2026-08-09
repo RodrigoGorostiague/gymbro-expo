@@ -184,6 +184,8 @@ export interface PrivatePlanShareRequest {
   id: string;
   senderAlias: string;
   senderAvatarId: AvatarId;
+  senderFrameId?: string;
+  senderTitleId?: string;
   senderThemeId: string | null;
   contentKind: 'routine' | 'mesocycle';
   snapshot: ProfilePlanLibrary & { mesocycle?: Mesocycle };
@@ -245,6 +247,8 @@ export interface WorkoutRecap {
   authorAlias: string;
   authorAvatarId: string;
   authorThemeId: string | null;
+  authorFrameId?: string;
+  authorTitleId?: string;
   routineName: string;
   completedAt: string;
   durationSeconds: number;
@@ -479,6 +483,8 @@ export interface CommunityActivityIdentity {
   readonly kind: CommunityActivityKind;
   readonly authorAlias: string;
   readonly authorAvatarId: AvatarId;
+  readonly authorFrameId?: string;
+  readonly authorTitleId?: string;
   readonly authorThemeId: string | null;
   readonly createdAt: string;
 }
@@ -487,6 +493,8 @@ export interface CommunityRankUpActivity extends CommunityActivityIdentity {
   readonly kind: 'rank_up';
   readonly level: number;
   readonly rank: TrainingRank;
+  readonly unlockedFrameId?: string;
+  readonly unlockedTitleId?: string;
 }
 
 export interface CommunityMilestoneActivity extends CommunityActivityIdentity {
@@ -548,12 +556,23 @@ export interface AppTheme {
   tabBarBackground: string;
   decoration?: ThemeDecoration;
   interaction?: ThemeInteraction;
+  celebration?: ThemeCelebrationSpec;
 }
 
 export type ThemeDecoration = 'star' | 'moon' | 'sun' | 'leaf' | 'snowflake';
 export type ShopThemeCategory = 'profile' | 'basic' | 'violet' | 'special';
 export type ShopThemeRarity = 'common' | 'rare' | 'exclusive';
 export type ThemeInteraction = 'set-celebration';
+export type ThemeCelebrationShape = 'circle' | 'diamond' | 'bar';
+export interface ThemeCelebrationSpec {
+  duration: number;
+  particleCount: number;
+  spread: number;
+  rise: number;
+  rotation: number;
+  flashScale: number;
+  shape: ThemeCelebrationShape;
+}
 
 export interface WeeklyGoalState {
   bonusWeekKey: string | null;

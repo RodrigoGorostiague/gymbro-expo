@@ -8,6 +8,7 @@ import { GlassButton } from './UI';
 import { HapticPressable } from './HapticPressable';
 import { JointParticipantProfileCard } from './JointParticipantProfileCard';
 import { ProfileAvatar } from './ProfileAvatar';
+import { ProfileTitleBadge } from './ProfileTitleBadge';
 import type { WorkoutRecap } from '../types';
 import { WorkoutPublicationCard } from './WorkoutPublicationCard';
 import { formatRelativeTime } from '../utils/feedTimeline';
@@ -31,6 +32,8 @@ function participantRecap(participant: JointParticipant, publishedAt: string): W
     authorAlias: participant.alias,
     authorAvatarId: participant.avatarId,
     authorThemeId: participant.themeId ?? null,
+    authorFrameId: participant.frameId,
+    authorTitleId: participant.titleId,
     routineName: participant.workout.routineName,
     durationSeconds: participant.workout.durationSeconds,
     exerciseCount: participant.workout.exercises.length,
@@ -80,7 +83,7 @@ export function JointWorkoutFeedCard({ workoutId, participants: previewParticipa
   return <GlassCard style={styles.card}>
     <HapticPressable accessibilityRole="button" accessibilityLabel="Expandir entrenamiento conjunto" accessibilityState={{ expanded }} onPress={() => setExpanded((value) => !value)} style={styles.trigger}>
       <View style={styles.heading}><View><Text style={[styles.title, { color: theme.text }]}>Entrenamiento conjunto</Text><Text style={{ color: theme.textMuted }}>{expanded ? 'Ocultar participantes' : 'Ver participantes y resultados'}</Text></View><View style={styles.headingMeta}><Text style={[styles.publishedAt, { color: theme.textMuted }]}>{formatRelativeTime(publishedAt, now)}</Text><Text style={[styles.chevron, { color: theme.primary }]}>{expanded ? '−' : '+'}</Text></View></View>
-      <View style={styles.people}>{participants.map((participant) => <View key={participant.id} style={styles.person}><ProfileAvatar avatarId={participant.avatarId} size={30} borderColor={theme.primary} /><Text numberOfLines={1} style={{ color: theme.text }}>{participant.alias}</Text></View>)}</View>
+      <View style={styles.people}>{participants.map((participant) => <View key={participant.id} style={styles.person}><ProfileAvatar avatarId={participant.avatarId} frameId={participant.frameId} size={30} borderColor={theme.primary} /><View style={styles.personCopy}><Text numberOfLines={1} style={{ color: theme.text }}>{participant.alias}</Text>{participant.titleId ? <ProfileTitleBadge titleId={participant.titleId} /> : null}</View></View>)}</View>
     </HapticPressable>
     {expanded ? <View style={styles.detail}>{error ? <Text accessibilityRole="alert" style={{ color: theme.textMuted }}>{error}</Text> : null}{!workout && !error ? <Text style={{ color: theme.textMuted }}>Cargando resultados...</Text> : null}{workout ? <View style={styles.participants}>{participants.map((participant) => {
       const recap = participantRecap(participant, publishedAt);
@@ -99,7 +102,8 @@ const styles = StyleSheet.create({
   title: { fontSize: 20, fontWeight: '900' },
   chevron: { fontSize: 28, fontWeight: '400' },
   people: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
-  person: { alignItems: 'center', flexDirection: 'row', gap: 6, maxWidth: 150 },
+  person: { alignItems: 'center', flexDirection: 'row', gap: 6, maxWidth: 180 },
+  personCopy: { flexShrink: 1, gap: 3 },
   detail: { borderTopWidth: StyleSheet.hairlineWidth, borderColor: '#9CA3AF', paddingTop: 12 },
   participants: { gap: 8 },
 });

@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { Alert, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -11,6 +11,9 @@ import { LogoutButton } from '../../components/LogoutButton';
 import { SelectablePulse } from '../../components/SelectablePulse';
 import { ThemeDecorations } from '../../components/ThemeDecorations';
 import { GlassButton } from '../../components/UI';
+import { ProfileAvatar } from '../../components/ProfileAvatar';
+import { DEFAULT_AVATAR_ID } from '../../constants/avatars';
+import { PROFILE_FRAMES } from '../../constants/profileFrames';
 import {
   getShopTheme,
   getThemesByRarity,
@@ -169,6 +172,26 @@ function ThemeCard({
   );
 }
 
+function FrameCard({ item, onBuy }: { item: Extract<(typeof PROFILE_FRAMES)[number], { kind: 'shop' }>; onBuy: () => void }) {
+  const { theme } = useTheme();
+  const { gems, purchasedFrameIds } = useShop();
+  const owned = purchasedFrameIds.includes(item.id);
+  const canAfford = gems >= item.price;
+  return <GlassCard style={styles.frameCard}>
+    <View style={styles.frameRow}>
+      <View style={styles.frameArt}><ProfileAvatar avatarId={DEFAULT_AVATAR_ID} frameId={item.id} size={68} borderColor={theme.primary} /></View>
+      <View style={styles.themeInfo}>
+        <Text style={[styles.themeName, { color: theme.text }]}>{item.label}</Text>
+        <Text style={[styles.themeDesc, { color: theme.textMuted }]}>Marco de perfil</Text>
+        <Text style={[styles.themePrice, { color: theme.textMuted }]}>{owned ? 'Desbloqueado' : `${item.price} gemas`}</Text>
+      </View>
+    </View>
+    <HapticPressable disabled={owned || !canAfford} onPress={onBuy} style={[styles.frameAction, { backgroundColor: owned || !canAfford ? theme.glass : theme.primary }]}>
+      <Text style={{ color: owned || !canAfford ? theme.textMuted : theme.onPrimary, fontWeight: '700' }}>{owned ? 'Desbloqueado' : canAfford ? 'Comprar' : 'Sin gemas'}</Text>
+    </HapticPressable>
+  </GlassCard>;
+}
+
 export default function ShopScreen() {
   const { theme } = useTheme();
   const { user } = useAuth();
@@ -178,10 +201,12 @@ export default function ShopScreen() {
     equippedThemeId,
     previewThemeId,
     purchaseTheme,
+    purchaseFrame,
     equipTheme,
     unequipTheme,
     startPreview,
   } = useShop();
+  const [activeTab, setActiveTab] = useState<'themes' | 'frames' | 'titles'>('themes');
 
   if (!user) return null;
 
@@ -228,6 +253,16 @@ export default function ShopScreen() {
   return (
     <ThemeBackground>
       <SafeAreaView style={styles.safe}>
+        <View style={styles.header}><AppScreenHeader title="Más" subtitle="Tienda, temas y ayuda" trailing={<LogoutButton />} /></View>
+        <View style={[styles.commerceBar, { backgroundColor: theme.background?.[0] ?? theme.glass, borderColor: theme.glassBorder }]}>
+          <View style={styles.balanceHeader}>
+            <View style={styles.balanceSummary}><Ionicons name="diamond" size={18} color={theme.primary} /><Text style={[styles.balanceLabel, { color: theme.textMuted }]}>Gemas</Text><Text style={[styles.balanceValue, { color: theme.primary }]}>{gems}</Text></View>
+            <HapticPressable onPress={showGemsHelp} style={({ pressed }) => [styles.helpBtn, { borderColor: theme.glassBorder, backgroundColor: theme.glass, opacity: pressed ? 0.75 : 1 }]}><Ionicons name="help-circle-outline" size={16} color={theme.primary} /><Text style={[styles.helpBtnText, { color: theme.primary }]}>Ayuda</Text></HapticPressable>
+          </View>
+          <View accessibilityRole="tablist" style={styles.tabs}>
+            {([['themes', 'Temas'], ['frames', 'Marcos'], ['titles', 'Títulos']] as const).map(([id, label]) => <HapticPressable key={id} accessibilityRole="tab" accessibilityState={{ selected: activeTab === id }} onPress={() => setActiveTab(id)} style={[styles.tab, { borderColor: activeTab === id ? theme.primary : theme.glassBorder, backgroundColor: activeTab === id ? theme.glass : 'transparent' }]}><Text style={{ color: activeTab === id ? theme.primary : theme.textMuted, fontWeight: '800' }}>{label}</Text></HapticPressable>)}
+          </View>
+        </View>
         <ScrollView
           contentContainerStyle={[
             styles.scroll,
@@ -235,36 +270,9 @@ export default function ShopScreen() {
           ]}
           showsVerticalScrollIndicator={false}
         >
-          <AppScreenHeader
-            title="Más"
-            subtitle="Tienda, temas y ayuda"
-            trailing={<LogoutButton />}
-          />
-
-          <GlassCard style={styles.balanceCard}>
-            <View style={styles.balanceHeader}>
-              <Text style={[styles.balanceLabel, { color: theme.textMuted }]}>Tus gemas</Text>
-              <HapticPressable
-                onPress={showGemsHelp}
-                style={({ pressed }) => [
-                  styles.helpBtn,
-                  {
-                    borderColor: theme.glassBorder,
-                    backgroundColor: theme.glass,
-                    opacity: pressed ? 0.75 : 1,
-                  },
-                ]}
-              >
-                <Ionicons name="help-circle-outline" size={16} color={theme.primary} />
-                <Text style={[styles.helpBtnText, { color: theme.primary }]}>Ayuda</Text>
-              </HapticPressable>
-            </View>
-            <Text style={[styles.balanceValue, { color: theme.primary }]}>{gems}</Text>
-          </GlassCard>
-
           <CombineWithPartnerCard />
 
-          <View style={styles.section}>
+          {activeTab === 'themes' && <><View style={styles.section}>
             <Text style={[styles.sectionTitle, { color: theme.text }]}>Temas de perfil</Text>
             {PROFILE_THEMES.map((item) => (
               <ThemeCard
@@ -308,6 +316,15 @@ export default function ShopScreen() {
           {hasCustomTheme && (
             <GlassButton title="Usar tema de perfil" onPress={unequipTheme} variant="secondary" />
           )}
+          </>}
+
+          {activeTab === 'frames' && <View style={styles.section}>
+            <Text style={[styles.sectionTitle, { color: theme.text }]}>Marcos de perfil</Text>
+            <Text style={[styles.sectionSubtitle, { color: theme.textMuted }]}>Compralos con gemas y elegilos después desde tu perfil.</Text>
+            {PROFILE_FRAMES.filter((frame): frame is Extract<(typeof PROFILE_FRAMES)[number], { kind: 'shop' }> => frame.kind === 'shop').map((item) => <FrameCard key={item.id} item={item} onBuy={() => Alert.alert('Comprar marco', `¿Comprar "${item.label}" por ${item.price} gemas?`, [{ text: 'Cancelar', style: 'cancel' }, { text: 'Comprar', onPress: () => { void purchaseFrame(item.id); } }])} />)}
+          </View>}
+
+          {activeTab === 'titles' && <GlassCard style={styles.comingSoon}><Text style={[styles.sectionTitle, { color: theme.text }]}>Títulos próximamente</Text><Text style={[styles.sectionSubtitle, { color: theme.textMuted }]}>La tienda de títulos llegará en una próxima actualización.</Text></GlassCard>}
         </ScrollView>
       </SafeAreaView>
     </ThemeBackground>
@@ -316,20 +333,24 @@ export default function ShopScreen() {
 
 const styles = StyleSheet.create({
   safe: { flex: 1 },
-  scroll: { padding: 20, paddingTop: 12, paddingBottom: 40 },
+  header: { paddingHorizontal: 20, paddingTop: 12 },
+  commerceBar: { borderBottomWidth: StyleSheet.hairlineWidth, gap: 10, paddingHorizontal: 20, paddingBottom: 12, paddingTop: 8, zIndex: 2, elevation: 2 },
+  tabs: { flexDirection: 'row', gap: 8 },
+  tab: { alignItems: 'center', borderRadius: 999, borderWidth: 1, flex: 1, paddingVertical: 10 },
+  frameCard: { gap: 12 },
+  frameRow: { alignItems: 'center', flexDirection: 'row', gap: 12 },
+  frameArt: { alignItems: 'center', height: 72, justifyContent: 'center', width: 72 },
+  frameAction: { alignItems: 'center', borderRadius: 12, paddingVertical: 11 },
+  comingSoon: { gap: 6, padding: 18 },
+  scroll: { padding: 20, paddingTop: 16, paddingBottom: 40 },
   scrollWithPreview: { paddingBottom: 120 },
-  balanceCard: {
-    alignItems: 'center',
-    marginVertical: 12,
-    paddingVertical: 20,
-  },
   balanceHeader: {
     width: '100%',
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    marginBottom: 4,
   },
+  balanceSummary: { alignItems: 'center', flexDirection: 'row', gap: 6 },
   balanceLabel: { fontSize: 13, fontWeight: '600' },
   helpBtn: {
     flexDirection: 'row',
@@ -344,7 +365,7 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: '700',
   },
-  balanceValue: { fontSize: 40, fontWeight: '900', marginTop: 4 },
+  balanceValue: { fontSize: 20, fontWeight: '900' },
   section: { marginBottom: 8 },
   sectionHeader: { flexDirection: 'row', alignItems: 'center', gap: 9, marginTop: 12, marginBottom: 10 },
   sectionHeaderCopy: { flex: 1 },

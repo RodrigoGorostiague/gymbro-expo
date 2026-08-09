@@ -5,6 +5,8 @@ export type WorkoutStartActivity = {
   id: string;
   authorAlias: string;
   authorAvatarId: string;
+  authorFrameId?: string;
+  authorTitleId?: string;
   authorThemeId: string | null;
   routineName: string;
   jointWorkoutId: string | null;
@@ -27,6 +29,8 @@ function asActivity(value: unknown): WorkoutStartActivity | null {
     id: row.id,
     authorAlias: row.author_alias,
     authorAvatarId: avatarIdOrDefault(row.author_avatar_id),
+    authorFrameId: typeof row.author_frame_id === 'string' ? row.author_frame_id : undefined,
+    authorTitleId: typeof row.author_title_id === 'string' ? row.author_title_id : undefined,
     authorThemeId: typeof row.author_theme_id === 'string' ? row.author_theme_id : null,
     routineName: row.routine_name,
     jointWorkoutId: typeof row.joint_workout_id === 'string' ? row.joint_workout_id : null,

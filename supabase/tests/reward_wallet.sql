@@ -1,5 +1,5 @@
 begin;
-select plan(38);
+select plan(40);
 
 insert into auth.users (id, instance_id, aud, role, email, encrypted_password, email_confirmed_at, raw_app_meta_data, raw_user_meta_data, created_at, updated_at)
 values ('40000000-0000-0000-0000-000000000001', '00000000-0000-0000-0000-000000000000', 'authenticated', 'authenticated', 'wallet@example.com', '', now(), '{}', '{}', now(), now()),
@@ -50,10 +50,12 @@ select is((public.claim_release_0_3_0_gem_reward() ->> 'claimed')::boolean, true
 select is((public.claim_release_0_3_0_gem_reward() ->> 'claimed')::boolean, false, '0.3.0 release gift retry does not grant again');
 select is((select count(*) from public.reward_ledger_entries where owner_id = public.require_actor() and idempotency_key = 'release:0.3.0:50-gems'), 1::bigint, '0.3.0 release gift has one ledger entry');
 select is((select amount from public.reward_ledger_entries where owner_id = public.require_actor() and idempotency_key = 'release:0.3.0:50-gems'), 50, '0.3.0 release gift amount is fixed');
-select is((public.claim_pending_release_gem_rewards() ->> 'claimed')::boolean, true, 'pending release campaigns grant the new 0.4.0 gift');
+select is((public.claim_pending_release_gem_rewards() ->> 'claimed')::boolean, true, 'pending release campaigns grant the 0.4.x gifts');
 select is((public.claim_pending_release_gem_rewards() ->> 'claimed')::boolean, false, 'pending release campaigns do not duplicate ledgered gifts');
 select is((select count(*) from public.reward_ledger_entries where owner_id = public.require_actor() and idempotency_key = 'release:0.4.0:100-gems'), 1::bigint, '0.4.0 release gift has one ledger entry');
 select is((select amount from public.reward_ledger_entries where owner_id = public.require_actor() and idempotency_key = 'release:0.4.0:100-gems'), 100, '0.4.0 release gift amount is fixed');
+select is((select count(*) from public.reward_ledger_entries where owner_id = public.require_actor() and idempotency_key = 'release:0.4.1:150-gems'), 1::bigint, '0.4.1 release gift has one ledger entry');
+select is((select amount from public.reward_ledger_entries where owner_id = public.require_actor() and idempotency_key = 'release:0.4.1:150-gems'), 150, '0.4.1 release gift amount is fixed');
 select lives_ok($$select public.purchase_reward_theme('arena')$$, 'new catalog themes can be purchased');
 select ok((public.load_reward_wallet() -> 'purchasedThemeIds') ? 'arena', 'new theme purchase is persisted in the authoritative wallet');
 

@@ -1,5 +1,5 @@
 begin;
-select plan(30);
+select plan(34);
 
 insert into auth.users (id, instance_id, aud, role, email, encrypted_password, email_confirmed_at, raw_app_meta_data, raw_user_meta_data, created_at, updated_at)
 values
@@ -22,6 +22,8 @@ select is(
   array['Principiante', 'Intermedio', 'Avanzado', 'GymBro', 'GymRat', 'G-Boom', 'Alfa', 'Sigma'],
   'rank labels use all requested level boundaries'
 );
+select is(public.profile_frame_unlock_level('alfa-user'), 70, 'Alfa User frame remains locked until level 70');
+select is(public.profile_title_unlock_level('alfa-user'), 70, 'Alfa User title remains locked until level 70');
 
 set local role authenticated;
 select set_config('request.jwt.claim.sub', '50000000-0000-0000-0000-000000000001', true);
@@ -85,9 +87,11 @@ select set_config('request.jwt.claim.sub', '50000000-0000-0000-0000-000000000002
 select is((select activity.value ->> 'kind' from jsonb_array_elements(public.list_community_activities() -> 'activities') activity(value) where activity.value ->> 'kind' = 'rank_up'), 'rank_up', 'connected viewer receives a generic rank-up activity');
 select is((select (activity.value -> 'payload' ->> 'level')::integer from jsonb_array_elements(public.list_community_activities() -> 'activities') activity(value) where activity.value ->> 'kind' = 'rank_up'), 5, 'rank-up activity records the new level');
 select is((select activity.value -> 'payload' ->> 'rank' from jsonb_array_elements(public.list_community_activities() -> 'activities') activity(value) where activity.value ->> 'kind' = 'rank_up'), 'Intermedio', 'rank-up activity records the crossed rank');
+select is((select activity.value -> 'payload' ->> 'unlocked_frame_id' from jsonb_array_elements(public.list_community_activities() -> 'activities') activity(value) where activity.value ->> 'kind' = 'rank_up'), 'intermedio', 'rank-up activity records the unlocked frame');
+select is((select activity.value -> 'payload' ->> 'unlocked_title_id' from jsonb_array_elements(public.list_community_activities() -> 'activities') activity(value) where activity.value ->> 'kind' = 'rank_up'), 'intermedio', 'rank-up activity records the unlocked title');
 select is(
   (public.list_community_activities() -> 'activities' -> 0) - 'id' - 'kind' - 'payload' - 'created_at' - 'author_alias',
-  '{"author_avatar_id":"capybara-athlete","author_theme_id":"violeta"}'::jsonb,
+  '{"author_avatar_id":"capybara-athlete","author_frame_id":"principiante","author_title_id":"principiante","author_theme_id":"violeta"}'::jsonb,
   'activity projection exposes only safe author presentation metadata'
 );
 select set_config('request.jwt.claim.sub', '50000000-0000-0000-0000-000000000001', true);

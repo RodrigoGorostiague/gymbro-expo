@@ -1,6 +1,6 @@
 {
   "name": "gymbro",
-  "version": "0.4.0",
+  "version": "0.4.1",
   "main": "expo-router/entry",
   "dependencies": {
     "@expo/ui": "~56.0.25",

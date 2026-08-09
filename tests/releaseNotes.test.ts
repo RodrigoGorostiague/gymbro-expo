@@ -5,10 +5,12 @@ import { CURRENT_RELEASE_NOTES, RELEASE_NOTES } from '../constants/releaseNotes'
 
 describe('release notes', () => {
   test('exposes the current ultra alpha release with user-visible changes', () => {
-    expect(CURRENT_RELEASE_NOTES.version).toBe('0.4.0');
+    expect(CURRENT_RELEASE_NOTES.version).toBe('0.4.1');
     expect(RELEASE_NOTES).toContain(CURRENT_RELEASE_NOTES);
     expect(CURRENT_RELEASE_NOTES.changes.length).toBeGreaterThan(0);
-    expect(CURRENT_RELEASE_NOTES.rewardGems).toBe(100);
+    expect(CURRENT_RELEASE_NOTES.rewardGems).toBe(150);
+    expect(CURRENT_RELEASE_NOTES.changes).toContain('Marco exclusivo Alfa User para personalizar tu perfil.');
+    expect(CURRENT_RELEASE_NOTES.changes).toContain('Título Alfa User para mostrar que sos parte de esta etapa.');
   });
 
   test('matches the user-facing version configured for Expo and npm', () => {

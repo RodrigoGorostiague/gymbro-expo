@@ -13,6 +13,7 @@ import { CommunityActivity, WorkoutRecap } from '../../types';
 import { WorkoutPublicationCard } from '../../components/WorkoutPublicationCard';
 import { CommunityMilestoneCard } from '../../components/CommunityMilestoneCard';
 import { ProfileAvatar } from '../../components/ProfileAvatar';
+import { ProfileTitleBadge } from '../../components/ProfileTitleBadge';
 import { listJointWorkoutPosts } from '../../services/jointWorkouts';
 import { CommunityBadgeCounts, getCommunityBadgeCounts } from '../../services/communityBadge';
 import { listWorkoutStartActivities, WorkoutStartActivity } from '../../services/workoutStartActivity';
@@ -131,7 +132,7 @@ export default function CommunityFeedScreen() {
     if (item.kind === 'joint') return <JointWorkoutFeedCard workoutId={item.post.id} participants={item.post.participants} publishedAt={item.publishedAt} now={now} />;
     if (item.kind === 'milestone') return <CommunityMilestoneCard activity={item.activity} now={now} />;
     const activity = item.activity;
-    return <GlassCard style={styles.startCard}><View style={[styles.liveDot, { backgroundColor: theme.primary }]} /><ProfileAvatar avatarId={activity.authorAvatarId} size={38} borderColor={theme.primary} /><View style={styles.startCopy}><Text style={[styles.startTitle, { color: theme.text }]}>{activity.isAuthor ? 'Comenzaste' : `${activity.authorAlias} comenzó`} {activity.jointWorkoutId ? 'a entrenar juntos' : 'un entrenamiento'}</Text><Text style={{ color: theme.textMuted }}>{activity.routineName} · En vivo para tu círculo</Text></View><Text style={[styles.startTime, { color: theme.textMuted }]}>{formatRelativeTime(activity.startedAt, now)}</Text></GlassCard>;
+    return <GlassCard style={styles.startCard}><View style={[styles.liveDot, { backgroundColor: theme.primary }]} /><ProfileAvatar avatarId={activity.authorAvatarId} frameId={activity.authorFrameId} size={38} borderColor={theme.primary} /><View style={styles.startCopy}><Text style={[styles.startTitle, { color: theme.text }]}>{activity.isAuthor ? 'Comenzaste' : `${activity.authorAlias} comenzó`} {activity.jointWorkoutId ? 'a entrenar juntos' : 'un entrenamiento'}</Text><ProfileTitleBadge titleId={activity.authorTitleId} /><Text style={{ color: theme.textMuted }}>{activity.routineName} · En vivo para tu círculo</Text></View><Text style={[styles.startTime, { color: theme.textMuted }]}>{formatRelativeTime(activity.startedAt, now)}</Text></GlassCard>;
   };
 
   return <ThemeBackground><SafeAreaView style={styles.safe}><ScrollView testID="community-feed" contentContainerStyle={styles.scroll} keyboardShouldPersistTaps="handled" refreshControl={<RefreshControl refreshing={loading} onRefresh={() => void load()} tintColor={theme.primary} />}>

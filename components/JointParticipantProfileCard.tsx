@@ -5,6 +5,7 @@ import { useTheme } from '../context/ThemeContext';
 import type { JointParticipant } from '../services/jointWorkouts';
 import { HapticPressable } from './HapticPressable';
 import { ProfileAvatar } from './ProfileAvatar';
+import { ProfileTitleBadge } from './ProfileTitleBadge';
 
 const statusPresentation = {
   invited: { label: 'Invitado', palette: { primary: '#525252', accent: '#A3A3A3', secondary: '#262626' } },
@@ -29,7 +30,7 @@ export function JointParticipantProfileCard({ participant, children, onPress, se
 
   if (compact) {
     return <View accessibilityLabel={`Participante ${participant.alias}: ${badge}`} style={[styles.compact, { backgroundColor: palette.primary, borderColor: palette.accent }]}>
-      <ProfileAvatar avatarId={participant.avatarId} size={28} borderColor="#fff" />
+      <ProfileAvatar avatarId={participant.avatarId} frameId={participant.frameId} size={28} borderColor="#fff" />
       <Text numberOfLines={1} style={styles.compactAlias}>{participant.alias}</Text>
       <Text style={[styles.compactBadge, { backgroundColor: palette.secondary }]}>{badge}</Text>
     </View>;
@@ -37,10 +38,10 @@ export function JointParticipantProfileCard({ participant, children, onPress, se
 
   const content = <>
       <View style={[styles.banner, { backgroundColor: palette.primary, borderColor: palette.accent }]}>
-        <ProfileAvatar avatarId={participant.avatarId} size={48} borderColor="#fff" />
+        <ProfileAvatar avatarId={participant.avatarId} frameId={participant.frameId} size={48} borderColor="#fff" />
         <View style={styles.copy}>
           <Text style={styles.alias}>{participant.alias}</Text>
-          <View style={[styles.badge, { backgroundColor: palette.secondary }]}><Text style={styles.badgeText}>{badge}</Text></View>
+          {participant.titleId ? <ProfileTitleBadge titleId={participant.titleId} /> : <View style={[styles.badge, { backgroundColor: palette.secondary }]}><Text style={styles.badgeText}>{badge}</Text></View>}
         </View>
       </View>
       {children}

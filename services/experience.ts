@@ -48,12 +48,21 @@ function asActivity(value: unknown): CommunityActivity | null {
     id: value.id,
     authorAlias: value.author_alias,
     authorAvatarId: (typeof value.author_avatar_id === 'string' ? value.author_avatar_id : 'capybara-athlete') as AvatarId,
+    authorFrameId: typeof value.author_frame_id === 'string' ? value.author_frame_id : undefined,
+    authorTitleId: typeof value.author_title_id === 'string' ? value.author_title_id : undefined,
     authorThemeId: typeof value.author_theme_id === 'string' ? value.author_theme_id : null,
     createdAt: value.created_at,
   };
   if (value.kind === 'rank_up') {
     if (!Number.isInteger(value.payload.level) || !ranks.includes(value.payload.rank as TrainingRank)) return null;
-    return { ...identity, kind: 'rank_up', level: value.payload.level as number, rank: value.payload.rank as TrainingRank };
+    return {
+      ...identity,
+      kind: 'rank_up',
+      level: value.payload.level as number,
+      rank: value.payload.rank as TrainingRank,
+      unlockedFrameId: typeof value.payload.unlocked_frame_id === 'string' ? value.payload.unlocked_frame_id : undefined,
+      unlockedTitleId: typeof value.payload.unlocked_title_id === 'string' ? value.payload.unlocked_title_id : undefined,
+    };
   }
   const payload = Object.fromEntries(Object.entries(value.payload).filter((entry): entry is [string, string | number] => isMilestoneValue(entry[1])));
   return { ...identity, kind: value.kind as Exclude<CommunityActivityKind, 'rank_up'>, payload };

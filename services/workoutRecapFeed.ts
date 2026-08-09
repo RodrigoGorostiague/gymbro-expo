@@ -29,6 +29,8 @@ function asRecap(row: unknown): WorkoutRecap {
     authorAlias: String(value.author_alias),
     authorAvatarId: avatarIdOrDefault(value.author_avatar_id),
     authorThemeId: typeof value.author_theme_id === 'string' ? value.author_theme_id : null,
+    authorFrameId: typeof value.author_frame_id === 'string' ? value.author_frame_id : undefined,
+    authorTitleId: typeof value.author_title_id === 'string' ? value.author_title_id : undefined,
     routineName: String(value.routine_name),
     completedAt: String(value.completed_at),
     durationSeconds: Number(value.duration_seconds),

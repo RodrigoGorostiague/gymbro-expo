@@ -36,6 +36,7 @@ function InAppNotificationBadge({ item, busy, canInviteWorkoutStart, onAct, onDi
   const entrance = useRef(new RNAnimated.Value(84)).current;
   const translateX = useSharedValue(0);
   const avatarId = typeof item.data.actor_avatar_id === 'string' ? item.data.actor_avatar_id : undefined;
+  const frameId = typeof item.data.actor_frame_id === 'string' ? item.data.actor_frame_id : undefined;
   const isInvite = invitationWorkoutId(item) !== null;
   const isWorkoutStart = workoutStartActorId(item) !== null && canInviteWorkoutStart;
   const swipeStyle = useAnimatedStyle(() => ({ transform: [{ translateX: translateX.value }] }));
@@ -59,7 +60,7 @@ function InAppNotificationBadge({ item, busy, canInviteWorkoutStart, onAct, onDi
   }, [entrance]);
 
   return <GestureDetector gesture={pan}><Animated.View style={swipeStyle}><RNAnimated.View accessibilityRole="alert" style={[styles.badge, { backgroundColor: theme.tabBarBackground, borderColor: theme.primary, transform: [{ translateY: entrance }] }]}>
-    <ProfileAvatar avatarId={avatarId} size={42} borderColor={theme.primary} />
+    <ProfileAvatar avatarId={avatarId} frameId={frameId} size={42} borderColor={theme.primary} />
     <View style={styles.copy}><Text numberOfLines={1} style={[styles.title, { color: theme.text }]}>{item.title}</Text>{item.body ? <Text numberOfLines={2} style={[styles.body, { color: theme.textMuted }]}>{item.body}</Text> : null}</View>
     <HapticPressable accessibilityRole="button" accessibilityLabel={isInvite ? 'Aceptar invitación' : isWorkoutStart ? 'Invitar a entrenar' : 'Abrir notificación'} disabled={busy} onPress={onAct} style={[styles.action, { backgroundColor: theme.primary }]}><Text style={[styles.actionText, { color: theme.onPrimary }]}>{isInvite ? 'Aceptar' : isWorkoutStart ? 'Invitar' : 'Ver'}</Text></HapticPressable>
     <HapticPressable accessibilityRole="button" accessibilityLabel="Cerrar notificación" disabled={busy} onPress={onDismiss} style={styles.close}><Text style={[styles.closeText, { color: theme.textMuted }]}>×</Text></HapticPressable>

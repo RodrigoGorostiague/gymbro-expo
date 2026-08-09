@@ -9,6 +9,8 @@ export function AppNoticeModal({
   message,
   changes = [],
   highlight,
+  version,
+  celebration,
   actionLabel = 'Entendido',
   onClose,
 }: {
@@ -17,6 +19,8 @@ export function AppNoticeModal({
   message: string;
   changes?: readonly string[];
   highlight?: string;
+  version?: string;
+  celebration?: React.ReactNode;
   actionLabel?: string;
   onClose: () => void;
 }) {
@@ -27,8 +31,10 @@ export function AppNoticeModal({
       <View style={styles.backdrop}>
         <View accessibilityRole="alert" style={[styles.card, { backgroundColor: theme.tabBarBackground, borderColor: theme.accent }]}>
           {highlight ? <View style={[styles.highlight, { backgroundColor: theme.primary }]}><Text style={[styles.highlightText, { color: theme.onPrimary }]}>{highlight}</Text></View> : null}
+          {version ? <Text style={[styles.version, { color: theme.textMuted }]}>VERSION {version}</Text> : null}
           <Text accessibilityRole="header" style={[styles.title, { color: theme.text }]}>{title}</Text>
           <Text style={[styles.message, { color: theme.textMuted }]}>{message}</Text>
+          {celebration}
           {changes.length ? <View style={styles.changes}>{changes.map((change) => <View key={change} style={styles.change}><Text style={[styles.changeBullet, { color: theme.primary }]}>•</Text><Text style={[styles.changeText, { color: theme.textMuted }]}>{change}</Text></View>)}</View> : null}
           <HapticPressable accessibilityRole="button" accessibilityLabel={actionLabel} onPress={onClose} style={[styles.action, { backgroundColor: theme.primary }]}>
             <Text style={[styles.actionText, { color: theme.onPrimary }]}>{actionLabel}</Text>
@@ -44,6 +50,7 @@ const styles = StyleSheet.create({
   card: { alignItems: 'center', borderRadius: 24, borderWidth: 1.5, gap: 14, maxWidth: 360, padding: 24, width: '100%' },
   highlight: { borderRadius: 999, paddingHorizontal: 16, paddingVertical: 8 },
   highlightText: { fontSize: 22, fontWeight: '900', letterSpacing: 0.5 },
+  version: { fontSize: 12, fontWeight: '800', letterSpacing: 1 },
   title: { fontSize: 24, fontWeight: '900', textAlign: 'center' },
   message: { fontSize: 16, lineHeight: 23, textAlign: 'center' },
   changes: { alignSelf: 'stretch', gap: 8 },

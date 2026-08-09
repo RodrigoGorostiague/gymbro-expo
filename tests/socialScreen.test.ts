@@ -264,11 +264,26 @@ describe('Community feed', () => {
   test('selects an available profile avatar for the athlete sex', async () => {
     let tree: TestRenderer.ReactTestRenderer;
     await act(async () => { tree = TestRenderer.create(React.createElement(ProfileScreen)); });
-    await act(async () => { tree!.root.find((node) => String(node.type) === 'HapticPressable' && node.props.accessibilityLabel === 'Editar avatar').props.onPress(); });
+    await act(async () => { tree!.root.find((node) => String(node.type) === 'HapticPressable' && node.props.accessibilityLabel === 'Elegir avatar').props.onPress(); });
     await act(async () => { tree!.root.find((node) => String(node.type) === 'HapticPressable' && node.props.accessibilityLabel === 'Capybro cabello puntiagudo').props.onPress(); });
     await act(async () => { tree!.root.find((node) => String(node.type) === 'GlassButton' && node.props.title === 'Guardar perfil').props.onPress(); });
 
     expect(social.saveProfile).toHaveBeenCalledWith(expect.objectContaining({ avatarId: 'capybro-spiky' }));
+  });
+
+  test('starts a locked frame preview only after confirming its modal', async () => {
+    let tree: TestRenderer.ReactTestRenderer;
+    await act(async () => { tree = TestRenderer.create(React.createElement(ProfileScreen)); });
+
+    await act(async () => { tree!.root.find((node) => String(node.type) === 'HapticPressable' && node.props.accessibilityLabel === 'Elegir marco').props.onPress(); });
+    await act(async () => { tree!.root.find((node) => String(node.type) === 'HapticPressable' && node.props.accessibilityLabel === 'Intermedio').props.onPress(); });
+
+    expect(alert).toHaveBeenCalledWith('Marco bloqueado', expect.stringContaining('nivel 5'), expect.any(Array));
+    expect(tree!.root.findAll((node) => String(node.type) === 'Text').map((node) => node.children.join(''))).not.toContain('Previsualización: 15s');
+    const actions = alert.mock.calls[0][2] as Array<{ text: string; onPress?: () => void }>;
+    await act(async () => { actions.find((action) => action.text === 'Previsualizar 15 s')?.onPress?.(); });
+
+    expect(tree!.root.findAll((node) => String(node.type) === 'Text').map((node) => node.children.join(''))).toContain('Previsualización: 15s');
   });
 
   test('renders every profile switch with safe defaults for a legacy profile missing sharing fields', async () => {
@@ -284,8 +299,8 @@ describe('Community feed', () => {
     await act(async () => { tree = TestRenderer.create(React.createElement(ProfileScreen)); });
 
     const switches = tree!.root.findAll((node) => String(node.type) === 'Switch');
-    expect(switches).toHaveLength(11);
-    expect(switches.map((node) => node.props.value)).toEqual(Array(11).fill(true));
+    expect(switches).toHaveLength(10);
+    expect(switches.map((node) => node.props.value)).toEqual(Array(10).fill(true));
   });
 
   test('normalizes malformed profile fields while preserving valid false switch values', async () => {
@@ -300,7 +315,7 @@ describe('Community feed', () => {
     await act(async () => { tree = TestRenderer.create(React.createElement(ProfileScreen)); });
 
     const switches = tree!.root.findAll((node) => String(node.type) === 'Switch');
-    expect(switches.map((node) => node.props.value)).toEqual([true, false, true, true, true, false, true, true, true, true, true]);
+    expect(switches.map((node) => node.props.value)).toEqual([false, true, true, true, false, true, true, true, true, true]);
   });
 
   test('renders loading and malformed profiles with valid Switch props when focus refresh throws synchronously', async () => {
@@ -310,7 +325,7 @@ describe('Community feed', () => {
 
     await act(async () => { tree = TestRenderer.create(React.createElement(ProfileScreen)); });
 
-    expect(tree!.root.findAll((node) => String(node.type) === 'Switch')).toHaveLength(11);
+    expect(tree!.root.findAll((node) => String(node.type) === 'Switch')).toHaveLength(10);
     expect(tree!.root.find((node) => String(node.type) === 'GlassButton' && node.props.title === 'Crear perfil')).toBeDefined();
     expect(alert).toHaveBeenCalledWith('Perfil no disponible', 'Offline');
 
@@ -338,7 +353,7 @@ describe('Community feed', () => {
 
     await act(async () => { tree = TestRenderer.create(React.createElement(ProfileScreen)); });
 
-    expect(tree!.root.findAll((node) => String(node.type) === 'Switch')).toHaveLength(11);
+    expect(tree!.root.findAll((node) => String(node.type) === 'Switch')).toHaveLength(10);
     expect(alert).toHaveBeenCalledWith('Perfil no disponible', 'Async offline');
   });
 
@@ -355,6 +370,8 @@ describe('Community feed', () => {
     expect(social.saveProfile).toHaveBeenCalledWith({
       alias: 'Blocker',
       avatarId: 'capybara-athlete',
+      frameId: 'principiante',
+      titleId: 'principiante',
       categories: {},
       categoryVisibility: {},
       autoShareCompletedWorkouts: true,
@@ -378,7 +395,6 @@ describe('Community feed', () => {
     const inputs = tree!.root.findAll((node) => String(node.type) === 'GlassInput');
 
     await act(async () => {
-      inputs.find((node) => node.props.placeholder === 'Estilo de entrenamiento')!.props.onChangeText('');
       inputs.find((node) => node.props.placeholder === 'Sobre ti')!.props.onChangeText('Updated bio');
     });
     await act(async () => { tree!.root.find((node) => String(node.type) === 'GlassButton' && node.props.title === 'Guardar perfil').props.onPress(); });

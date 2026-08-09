@@ -12,6 +12,7 @@ import { ProfileAvatar } from './ProfileAvatar';
 import { formatRelativeTime } from '../utils/feedTimeline';
 import { MiniMuscleDistributionRadar } from './MiniMuscleDistributionRadar';
 import { HapticPressable } from './HapticPressable';
+import { ProfileTitleBadge } from './ProfileTitleBadge';
 
 /** Shared feed surface for one athlete's recap; joint posts compose participant cards separately. */
 export function WorkoutPublicationCard({ recap, now = Date.now(), onPress, onProfilePress, onToggleReaction }: { recap: WorkoutRecap; now?: number; onPress?: () => void; onProfilePress?: () => void; onToggleReaction?: () => void }) {
@@ -20,8 +21,8 @@ export function WorkoutPublicationCard({ recap, now = Date.now(), onPress, onPro
   const authorTheme = getShopTheme(recap.authorThemeId ?? '') ?? (recap.authorAlias.toLocaleLowerCase() === 'brisas' ? THEMES.brisas : THEMES.rodaja);
   const muscleDistribution = (recap.muscleDistribution ?? []).map(({ id, value }) => ({ id, label: muscleGroupLabels(catalogMuscleGroups, [id])[0] ?? id, value }));
   const header = <LinearGradient colors={[authorTheme.primary, authorTheme.accent, authorTheme.secondary]} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={styles.authorBanner}>
-      <ProfileAvatar avatarId={recap.authorAvatarId} size={48} borderColor="rgba(255,255,255,0.7)" />
-      <View style={styles.authorCopy}><Text style={styles.alias}>{recap.authorAlias}</Text><Text style={styles.authorAction}>Completó un entrenamiento</Text></View>
+      <ProfileAvatar avatarId={recap.authorAvatarId} frameId={recap.authorFrameId} size={48} borderColor="rgba(255,255,255,0.7)" />
+      <View style={styles.authorCopy}><Text style={styles.alias}>{recap.authorAlias}</Text>{recap.authorTitleId ? <ProfileTitleBadge titleId={recap.authorTitleId} /> : <Text style={styles.authorAction}>Completó un entrenamiento</Text>}</View>
       <View style={styles.bannerMeta}><Text style={styles.badge}>{recap.mesocycleAvailable ? 'MESOCICLO' : 'RUTINA'}</Text><Text style={styles.publishedAt}>{formatRelativeTime(recap.createdAt, now)}</Text></View>
     </LinearGradient>;
   const commentCount = recap.commentCount ?? 0;

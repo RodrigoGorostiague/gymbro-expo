@@ -1,20 +1,23 @@
 import React from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 import { ExperienceProgress } from '../types';
+import { ProfileFrameId } from '../constants/profileFrames';
 import { experienceProgressPercent } from '../utils/experience';
 import { AnimatedProgressBar } from './AnimatedProgressBar';
+import { ProfileFrameOverlay } from './ProfileFrameOverlay';
 
 type Theme = { primary: string; secondary: string; text: string; textMuted: string; glassBorder: string };
 
-export function ExperienceProgressCard({ progress, theme, title = 'Progreso de entrenamiento' }: {
+export function ExperienceProgressCard({ progress, theme, title = 'Progreso de entrenamiento', frameId }: {
   progress: ExperienceProgress | null;
   theme: Theme;
   title?: string;
+  frameId?: ProfileFrameId;
 }) {
   if (!progress) return null;
   const percent = experienceProgressPercent(progress);
   return <View style={[styles.card, { borderColor: theme.glassBorder }]}>
-    <View style={[styles.badge, { borderColor: theme.secondary }]}><Text style={[styles.badgeLevel, { color: theme.text }]}>{progress.level}</Text><Text style={[styles.badgeLabel, { color: theme.textMuted }]}>NIVEL</Text></View>
+    <View style={[styles.badge, { borderColor: frameId ? 'transparent' : theme.secondary }]}>{frameId ? <ProfileFrameOverlay frameId={frameId} level={progress.level} size={72} /> : <Text style={[styles.badgeLevel, { color: theme.text }]}>{progress.level}</Text>}<Text style={[styles.badgeLabel, { color: theme.textMuted }]}>NIVEL</Text></View>
     <View style={styles.copy}>
       <Text style={[styles.title, { color: theme.text }]}>{title}</Text>
       <Text style={[styles.rank, { color: theme.secondary }]}>Nivel {progress.level} · {progress.rank}</Text>

@@ -8,6 +8,7 @@ import type { CommunityActivity, CommunityMilestoneActivity } from '../types';
 import { formatRelativeTime } from '../utils/feedTimeline';
 import { GlassCard } from './GlassCard';
 import { ProfileAvatar } from './ProfileAvatar';
+import { ProfileTitleBadge } from './ProfileTitleBadge';
 
 function milestoneCopy(activity: CommunityMilestoneActivity): { label: string; title: string; detail: string } {
   const payload = activity.payload;
@@ -29,13 +30,26 @@ function milestoneCopy(activity: CommunityMilestoneActivity): { label: string; t
 export function CommunityMilestoneCard({ activity, now }: { activity: CommunityActivity; now: number }) {
   const { theme } = useTheme();
   const authorTheme = getShopTheme(activity.authorThemeId ?? '') ?? THEMES.rodaja;
-  const copy = activity.kind === 'rank_up'
-    ? { label: 'RANGO', title: `Nivel ${activity.level} · ${activity.rank}`, detail: 'El entrenamiento constante da resultados.' }
-    : milestoneCopy(activity);
+  if (activity.kind === 'rank_up') {
+    const unlockedFrameId = activity.unlockedFrameId ?? activity.authorFrameId;
+    const unlockedTitleId = activity.unlockedTitleId ?? activity.authorTitleId;
+    return <GlassCard style={styles.rankCard}>
+      <LinearGradient colors={[authorTheme.primary, authorTheme.accent, authorTheme.secondary]} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={styles.rankBanner}>
+        <Text style={styles.congratulations}>FELICITACIONES</Text>
+        <ProfileAvatar avatarId={activity.authorAvatarId} frameId={unlockedFrameId} level={activity.level} size={82} borderColor="rgba(255,255,255,0.7)" />
+        <Text style={styles.rankAlias}>{activity.authorAlias}</Text>
+        <Text style={styles.rankCopy}>Desbloqueó un nuevo rango</Text>
+        <Text style={styles.time}>{formatRelativeTime(activity.createdAt, now)}</Text>
+      </LinearGradient>
+      <Text style={[styles.rankTitle, { color: theme.text }]}>Nivel {activity.level} · {activity.rank}</Text>
+      {unlockedTitleId ? <ProfileTitleBadge titleId={unlockedTitleId} size={140} /> : null}
+    </GlassCard>;
+  }
+  const copy = milestoneCopy(activity);
   return <GlassCard style={styles.card}>
     <LinearGradient colors={[authorTheme.primary, authorTheme.accent, authorTheme.secondary]} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={styles.banner}>
-      <ProfileAvatar avatarId={activity.authorAvatarId} size={48} borderColor="rgba(255,255,255,0.7)" />
-      <View style={styles.copy}><Text style={styles.alias}>{activity.authorAlias}</Text><Text style={styles.action}>{copy.label}</Text></View>
+      <ProfileAvatar avatarId={activity.authorAvatarId} frameId={activity.authorFrameId} size={48} borderColor="rgba(255,255,255,0.7)" />
+      <View style={styles.copy}><Text style={styles.alias}>{activity.authorAlias}</Text><ProfileTitleBadge titleId={activity.authorTitleId} /><Text style={styles.action}>{copy.label}</Text></View>
       <Text style={styles.time}>{formatRelativeTime(activity.createdAt, now)}</Text>
     </LinearGradient>
     <Text style={[styles.title, { color: theme.text }]}>{copy.title}</Text>
@@ -45,6 +59,12 @@ export function CommunityMilestoneCard({ activity, now }: { activity: CommunityA
 
 const styles = StyleSheet.create({
   card: { gap: 12, paddingVertical: 18 },
+  rankCard: { alignItems: 'center', gap: 12, paddingVertical: 18 },
+  rankBanner: { alignItems: 'center', borderRadius: 15, gap: 5, padding: 18, width: '100%' },
+  congratulations: { color: 'rgba(255,255,255,0.88)', fontSize: 11, fontWeight: '900', letterSpacing: 1.3 },
+  rankAlias: { color: '#FFFFFF', fontSize: 21, fontWeight: '900' },
+  rankCopy: { color: 'rgba(255,255,255,0.86)', fontSize: 14, fontWeight: '700' },
+  rankTitle: { fontSize: 21, fontWeight: '900', textAlign: 'center' },
   banner: { alignItems: 'center', borderRadius: 15, flexDirection: 'row', gap: 11, padding: 12 },
   copy: { flex: 1, gap: 2 },
   alias: { color: '#FFFFFF', fontSize: 18, fontWeight: '900' },

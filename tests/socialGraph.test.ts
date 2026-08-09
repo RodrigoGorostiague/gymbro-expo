@@ -47,7 +47,7 @@ import { SocialProvider, useSocial } from '../context/SocialContext';
 
 describe('social graph client boundary', () => {
   beforeEach(() => {
-    vi.clearAllMocks();
+    vi.resetAllMocks();
     authState.user = 'member-1';
     client.auth.getSession.mockResolvedValue({
       data: { session: { user: { id: 'member-1' }, access_token: 'access-token' } },
@@ -63,7 +63,7 @@ describe('social graph client boundary', () => {
 
     expect(normalizeAliasPrefix('  JÓSE  ')).toBe('jose');
     await expect(searchProfiles('  JÓSE  ', 'cursor-1')).resolves.toEqual({
-      profiles: [{ uid: 'member-1', alias: 'José', avatarId: 'capybara-athlete', categories: { style: 'powerlifting' }, presentationThemeId: null, relationshipStatus: 'partner' }],
+      profiles: [{ uid: 'member-1', alias: 'José', avatarId: 'capybara-athlete', frameId: 'principiante', titleId: 'principiante', categories: { style: 'powerlifting' }, presentationThemeId: null, relationshipStatus: 'partner' }],
       nextCursor: 'cursor-2',
     });
     await getDiscoveryPage();
@@ -98,7 +98,7 @@ describe('social graph client boundary', () => {
     const maybeSingle = vi.fn().mockResolvedValue({ data: { id: 'member-2', alias: 'Theme athlete', avatar_id: 'capigirl', categories: { style: 'strength' }, presentation_theme_id: 'moon' }, error: null });
     client.from.mockReturnValue({ select: vi.fn(() => ({ eq: vi.fn(() => ({ maybeSingle })) })) });
 
-    await expect(getPublicProfile('member-2')).resolves.toEqual({ uid: 'member-2', alias: 'Theme athlete', avatarId: 'capigirl', categories: { style: 'strength' }, presentationThemeId: 'moon' });
+    await expect(getPublicProfile('member-2')).resolves.toEqual({ uid: 'member-2', alias: 'Theme athlete', avatarId: 'capigirl', frameId: 'principiante', titleId: 'principiante', categories: { style: 'strength' }, presentationThemeId: 'moon' });
     expect(client.from).toHaveBeenCalledWith('public_profiles');
   });
 
@@ -114,19 +114,32 @@ describe('social graph client boundary', () => {
       .mockResolvedValueOnce({ data: null, error: null })
       .mockResolvedValueOnce({ data: null, error: null });
 
-    await expect(getOwnProfile()).resolves.toEqual({ uid: 'member-1', alias: 'Bro', avatarId: 'capybara-athlete', categories: {}, categoryVisibility: {}, autoShareCompletedWorkouts: true, shareRoutineTemplate: true, shareMesocycleTemplate: true, sharePerformedSetDetails: true, shareSocialActivity: true, shareSocialProgress: true, shareSocialConsistency: true, shareSocialStatistics: true, shareSocialMuscleDistribution: true });
+    await expect(getOwnProfile()).resolves.toEqual({ uid: 'member-1', alias: 'Bro', avatarId: 'capybara-athlete', frameId: 'principiante', titleId: 'principiante', categories: {}, categoryVisibility: {}, autoShareCompletedWorkouts: true, shareRoutineTemplate: true, shareMesocycleTemplate: true, sharePerformedSetDetails: true, shareSocialActivity: true, shareSocialProgress: true, shareSocialConsistency: true, shareSocialStatistics: true, shareSocialMuscleDistribution: true });
     await saveOwnProfile({ alias: 'Bro', categories: {}, categoryVisibility: {}, autoShareCompletedWorkouts: false });
     await syncOwnPresentationTheme('moon');
 
     expect(client.rpc).toHaveBeenNthCalledWith(1, 'get_own_profile', {});
     expect(client.rpc).toHaveBeenNthCalledWith(2, 'save_own_profile', {
       profile_input: {
-        alias: 'Bro', avatar_id: 'capybara-athlete', categories: {}, category_visibility: {}, auto_share_completed_workouts: false, share_routine_template: true, share_mesocycle_template: true, share_performed_set_details: true, share_social_activity: true, share_social_progress: true, share_social_consistency: true, share_social_statistics: true, share_social_muscle_distribution: true,
+        alias: 'Bro', avatar_id: 'capybara-athlete', equipped_frame_id: 'principiante', equipped_title_id: 'principiante', categories: {}, category_visibility: {}, auto_share_completed_workouts: false, share_routine_template: true, share_mesocycle_template: true, share_performed_set_details: true, share_social_activity: true, share_social_progress: true, share_social_consistency: true, share_social_statistics: true, share_social_muscle_distribution: true,
       },
     });
     expect(client.rpc).toHaveBeenNthCalledWith(3, 'update_own_presentation_theme', { theme_id: 'moon' });
     expect(client.auth.getUser).not.toHaveBeenCalled();
     expect(client.from).not.toHaveBeenCalled();
+  });
+
+  test('preserves an intentionally empty profile title through the RPC boundary', async () => {
+    client.rpc
+      .mockResolvedValueOnce({ data: { id: 'member-1', alias: 'Bro', categories: {}, category_visibility: {}, equipped_title_id: null }, error: null })
+      .mockResolvedValueOnce({ data: null, error: null });
+
+    await expect(getOwnProfile()).resolves.toMatchObject({ titleId: null });
+    await saveOwnProfile({ alias: 'Bro', titleId: null, categories: {}, categoryVisibility: {}, autoShareCompletedWorkouts: true });
+
+    expect(client.rpc).toHaveBeenLastCalledWith('save_own_profile', expect.objectContaining({
+      profile_input: expect.objectContaining({ equipped_title_id: null }),
+    }));
   });
 
   test('bootstraps the own profile through the server-owned RPC without reading auth data or writing profiles directly', async () => {
@@ -153,7 +166,7 @@ describe('social graph client boundary', () => {
     }, error: null });
 
     await expect(getOwnProfile()).resolves.toEqual({
-      uid: 'member-1', alias: 'Bro', avatarId: 'capybara-athlete', categories: { legacy: 'keep' }, categoryVisibility: { legacy: false },
+      uid: 'member-1', alias: 'Bro', avatarId: 'capybara-athlete', frameId: 'principiante', titleId: 'principiante', categories: { legacy: 'keep' }, categoryVisibility: { legacy: false },
       autoShareCompletedWorkouts: false, shareRoutineTemplate: true, shareMesocycleTemplate: true, sharePerformedSetDetails: false, shareSocialActivity: true, shareSocialProgress: true, shareSocialConsistency: true, shareSocialStatistics: true, shareSocialMuscleDistribution: true,
     });
   });

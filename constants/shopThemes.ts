@@ -1,4 +1,4 @@
-import { AppTheme, ShopThemeCategory, ShopThemeRarity, ThemeDecoration, ThemeInteraction, UserProfile } from '../types';
+import { AppTheme, ShopThemeCategory, ShopThemeRarity, ThemeCelebrationSpec, ThemeDecoration, ThemeInteraction, UserProfile } from '../types';
 import { THEMES } from './theme';
 
 export interface ShopTheme extends AppTheme {
@@ -39,6 +39,15 @@ export function getProfileThemeId(profile: UserProfile): string {
 
 type ThemePalette = Pick<AppTheme, 'primary' | 'secondary' | 'accent' | 'background' | 'text' | 'onPrimary' | 'success' | 'blurTint' | 'tabBarBackground'>;
 
+const FRAME_THEME_CELEBRATIONS: Record<string, ThemeCelebrationSpec> = {
+  boca: { duration: 760, particleCount: 9, spread: 148, rise: 190, rotation: 270, flashScale: 2.5, shape: 'diamond' }, river: { duration: 800, particleCount: 8, spread: 132, rise: 235, rotation: 180, flashScale: 2.1, shape: 'bar' }, snowflake: { duration: 1050, particleCount: 12, spread: 112, rise: 160, rotation: 90, flashScale: 1.8, shape: 'circle' }, aurora: { duration: 1120, particleCount: 11, spread: 172, rise: 205, rotation: 330, flashScale: 2.7, shape: 'bar' }, prisma: { duration: 900, particleCount: 10, spread: 155, rise: 250, rotation: 450, flashScale: 2.4, shape: 'diamond' }, red: { duration: 720, particleCount: 7, spread: 140, rise: 270, rotation: 240, flashScale: 2.9, shape: 'circle' }, cyberpunk: { duration: 860, particleCount: 13, spread: 165, rise: 180, rotation: 540, flashScale: 2.6, shape: 'bar' },
+  'frame-campeon-indiscutible': { duration: 980, particleCount: 14, spread: 180, rise: 245, rotation: 360, flashScale: 3, shape: 'diamond' }, 'frame-heavy-duty': { duration: 680, particleCount: 6, spread: 105, rise: 285, rotation: 120, flashScale: 1.9, shape: 'bar' }, 'frame-alfa': { duration: 940, particleCount: 15, spread: 190, rise: 220, rotation: 600, flashScale: 3.1, shape: 'circle' }, 'frame-celtic-spirit': { duration: 1080, particleCount: 16, spread: 145, rise: 175, rotation: 300, flashScale: 2.3, shape: 'diamond' }, 'frame-hierro-fe-disciplina': { duration: 830, particleCount: 5, spread: 125, rise: 300, rotation: 150, flashScale: 2, shape: 'bar' }, 'frame-yo-soy-el-huno': { duration: 740, particleCount: 17, spread: 200, rise: 210, rotation: 390, flashScale: 2.8, shape: 'circle' }, 'frame-spqr': { duration: 1010, particleCount: 18, spread: 135, rise: 265, rotation: 480, flashScale: 2.2, shape: 'diamond' }, 'frame-fuerza-rinoceronte': { duration: 770, particleCount: 4, spread: 210, rise: 240, rotation: 210, flashScale: 3.2, shape: 'bar' }, 'frame-fuerza-pantera': { duration: 890, particleCount: 19, spread: 175, rise: 195, rotation: 570, flashScale: 2.55, shape: 'circle' }, 'frame-ruby-fit': { duration: 930, particleCount: 20, spread: 150, rise: 290, rotation: 420, flashScale: 2.35, shape: 'diamond' }, 'frame-valhalla-training': { duration: 1160, particleCount: 21, spread: 185, rise: 230, rotation: 660, flashScale: 3.3, shape: 'bar' }, 'frame-holy-fit': { duration: 1100, particleCount: 22, spread: 120, rise: 310, rotation: 60, flashScale: 1.7, shape: 'circle' }, 'frame-medjay-core': { duration: 970, particleCount: 23, spread: 205, rise: 200, rotation: 510, flashScale: 2.75, shape: 'diamond' }, 'frame-fuerza-cocodrilo': { duration: 810, particleCount: 24, spread: 160, rise: 280, rotation: 285, flashScale: 2.45, shape: 'bar' }, 'frame-fuerza-gorila': { duration: 750, particleCount: 25, spread: 220, rise: 255, rotation: 720, flashScale: 3.4, shape: 'circle' }, 'frame-elegante-sport': { duration: 1030, particleCount: 26, spread: 130, rise: 185, rotation: 375, flashScale: 2.15, shape: 'diamond' }, 'frame-banzai': { duration: 870, particleCount: 27, spread: 195, rise: 295, rotation: 630, flashScale: 2.95, shape: 'bar' }, 'frame-neon-gym': { duration: 690, particleCount: 28, spread: 170, rise: 225, rotation: 810, flashScale: 3.05, shape: 'circle' }, 'frame-fuerza-elefante': { duration: 1140, particleCount: 29, spread: 230, rise: 215, rotation: 240, flashScale: 2.65, shape: 'diamond' }, 'frame-this-is-sparta': { duration: 790, particleCount: 30, spread: 155, rise: 320, rotation: 690, flashScale: 3.5, shape: 'bar' }, 'frame-fuerza-tigre': { duration: 840, particleCount: 31, spread: 215, rise: 275, rotation: 555, flashScale: 2.85, shape: 'circle' },
+};
+
+export const EXCLUSIVE_FRAME_THEME_IDS = {
+  'shop-campeon-indiscutible': 'frame-campeon-indiscutible', 'shop-heavy-duty': 'frame-heavy-duty', 'shop-neon-vital': 'cyberpunk', 'shop-alfa': 'frame-alfa', 'shop-la-12': 'boca', 'shop-rosa-carmesi': 'red', 'shop-millo': 'river', 'shop-celtic-spirit': 'frame-celtic-spirit', 'shop-hierro-fe-disciplina': 'frame-hierro-fe-disciplina', 'shop-yo-soy-el-huno': 'frame-yo-soy-el-huno', 'shop-spqr': 'frame-spqr', 'shop-fuerza-rinoceronte': 'frame-fuerza-rinoceronte', 'shop-fuerza-pantera': 'frame-fuerza-pantera', 'shop-diamond-fit': 'prisma', 'shop-ruby-fit': 'frame-ruby-fit', 'shop-valhalla-training': 'frame-valhalla-training', 'shop-aurora-fitness': 'aurora', 'shop-holy-fit': 'frame-holy-fit', 'shop-medjay-core': 'frame-medjay-core', 'shop-fuerza-cocodrilo': 'frame-fuerza-cocodrilo', 'shop-fuerza-gorila': 'frame-fuerza-gorila', 'shop-elegante-sport': 'frame-elegante-sport', 'shop-banzai': 'frame-banzai', 'shop-neon-gym': 'frame-neon-gym', 'shop-fuerza-elefante': 'frame-fuerza-elefante', 'shop-this-is-sparta': 'frame-this-is-sparta', 'shop-fuerza-tigre': 'frame-fuerza-tigre', 'shop-winter-arc': 'snowflake',
+} as const;
+
 function createTheme(
   id: string,
   name: string,
@@ -48,6 +57,7 @@ function createTheme(
   palette: ThemePalette,
   decoration?: ThemeDecoration,
   interaction?: ThemeInteraction,
+  celebration?: ThemeCelebrationSpec,
 ): ShopTheme {
   const light = palette.blurTint === 'light';
   return {
@@ -64,6 +74,7 @@ function createTheme(
     ...palette,
     decoration,
     interaction,
+    celebration,
   };
 }
 
@@ -338,10 +349,10 @@ export const SHOP_THEMES: ShopTheme[] = [
   },
   {
     id: 'snowflake',
-    name: 'Copo · Invierno',
+    name: 'Winter Arc',
     price: 1200,
     category: 'special',
-    rarity: 'rare',
+    rarity: 'exclusive',
     description: 'Invierno frío',
     preview: '#81D4FA',
     decoration: 'snowflake',
@@ -357,13 +368,15 @@ export const SHOP_THEMES: ShopTheme[] = [
     success: '#0288D1',
     blurTint: 'light',
     tabBarBackground: 'rgba(227, 242, 253, 0.96)',
+    interaction: 'set-celebration',
+    celebration: FRAME_THEME_CELEBRATIONS.snowflake,
   },
   {
     id: 'red',
-    name: 'Rojo',
+    name: 'Rosa Carmesí',
     price: 1500,
     category: 'basic',
-    rarity: 'common',
+    rarity: 'exclusive',
     preview: '#C62828',
     primary: '#E53935',
     secondary: '#B71C1C',
@@ -377,6 +390,8 @@ export const SHOP_THEMES: ShopTheme[] = [
     success: '#FF8A80',
     blurTint: 'dark',
     tabBarBackground: 'rgba(20, 5, 5, 0.92)',
+    interaction: 'set-celebration',
+    celebration: FRAME_THEME_CELEBRATIONS.red,
   },
   createTheme('arena', 'Arena', 30, 'common', 'Dunas cálidas y minimalistas', { primary: '#D7A86E', secondary: '#A86C3A', accent: '#F7DBA7', background: ['#26170D', '#70421F', '#D7A86E'], text: '#FFF8EB', onPrimary: '#2A180D', success: '#F1C27D', blurTint: 'dark', tabBarBackground: 'rgba(38, 23, 13, 0.94)' }),
   createTheme('menta', 'Menta', 45, 'common', 'Fresco, limpio y enérgico', { primary: '#2EC4A6', secondary: '#147D6B', accent: '#A4F4DD', background: ['#062620', '#0B6555', '#2EC4A6'], text: '#E9FFF9', onPrimary: '#03221C', success: '#9AF3D8', blurTint: 'dark', tabBarBackground: 'rgba(6, 38, 32, 0.94)' }),
@@ -388,14 +403,14 @@ export const SHOP_THEMES: ShopTheme[] = [
   createTheme('cielo', 'Cielo', 170, 'common', 'Claridad azul brillante', { primary: '#5AA9FF', secondary: '#3870C8', accent: '#D6EDFF', background: ['#EAF6FF', '#B7DCFF', '#77B7FF'], text: '#123F79', onPrimary: '#FFFFFF', success: '#3384DC', blurTint: 'light', tabBarBackground: 'rgba(234, 246, 255, 0.96)' }),
   createTheme('cafe', 'Café', 180, 'common', 'Tostado intenso para sesiones largas', { primary: '#B8784C', secondary: '#6F3E28', accent: '#F0C99B', background: ['#20100B', '#512817', '#8C4B2D'], text: '#FFF4EB', onPrimary: '#25120B', success: '#D4A373', blurTint: 'dark', tabBarBackground: 'rgba(32, 16, 11, 0.94)' }),
   createTheme('pizarra', 'Pizarra', 180, 'common', 'Grafito sobrio y definido', { primary: '#94A3B8', secondary: '#475569', accent: '#E2E8F0', background: ['#0F172A', '#25364D', '#52677F'], text: '#F8FAFC', onPrimary: '#111827', success: '#CBD5E1', blurTint: 'dark', tabBarBackground: 'rgba(15, 23, 42, 0.94)' }),
-  createTheme('aurora', 'Aurora', 340, 'rare', 'Verdes y violetas en danza', { primary: '#5EEAD4', secondary: '#7C3AED', accent: '#D8B4FE', background: ['#071C2A', '#174A5B', '#6236B8'], text: '#F2FFFD', onPrimary: '#071C2A', success: '#A7F3D0', blurTint: 'dark', tabBarBackground: 'rgba(7, 28, 42, 0.94)' }, 'star'),
+  createTheme('aurora', 'Aurora Fitness', 340, 'exclusive', 'Verdes y violetas de aurora en movimiento', { primary: '#5EEAD4', secondary: '#7C3AED', accent: '#D8B4FE', background: ['#071C2A', '#174A5B', '#6236B8'], text: '#F2FFFD', onPrimary: '#071C2A', success: '#A7F3D0', blurTint: 'dark', tabBarBackground: 'rgba(7, 28, 42, 0.94)' }, 'star', 'set-celebration', FRAME_THEME_CELEBRATIONS.aurora),
   createTheme('volcan', 'Volcán', 440, 'rare', 'Lava encendida bajo obsidiana', { primary: '#FF5A36', secondary: '#A71919', accent: '#FFC14D', background: ['#170A0A', '#611313', '#C4341D'], text: '#FFF3E8', onPrimary: '#2A0705', success: '#FF9E5E', blurTint: 'dark', tabBarBackground: 'rgba(23, 10, 10, 0.94)' }, 'sun'),
   createTheme('medusa', 'Medusa', 540, 'rare', 'Profundidad eléctrica y acuática', { primary: '#22D3EE', secondary: '#2563EB', accent: '#E879F9', background: ['#050B2B', '#123B76', '#4C1D95'], text: '#EFFBFF', onPrimary: '#06152F', success: '#67E8F9', blurTint: 'dark', tabBarBackground: 'rgba(5, 11, 43, 0.94)' }, 'moon'),
-  createTheme('cyberpunk', 'Cyberpunk', 650, 'rare', 'Fucsia y cian de ciudad nocturna', { primary: '#FF3CAC', secondary: '#784BA0', accent: '#00F5D4', background: ['#130526', '#4A125A', '#0B6072'], text: '#FFF1FD', onPrimary: '#25052E', success: '#00E5C3', blurTint: 'dark', tabBarBackground: 'rgba(19, 5, 38, 0.94)' }, 'star'),
-  createTheme('boca', 'Boca Juniors', 700, 'rare', 'Azul profundo y oro xeneize', { primary: '#1746A2', secondary: '#082B68', accent: '#F6C445', background: ['#06152E', '#0A2D68', '#1746A2'], text: '#FFF9E8', onPrimary: '#06152E', success: '#F6C445', blurTint: 'dark', tabBarBackground: 'rgba(6, 21, 46, 0.94)' }, 'star'),
-  createTheme('prisma', 'Prisma', 760, 'rare', 'Cristales de color refractado', { primary: '#8B5CF6', secondary: '#EC4899', accent: '#FDE047', background: ['#1A103B', '#543B9A', '#D94A99'], text: '#FFF9FF', onPrimary: '#1F1149', success: '#C4B5FD', blurTint: 'dark', tabBarBackground: 'rgba(26, 16, 59, 0.94)' }, 'star'),
+  createTheme('cyberpunk', 'Neon Vital', 650, 'exclusive', 'Fucsia y cian de ciudad nocturna', { primary: '#FF3CAC', secondary: '#784BA0', accent: '#00F5D4', background: ['#130526', '#4A125A', '#0B6072'], text: '#FFF1FD', onPrimary: '#25052E', success: '#00E5C3', blurTint: 'dark', tabBarBackground: 'rgba(19, 5, 38, 0.94)' }, 'star', 'set-celebration', FRAME_THEME_CELEBRATIONS.cyberpunk),
+  createTheme('boca', 'La 12', 700, 'exclusive', 'Azul profundo y oro xeneize', { primary: '#1746A2', secondary: '#082B68', accent: '#F6C445', background: ['#06152E', '#0A2D68', '#1746A2'], text: '#FFF9E8', onPrimary: '#06152E', success: '#F6C445', blurTint: 'dark', tabBarBackground: 'rgba(6, 21, 46, 0.94)' }, 'star', 'set-celebration', FRAME_THEME_CELEBRATIONS.boca),
+  createTheme('prisma', 'Diamond Fit', 760, 'exclusive', 'Cristales de color refractado', { primary: '#8B5CF6', secondary: '#EC4899', accent: '#FDE047', background: ['#1A103B', '#543B9A', '#D94A99'], text: '#FFF9FF', onPrimary: '#1F1149', success: '#C4B5FD', blurTint: 'dark', tabBarBackground: 'rgba(26, 16, 59, 0.94)' }, 'star', 'set-celebration', FRAME_THEME_CELEBRATIONS.prisma),
   createTheme('jade-imperial', 'Jade imperial', 850, 'rare', 'Esmeralda profunda y oro suave', { primary: '#2DD4A8', secondary: '#0F766E', accent: '#FCD34D', background: ['#062A29', '#0C5D55', '#167A6A'], text: '#F0FFFC', onPrimary: '#042E2A', success: '#A7F3D0', blurTint: 'dark', tabBarBackground: 'rgba(6, 42, 41, 0.94)' }, 'leaf'),
-  createTheme('river', 'River Plate', 850, 'rare', 'Blanco, rojo y negro monumental', { primary: '#E53935', secondary: '#961B1B', accent: '#FFFFFF', background: ['#170808', '#651616', '#BA2A2A'], text: '#FFF8F8', onPrimary: '#260909', success: '#FFB4B1', blurTint: 'dark', tabBarBackground: 'rgba(23, 8, 8, 0.94)' }, 'sun'),
+  createTheme('river', 'Millo Monumental', 850, 'exclusive', 'Blanco, rojo y negro monumental', { primary: '#E53935', secondary: '#961B1B', accent: '#FFFFFF', background: ['#170808', '#651616', '#BA2A2A'], text: '#FFF8F8', onPrimary: '#260909', success: '#FFB4B1', blurTint: 'dark', tabBarBackground: 'rgba(23, 8, 8, 0.94)' }, 'sun', 'set-celebration', FRAME_THEME_CELEBRATIONS.river),
   createTheme('atardecer', 'Atardecer', 940, 'rare', 'Magenta, naranja y último sol', { primary: '#FB7185', secondary: '#F97316', accent: '#FDE68A', background: ['#3A1034', '#A52B57', '#ED6527'], text: '#FFF7EE', onPrimary: '#4A102E', success: '#FDBA74', blurTint: 'dark', tabBarBackground: 'rgba(58, 16, 52, 0.94)' }, 'sun'),
   createTheme('seleccion-argentina', 'Selección Argentina', 1000, 'rare', 'Celeste, blanco y oro nacional', { primary: '#75AADB', secondary: '#2D6FA3', accent: '#F6C445', background: ['#071A2B', '#164B78', '#75AADB'], text: '#F5FBFF', onPrimary: '#071A2B', success: '#F6C445', blurTint: 'dark', tabBarBackground: 'rgba(7, 26, 43, 0.94)' }, 'star'),
   createTheme('tormenta', 'Tormenta', 1000, 'rare', 'Electricidad sobre nubes oscuras', { primary: '#8B9EFF', secondary: '#4353B9', accent: '#DCE7FF', background: ['#101426', '#273356', '#5369A3'], text: '#F7F9FF', onPrimary: '#11162C', success: '#B8C7FF', blurTint: 'dark', tabBarBackground: 'rgba(16, 20, 38, 0.94)' }, 'moon'),
@@ -405,6 +420,27 @@ export const SHOP_THEMES: ShopTheme[] = [
   createTheme('aurora-boreal', 'Aurora boreal', 2600, 'exclusive', 'Cintas polares de luz al conquistar una serie', { primary: '#2EF2C3', secondary: '#4265FF', accent: '#D58CFF', background: ['#031C24', '#0C5A67', '#4933A6'], text: '#EFFFFB', onPrimary: '#04232D', success: '#8BFFD8', blurTint: 'dark', tabBarBackground: 'rgba(3, 28, 36, 0.96)' }, 'star', 'set-celebration'),
   createTheme('fenix', 'Fénix', 3000, 'exclusive', 'Fuego magenta que renace con cada esfuerzo', { primary: '#FF3D71', secondary: '#FF8A3D', accent: '#FFE06B', background: ['#270515', '#8A123F', '#D8492F'], text: '#FFF4ED', onPrimary: '#350615', success: '#FFB26B', blurTint: 'dark', tabBarBackground: 'rgba(39, 5, 21, 0.96)' }, 'sun', 'set-celebration'),
   createTheme('holograma', 'Holograma', 3500, 'exclusive', 'Irisación cian y violeta con destello de victoria', { primary: '#6EE7F9', secondary: '#A855F7', accent: '#F0ABFC', background: ['#09102B', '#22457A', '#7137A5'], text: '#F6FCFF', onPrimary: '#0A1531', success: '#A5F3FC', blurTint: 'dark', tabBarBackground: 'rgba(9, 16, 43, 0.96)' }, 'star', 'set-celebration'),
+  createTheme('frame-campeon-indiscutible', 'Campeón Indiscutible', 1800, 'exclusive', 'Oro de podio y violeta de campeón', { primary: '#FFD166', secondary: '#7B2CBF', accent: '#FFF3B0', background: ['#21110A', '#704214', '#7B2CBF'], text: '#FFF9E8', onPrimary: '#2A1608', success: '#FFE08A', blurTint: 'dark', tabBarBackground: 'rgba(33, 17, 10, 0.96)' }, 'sun', 'set-celebration', FRAME_THEME_CELEBRATIONS['frame-campeon-indiscutible']),
+  createTheme('frame-heavy-duty', 'Heavy Duty', 1900, 'exclusive', 'Acero industrial y naranja de carga', { primary: '#A8B1BA', secondary: '#3D4A55', accent: '#FF8C42', background: ['#11161A', '#29343B', '#75411F'], text: '#F1F5F7', onPrimary: '#101417', success: '#C6D0D6', blurTint: 'dark', tabBarBackground: 'rgba(17, 22, 26, 0.96)' }, 'leaf', 'set-celebration', FRAME_THEME_CELEBRATIONS['frame-heavy-duty']),
+  createTheme('frame-alfa', 'Alfa', 2000, 'exclusive', 'Negro, oro y presencia dominante', { primary: '#F6C945', secondary: '#23212A', accent: '#FFF4B8', background: ['#09090B', '#292421', '#735F1F'], text: '#FFFCEB', onPrimary: '#14120C', success: '#E9D785', blurTint: 'dark', tabBarBackground: 'rgba(9, 9, 11, 0.96)' }, 'sun', 'set-celebration', FRAME_THEME_CELEBRATIONS['frame-alfa']),
+  createTheme('frame-celtic-spirit', 'Celtic Spirit', 2100, 'exclusive', 'Verde esmeralda y nudos de bosque', { primary: '#34D399', secondary: '#166534', accent: '#D9F99D', background: ['#061A12', '#0D5133', '#3A6B29'], text: '#F3FFE9', onPrimary: '#082114', success: '#A7F3D0', blurTint: 'dark', tabBarBackground: 'rgba(6, 26, 18, 0.96)' }, 'leaf', 'set-celebration', FRAME_THEME_CELEBRATIONS['frame-celtic-spirit']),
+  createTheme('frame-hierro-fe-disciplina', 'Hierro, Fe y Disciplina', 2200, 'exclusive', 'Bronce solemne sobre piedra oscura', { primary: '#CD9B5A', secondary: '#5F3A20', accent: '#F4D6A5', background: ['#18120E', '#4D3325', '#805A34'], text: '#FFF7ED', onPrimary: '#23170E', success: '#E8C182', blurTint: 'dark', tabBarBackground: 'rgba(24, 18, 14, 0.96)' }, 'moon', 'set-celebration', FRAME_THEME_CELEBRATIONS['frame-hierro-fe-disciplina']),
+  createTheme('frame-yo-soy-el-huno', 'Yo Soy el Huno', 2300, 'exclusive', 'Rojo guerrero y cobre de conquista', { primary: '#E85D3F', secondary: '#6B1D1D', accent: '#F6B44C', background: ['#250908', '#6E2020', '#9A5225'], text: '#FFF2E8', onPrimary: '#320B08', success: '#FF9B6A', blurTint: 'dark', tabBarBackground: 'rgba(37, 9, 8, 0.96)' }, 'sun', 'set-celebration', FRAME_THEME_CELEBRATIONS['frame-yo-soy-el-huno']),
+  createTheme('frame-spqr', 'SPQR', 2400, 'exclusive', 'Púrpura imperial y laurel dorado', { primary: '#A855F7', secondary: '#4C1D95', accent: '#FACC15', background: ['#170824', '#4C176F', '#8D5D14'], text: '#FFF8E8', onPrimary: '#250B38', success: '#E9C46A', blurTint: 'dark', tabBarBackground: 'rgba(23, 8, 36, 0.96)' }, 'star', 'set-celebration', FRAME_THEME_CELEBRATIONS['frame-spqr']),
+  createTheme('frame-fuerza-rinoceronte', 'Fuerza de Rinoceronte', 2500, 'exclusive', 'Gris blindado y tierra compacta', { primary: '#9CA3AF', secondary: '#4B5563', accent: '#C4A484', background: ['#131619', '#353C42', '#70543C'], text: '#F7F7F5', onPrimary: '#1A1D20', success: '#D1D5DB', blurTint: 'dark', tabBarBackground: 'rgba(19, 22, 25, 0.96)' }, 'moon', 'set-celebration', FRAME_THEME_CELEBRATIONS['frame-fuerza-rinoceronte']),
+  createTheme('frame-fuerza-pantera', 'Fuerza de Pantera', 2600, 'exclusive', 'Obsidiana, violeta y mirada felina', { primary: '#A78BFA', secondary: '#312E81', accent: '#E9D5FF', background: ['#0B0920', '#29205C', '#5B347A'], text: '#F7F2FF', onPrimary: '#120D2A', success: '#C4B5FD', blurTint: 'dark', tabBarBackground: 'rgba(11, 9, 32, 0.96)' }, 'moon', 'set-celebration', FRAME_THEME_CELEBRATIONS['frame-fuerza-pantera']),
+  createTheme('frame-ruby-fit', 'Ruby Fit', 2700, 'exclusive', 'Rubí intenso sobre granate pulido', { primary: '#F43F5E', secondary: '#9F1239', accent: '#FDA4AF', background: ['#26050F', '#73112D', '#B42B48'], text: '#FFF1F3', onPrimary: '#350711', success: '#FB7185', blurTint: 'dark', tabBarBackground: 'rgba(38, 5, 15, 0.96)' }, 'star', 'set-celebration', FRAME_THEME_CELEBRATIONS['frame-ruby-fit']),
+  createTheme('frame-valhalla-training', 'Valhalla Training', 2800, 'exclusive', 'Hielo nórdico, acero y runas', { primary: '#93C5FD', secondary: '#1E3A8A', accent: '#E0F2FE', background: ['#07111F', '#17385D', '#49759C'], text: '#EFFBFF', onPrimary: '#09182A', success: '#BAE6FD', blurTint: 'dark', tabBarBackground: 'rgba(7, 17, 31, 0.96)' }, 'snowflake', 'set-celebration', FRAME_THEME_CELEBRATIONS['frame-valhalla-training']),
+  createTheme('frame-holy-fit', 'Holy Fit', 2900, 'exclusive', 'Blanco luminoso y azul celestial', { primary: '#E0F2FE', secondary: '#60A5FA', accent: '#FDE68A', background: ['#EEF8FF', '#CBE7FF', '#A5BFE8'], text: '#18345A', onPrimary: '#FFFFFF', success: '#3B82F6', blurTint: 'light', tabBarBackground: 'rgba(238, 248, 255, 0.96)' }, 'sun', 'set-celebration', FRAME_THEME_CELEBRATIONS['frame-holy-fit']),
+  createTheme('frame-medjay-core', 'Medjay Core', 3000, 'exclusive', 'Turquesa egipcio y arena antigua', { primary: '#22C1C3', secondary: '#0F766E', accent: '#F4C95D', background: ['#082323', '#145C59', '#89712F'], text: '#F2FFFA', onPrimary: '#092B2B', success: '#5EEAD4', blurTint: 'dark', tabBarBackground: 'rgba(8, 35, 35, 0.96)' }, 'star', 'set-celebration', FRAME_THEME_CELEBRATIONS['frame-medjay-core']),
+  createTheme('frame-fuerza-cocodrilo', 'Fuerza de Cocodrilo', 3100, 'exclusive', 'Pantano profundo y escamas verdes', { primary: '#84CC16', secondary: '#365314', accent: '#D9F99D', background: ['#0C1606', '#365E14', '#63752B'], text: '#F7FEE7', onPrimary: '#172B08', success: '#BEF264', blurTint: 'dark', tabBarBackground: 'rgba(12, 22, 6, 0.96)' }, 'leaf', 'set-celebration', FRAME_THEME_CELEBRATIONS['frame-fuerza-cocodrilo']),
+  createTheme('frame-fuerza-gorila', 'Fuerza de Gorila', 3200, 'exclusive', 'Pizarra volcánica y plata salvaje', { primary: '#D1D5DB', secondary: '#374151', accent: '#94A3B8', background: ['#111827', '#2E3948', '#5A6470'], text: '#F8FAFC', onPrimary: '#171D27', success: '#CBD5E1', blurTint: 'dark', tabBarBackground: 'rgba(17, 24, 39, 0.96)' }, 'moon', 'set-celebration', FRAME_THEME_CELEBRATIONS['frame-fuerza-gorila']),
+  createTheme('frame-elegante-sport', 'Elegante Sport', 3300, 'exclusive', 'Negro tinta, marfil y azul sastre', { primary: '#DCE6F2', secondary: '#1E3A5F', accent: '#C9A86A', background: ['#0D1520', '#253A54', '#6F5A3B'], text: '#F7FAFC', onPrimary: '#121D2B', success: '#B6D4F0', blurTint: 'dark', tabBarBackground: 'rgba(13, 21, 32, 0.96)' }, 'star', 'set-celebration', FRAME_THEME_CELEBRATIONS['frame-elegante-sport']),
+  createTheme('frame-banzai', 'Banzai', 3400, 'exclusive', 'Carmesí japonés y destello sakura', { primary: '#FB7185', secondary: '#9F1239', accent: '#FED7E2', background: ['#2A0715', '#7D1839', '#C64B68'], text: '#FFF4F6', onPrimary: '#3A091A', success: '#FDA4AF', blurTint: 'dark', tabBarBackground: 'rgba(42, 7, 21, 0.96)' }, 'sun', 'set-celebration', FRAME_THEME_CELEBRATIONS['frame-banzai']),
+  createTheme('frame-neon-gym', 'Neon Gym', 3500, 'exclusive', 'Verde láser y violeta nocturno', { primary: '#39FF88', secondary: '#6D28D9', accent: '#A7F3D0', background: ['#090414', '#321254', '#0D6944'], text: '#EDFFF6', onPrimary: '#12081D', success: '#6EE7B7', blurTint: 'dark', tabBarBackground: 'rgba(9, 4, 20, 0.96)' }, 'star', 'set-celebration', FRAME_THEME_CELEBRATIONS['frame-neon-gym']),
+  createTheme('frame-fuerza-elefante', 'Fuerza de Elefante', 3500, 'exclusive', 'Azul pizarra y marfil ancestral', { primary: '#8FA3B8', secondary: '#334155', accent: '#F5E6C8', background: ['#10161E', '#30465C', '#746C5B'], text: '#F8FAFC', onPrimary: '#17202A', success: '#CBD5E1', blurTint: 'dark', tabBarBackground: 'rgba(16, 22, 30, 0.96)' }, 'moon', 'set-celebration', FRAME_THEME_CELEBRATIONS['frame-fuerza-elefante']),
+  createTheme('frame-this-is-sparta', 'This Is Sparta', 3500, 'exclusive', 'Rojo espartano y bronce de escudo', { primary: '#DC2626', secondary: '#7F1D1D', accent: '#D4A017', background: ['#250707', '#731B1B', '#8B5A16'], text: '#FFF7ED', onPrimary: '#350909', success: '#F87171', blurTint: 'dark', tabBarBackground: 'rgba(37, 7, 7, 0.96)' }, 'sun', 'set-celebration', FRAME_THEME_CELEBRATIONS['frame-this-is-sparta']),
+  createTheme('frame-fuerza-tigre', 'Fuerza de Tigre', 3500, 'exclusive', 'Naranja feroz y rayas de carbón', { primary: '#FB923C', secondary: '#9A3412', accent: '#FED7AA', background: ['#251005', '#713313', '#A8511A'], text: '#FFF7ED', onPrimary: '#341604', success: '#FDBA74', blurTint: 'dark', tabBarBackground: 'rgba(37, 16, 5, 0.96)' }, 'sun', 'set-celebration', FRAME_THEME_CELEBRATIONS['frame-fuerza-tigre']),
 ];
 
 export const SHOP_CATEGORIES: { key: ShopThemeCategory; label: string }[] = [

@@ -12,6 +12,8 @@ describe('AppNoticeModal', () => {
       message: 'Reward message',
       changes: ['First change', 'Second change'],
       highlight: '+250 GEMS',
+      version: '0.4.1',
+      celebration: React.createElement('Text', null, 'Alfa User preview'),
       actionLabel: 'Claim',
       onClose,
     }));
@@ -19,6 +21,9 @@ describe('AppNoticeModal', () => {
     expect(notice.root.findByProps({ accessibilityRole: 'alert' })).toBeTruthy();
     expect(JSON.stringify(notice.toJSON())).toContain('First change');
     expect(JSON.stringify(notice.toJSON())).toContain('Second change');
+    expect(JSON.stringify(notice.toJSON())).toContain('VERSION');
+    expect(JSON.stringify(notice.toJSON())).toContain('0.4.1');
+    expect(JSON.stringify(notice.toJSON())).toContain('Alfa User preview');
     notice.root.findByProps({ accessibilityLabel: 'Claim' }).props.onPress();
     expect(onClose).toHaveBeenCalledOnce();
   });
