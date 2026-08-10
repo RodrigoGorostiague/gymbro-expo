@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, test, vi } from 'vitest';
 const rpc = vi.hoisted(() => vi.fn());
 vi.mock('../services/supabase', () => ({ supabase: { rpc }, supabaseConfigurationError: null }));
 
-import { claimPendingReleaseGemRewards, claimWelcomeGemReward, loadRewardWallet, purchaseRewardFrame, purchaseRewardTheme, receiptTotal, updateRewardWalletPreferences } from '../services/rewardWallet';
+import { acknowledgeReleaseUpdates, claimPendingReleaseGemRewards, claimPendingReleaseUpdates, claimWelcomeGemReward, loadRewardWallet, purchaseRewardFrame, purchaseRewardTheme, receiptTotal, updateRewardWalletPreferences } from '../services/rewardWallet';
 
 const wallet = { balance: 25, purchasedThemeIds: ['white'], purchasedFrameIds: [], purchasedTitleIds: [], equippedThemeId: 'white', combineWithPartner: false };
 
@@ -46,6 +46,19 @@ describe('remote reward wallet boundary', () => {
     rpc.mockResolvedValueOnce({ data: { claimed: true, wallet: { ...wallet, balance: 225 } }, error: null });
     await expect(claimPendingReleaseGemRewards()).resolves.toEqual({ claimed: true, wallet: { ...wallet, balance: 225 } });
     expect(rpc).toHaveBeenCalledWith('claim_pending_release_gem_rewards', {});
+  });
+
+  test('loads the server-owned release digest after crediting pending rewards', async () => {
+    const updates = { claimed: true, wallet, releases: [{ version: '0.5.0', title: 'Release', message: 'Message', features: ['Feature'], fixes: ['Fix'], rewardGems: 50, rewardClaimed: true }] };
+    rpc.mockResolvedValueOnce({ data: updates, error: null });
+    await expect(claimPendingReleaseUpdates(6)).resolves.toEqual(updates);
+    expect(rpc).toHaveBeenCalledWith('claim_pending_release_updates', { max_release_sequence: 6 });
+  });
+
+  test('acknowledges release updates remotely after they are presented', async () => {
+    rpc.mockResolvedValueOnce({ error: null });
+    await expect(acknowledgeReleaseUpdates(['0.4.1', '0.5.0'])).resolves.toBeUndefined();
+    expect(rpc).toHaveBeenCalledWith('acknowledge_release_updates', { versions: ['0.4.1', '0.5.0'] });
   });
 
   test('totals only positive server receipt entries', () => {

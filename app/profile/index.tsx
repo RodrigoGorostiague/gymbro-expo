@@ -19,9 +19,10 @@ import { ExperienceProgressCard } from '../../components/ExperienceProgressCard'
 import { MuscleDistributionRadar } from '../../components/MuscleDistributionRadar';
 import { useData } from '../../context/DataContext';
 import { ownMuscleDistribution } from '../../utils/muscleDistribution';
+import { MUSCLE_BALANCE_TARGETS, MuscleBalanceTargetId, muscleBalanceTargetEntries, muscleBalanceTargetForId } from '../../constants/muscleBalanceTargets';
 
 const categoryKeys = ['about'] as const;
-type CustomizationSection = 'avatar' | 'frame' | 'title' | null;
+type CustomizationSection = 'avatar' | 'frame' | 'title' | 'target' | null;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
@@ -81,6 +82,7 @@ export default function ProfileScreen() {
   const [shareSocialConsistency, setShareSocialConsistency] = useState(true);
   const [shareSocialStatistics, setShareSocialStatistics] = useState(true);
   const [shareSocialMuscleDistribution, setShareSocialMuscleDistribution] = useState(true);
+  const [muscleBalanceTargetId, setMuscleBalanceTargetId] = useState<MuscleBalanceTargetId>('balanced');
   const [avatarId, setAvatarId] = useState<AvatarId>(DEFAULT_AVATAR_ID);
   const [frameId, setFrameId] = useState<ProfileFrameId>(DEFAULT_PROFILE_FRAME_ID);
   const [titleId, setTitleId] = useState<ProfileTitleId | null>(DEFAULT_PROFILE_TITLE_ID);
@@ -93,6 +95,7 @@ export default function ProfileScreen() {
   const profile = isRecord(ownProfile) ? ownProfile : null;
   const { purchasedFrameIds } = useShop();
   const muscleDistribution = useMemo(() => ownMuscleDistribution(attempts ?? [], catalogMuscleGroups), [attempts, catalogMuscleGroups]);
+  const muscleBalanceTarget = useMemo(() => muscleBalanceTargetEntries(catalogMuscleGroups, muscleBalanceTargetId), [catalogMuscleGroups, muscleBalanceTargetId]);
   const displayedFrameId = previewFrameId ?? frameId;
 
   useEffect(() => {
@@ -147,6 +150,7 @@ export default function ProfileScreen() {
     setShareSocialConsistency(booleanOrDefault(profile.shareSocialConsistency));
     setShareSocialStatistics(booleanOrDefault(profile.shareSocialStatistics));
     setShareSocialMuscleDistribution(booleanOrDefault(profile.shareSocialMuscleDistribution));
+    setMuscleBalanceTargetId(muscleBalanceTargetForId(profile.muscleBalanceTargetId));
   }, [profile]);
 
   useFocusEffect(useCallback(() => {
@@ -185,6 +189,7 @@ export default function ProfileScreen() {
         shareSocialConsistency,
         shareSocialStatistics,
         shareSocialMuscleDistribution,
+        muscleBalanceTargetId,
       });
       Alert.alert('Perfil guardado', 'Tus ajustes de privacidad se actualizaron.');
     } catch (reason) {
@@ -214,8 +219,10 @@ export default function ProfileScreen() {
            <GlassCard><ExperienceProgressCard progress={experienceProgress} frameId={frameId} theme={theme} title="Tu rango" /></GlassCard>
            <GlassCard>
             <Text accessibilityRole="header" style={[styles.title, { color: theme.text }]}>Tu distribución muscular</Text>
-            <Text style={[styles.identityHint, { color: theme.textMuted }]}>{shareSocialMuscleDistribution ? 'Así se ve tu distribución en tu círculo.' : 'Tu distribución está privada para tu círculo.'}</Text>
-            <MuscleDistributionRadar data={muscleDistribution} />
+             <Text style={[styles.identityHint, { color: theme.textMuted }]}>{shareSocialMuscleDistribution ? 'Así se ve tu distribución en tu círculo.' : 'Tu distribución está privada para tu círculo.'}</Text>
+             <MuscleDistributionRadar data={muscleDistribution} reference={muscleBalanceTarget} />
+             <View style={styles.targetHeader}><View style={styles.targetCopy}><Text style={[styles.targetTitle, { color: theme.text }]}>Objetivo de distribución</Text><Text style={[styles.identityHint, { color: theme.textMuted }]}>{MUSCLE_BALANCE_TARGETS.find((target) => target.id === muscleBalanceTargetId)?.description}</Text></View><HapticPressable accessibilityRole="button" accessibilityLabel="Elegir objetivo muscular" onPress={() => setCustomizationSection((current) => current === 'target' ? null : 'target')} style={[styles.targetButton, { borderColor: theme.primary }]}><Text style={[styles.editAvatarText, { color: theme.primary }]}>Cambiar</Text></HapticPressable></View>
+             {customizationSection === 'target' ? <View accessibilityRole="radiogroup" style={styles.targetOptions}>{MUSCLE_BALANCE_TARGETS.map((target) => <HapticPressable key={target.id} accessibilityRole="radio" accessibilityLabel={target.label} accessibilityState={{ selected: muscleBalanceTargetId === target.id }} onPress={() => { setMuscleBalanceTargetId(target.id); setCustomizationSection(null); }} style={[styles.targetOption, { borderColor: muscleBalanceTargetId === target.id ? theme.primary : theme.glassBorder, backgroundColor: muscleBalanceTargetId === target.id ? theme.glass : 'transparent' }]}><Text style={[styles.avatarOptionLabel, { color: theme.text }]}>{target.label}</Text><Text style={[styles.identityHint, { color: theme.textMuted }]}>{target.description}</Text></HapticPressable>)}</View> : null}
            </GlassCard>
            <GlassCard>
             <View style={styles.identityRow}>
@@ -320,5 +327,11 @@ const styles = StyleSheet.create({
   frameLock: { alignItems: 'center', backgroundColor: 'rgba(15,23,42,0.88)', borderColor: 'rgba(255,255,255,0.45)', borderRadius: 999, borderWidth: 1, bottom: -3, height: 22, justifyContent: 'center', position: 'absolute', right: -5, width: 22 },
   avatarOptionLabel: { fontSize: 11, fontWeight: '700', textAlign: 'center' },
   setting: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 16, marginVertical: 8 },
-  settingCopy: { flex: 1 },
+   settingCopy: { flex: 1 },
+   targetHeader: { alignItems: 'center', flexDirection: 'row', gap: 12, marginTop: 12 },
+   targetCopy: { flex: 1, gap: 3 },
+   targetTitle: { fontSize: 14, fontWeight: '800' },
+   targetButton: { borderRadius: 999, borderWidth: 1, paddingHorizontal: 12, paddingVertical: 7 },
+   targetOptions: { gap: 8, marginTop: 12 },
+   targetOption: { borderRadius: 12, borderWidth: 1, gap: 3, padding: 10 },
 });

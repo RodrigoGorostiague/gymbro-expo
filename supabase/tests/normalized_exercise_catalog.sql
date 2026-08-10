@@ -1,5 +1,5 @@
 begin;
-select plan(14);
+select plan(15);
 
 delete from public.exercise_muscle_groups;
 delete from public.muscle_group_relations;
@@ -49,6 +49,7 @@ set local role authenticated;
 select set_config('request.jwt.claim.sub', '00000000-0000-0000-0000-000000000001', true);
 
 select is((select count(*)::int from public.list_catalog_exercises()), 4, 'the authenticated catalog projection returns normalized exercises');
+select is((select parent_group_ids from public.list_catalog_muscle_groups_with_parents() where id = 'GM-101'), array['GM-100']::text[], 'catalog projection resolves recursive visible parent groups');
 
 select is(
   (select array_agg(exercise_id order by relevance desc) from public.list_catalog_exercises_by_muscle_group('GM-100', 'primary_only')),

@@ -43,6 +43,25 @@ describe('active workout snapshot', () => {
     expect(updateSessionExerciseSets(edited, 'first', { 'first-first-set': true }, (sets) => [], () => 'unused')).toBe(edited);
   });
 
+  test('keeps per-subset intensity targets and backoff grouping in the session snapshot', () => {
+    const enriched = {
+      ...routine,
+      exercises: [{ ...routine.exercises[0], sets: [
+        { id: 'backoff-1', tipo: 1, weight: 70, reps: 10, backoffGroupId: 'backoff-group', effortTarget: { kind: 'rir' as const, value: 2 as const } },
+        { id: 'backoff-2', tipo: 2, weight: 65, reps: 10, backoffGroupId: 'backoff-group', effortTarget: { kind: 'rpe' as const, value: 8 as const } },
+      ] }, routine.exercises[1]],
+    };
+
+    const snapshot = snapshotWorkoutRoutine(enriched);
+    snapshot.exercises[0].sets[0].effortTarget = { kind: 'rir', value: 1 };
+
+    expect(snapshot.exercises[0].sets).toMatchObject([
+      { backoffGroupId: 'backoff-group', effortTarget: { kind: 'rir', value: 1 } },
+      { backoffGroupId: 'backoff-group', effortTarget: { kind: 'rpe', value: 8 } },
+    ]);
+    expect(enriched.exercises[0].sets[0].effortTarget).toEqual({ kind: 'rir', value: 2 });
+  });
+
   test('changes an unfinished session set type and keeps failure prescriptions at zero reps', () => {
     const snapshot = snapshotWorkoutRoutine(routine);
     const edited = updateSessionExerciseSets(snapshot, 'first', {}, (sets) => withSessionSetType(sets, 'first-set', 'F'), () => 'unused');

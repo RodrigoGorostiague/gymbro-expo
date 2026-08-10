@@ -55,10 +55,15 @@ function asSharePayload(value: unknown): WorkoutRecapSharePayload | null {
   const hasRequired = (candidate: Record<string, unknown>, keys: readonly string[]) => keys.every((key) => key in candidate);
   const validLabel = (candidate: unknown, max: number, required = true) => typeof candidate === 'string' && (required ? candidate.trim().length > 0 : true) && candidate.length <= max;
   const validMuscles = (candidate: unknown) => Array.isArray(candidate) && candidate.length >= 1 && candidate.length <= 32 && candidate.every((muscle) => validLabel(muscle, 120));
-  const validSet = (set: unknown) => isRecord(set) && hasOnly(set, ['tipo', 'weight', 'reps']) && hasRequired(set, ['tipo', 'weight', 'reps'])
+  const validEffortTarget = (target: unknown) => isRecord(target)
+    && ((target.kind === 'rir' && Number.isInteger(target.value) && (target.value as number) >= 0 && (target.value as number) <= 5)
+      || (target.kind === 'rpe' && Number.isInteger(target.value) && (target.value as number) >= 6 && (target.value as number) <= 10));
+  const validSet = (set: unknown) => isRecord(set) && hasOnly(set, ['tipo', 'weight', 'reps', 'effortTarget', 'backoffGroup']) && hasRequired(set, ['tipo', 'weight', 'reps'])
     && (set.tipo === 'C' || set.tipo === 'F' || (typeof set.tipo === 'number' && Number.isInteger(set.tipo) && set.tipo >= 0 && set.tipo <= 10))
     && typeof set.weight === 'number' && Number.isFinite(set.weight) && set.weight >= 0 && set.weight <= 10000
-    && typeof set.reps === 'number' && Number.isInteger(set.reps) && set.reps >= 0 && set.reps <= 1000;
+    && typeof set.reps === 'number' && Number.isInteger(set.reps) && set.reps >= 0 && set.reps <= 1000
+    && (set.effortTarget === undefined || validEffortTarget(set.effortTarget))
+    && (set.backoffGroup === undefined || (typeof set.backoffGroup === 'number' && Number.isInteger(set.backoffGroup) && set.backoffGroup >= 0 && set.backoffGroup <= 99));
   const validRoutine = (routine: unknown): routine is NonNullable<WorkoutRecapSharePayload['routine']> => {
     if (!routine || typeof routine !== 'object') return false;
     const value = routine as Record<string, unknown>;
@@ -86,7 +91,16 @@ function routinePayload(routine: Routine): NonNullable<WorkoutRecapSharePayload[
       loadMode: exercise.loadMode ?? exercise.definitionSnapshot?.loadMode ?? 'external-load',
       loadUnit: exercise.loadUnit ?? exercise.definitionSnapshot?.loadUnit ?? 'kg',
       variant: exercise.variant,
-      sets: exercise.sets.map(({ tipo, weight, reps }) => ({ tipo, weight, reps })),
+      sets: (() => {
+        const groups = new Map<string, number>();
+        return exercise.sets.map(({ tipo, weight, reps, effortTarget, backoffGroupId }) => ({
+          tipo,
+          weight,
+          reps,
+          ...(effortTarget ? { effortTarget } : {}),
+          ...(backoffGroupId ? { backoffGroup: groups.get(backoffGroupId) ?? (groups.set(backoffGroupId, groups.size), groups.size - 1) } : {}),
+        }));
+      })(),
     })),
   };
 }
@@ -126,14 +140,23 @@ export function recapSharePayload(
   return payload;
 }
 
+function importedSets(sets: NonNullable<WorkoutRecapSharePayload['routine']>['exercises'][number]['sets'], prefix: string) {
+  const groups = new Map<number, string>();
+  return sets.map(({ backoffGroup, ...set }, setIndex) => ({
+    ...set,
+    id: `${prefix}:set:${setIndex + 1}`,
+    ...(backoffGroup === undefined ? {} : { backoffGroupId: groups.get(backoffGroup) ?? (groups.set(backoffGroup, `${prefix}:backoff:${groups.size}`), groups.get(backoffGroup)!) }),
+  }));
+}
+
 export function recapImportPlan(recapId: string, recipient: string, payload: WorkoutRecapSharePayload, includeMesocycle = false): CatalogImportPlan {
   const templates = includeMesocycle && payload.mesocycle ? payload.mesocycle.routines : payload.routine ? [payload.routine] : [];
   if (!templates.length) throw new Error('This recap does not include an importable template.');
   const definitions = templates.flatMap((routine, routineIndex) => routine.exercises.map((exercise, exerciseIndex) => ({
-    id: `recap:${recapId}:definition:${routineIndex}:${exerciseIndex}`, source: { kind: 'custom' as const, owner: recipient, originId: `recap:${recapId}:definition:${routineIndex}:${exerciseIndex}` }, name: exercise.name, muscleGroups: exercise.muscleGroups, loadMode: exercise.loadMode, loadUnit: exercise.loadUnit, variant: exercise.variant, defaultSets: exercise.sets.map((set, setIndex) => ({ ...set, id: `set:${setIndex + 1}` })),
+    id: `recap:${recapId}:definition:${routineIndex}:${exerciseIndex}`, source: { kind: 'custom' as const, owner: recipient, originId: `recap:${recapId}:definition:${routineIndex}:${exerciseIndex}` }, name: exercise.name, muscleGroups: exercise.muscleGroups, loadMode: exercise.loadMode, loadUnit: exercise.loadUnit, variant: exercise.variant, defaultSets: importedSets(exercise.sets, `recap:${recapId}:routine:${routineIndex}:exercise:${exerciseIndex}`),
   })));
   const routines = templates.map((routine, routineIndex) => ({
-    id: `recap:${recapId}:routine:${routineIndex}`, name: routine.name, muscleGroups: routine.muscleGroups, createdAt: new Date().toISOString(), exercises: routine.exercises.map((exercise, exerciseIndex) => ({ id: `exercise:${exerciseIndex}`, name: exercise.name, muscleGroups: exercise.muscleGroups, loadMode: exercise.loadMode, loadUnit: exercise.loadUnit, variant: exercise.variant, definitionId: `recap:${recapId}:definition:${routineIndex}:${exerciseIndex}`, catalogExerciseId: `recap:${recapId}:definition:${routineIndex}:${exerciseIndex}`, sets: exercise.sets.map((set, setIndex) => ({ ...set, id: `set:${setIndex + 1}` })) })),
+    id: `recap:${recapId}:routine:${routineIndex}`, name: routine.name, muscleGroups: routine.muscleGroups, createdAt: new Date().toISOString(), exercises: routine.exercises.map((exercise, exerciseIndex) => ({ id: `exercise:${exerciseIndex}`, name: exercise.name, muscleGroups: exercise.muscleGroups, loadMode: exercise.loadMode, loadUnit: exercise.loadUnit, variant: exercise.variant, definitionId: `recap:${recapId}:definition:${routineIndex}:${exerciseIndex}`, catalogExerciseId: `recap:${recapId}:definition:${routineIndex}:${exerciseIndex}`, sets: importedSets(exercise.sets, `recap:${recapId}:routine:${routineIndex}:exercise:${exerciseIndex}`) })),
   }));
   const mesocycles: Mesocycle[] = includeMesocycle && payload.mesocycle ? [{
     id: `recap:${recapId}:mesocycle:0`, name: payload.mesocycle.name, goal: payload.mesocycle.goal, status: 'draft' as const, durationWeeks: payload.mesocycle.durationWeeks, createdAt: new Date().toISOString(),

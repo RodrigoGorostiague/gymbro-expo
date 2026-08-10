@@ -1,7 +1,7 @@
 import 'react-native-gesture-handler';
 import 'react-native-reanimated';
-import React, { useEffect, useState } from 'react';
-import { View } from 'react-native';
+import React from 'react';
+import { ScrollView, StyleSheet, Text, View } from 'react-native';
 import { Stack } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
@@ -14,10 +14,7 @@ import { SocialProvider } from '../context/SocialContext';
 import { NotificationRuntime } from '../components/NotificationRuntime';
 import { AppNoticeModal } from '../components/AppNoticeModal';
 import { useShop } from '../context/ShopContext';
-import { useAuth } from '../context/AuthContext';
 import { useSocial } from '../context/SocialContext';
-import { CURRENT_RELEASE_NOTES } from '../constants/releaseNotes';
-import { hasSeenReleaseNotes, markReleaseNotesSeen } from '../utils/storage';
 import { ProfileAvatar } from '../components/ProfileAvatar';
 import { ProfileTitleBadge } from '../components/ProfileTitleBadge';
 
@@ -38,43 +35,32 @@ function WelcomeGemRewardNotice() {
   />;
 }
 
-function ReleaseNotesNotice() {
-  const { user } = useAuth();
+function ReleaseUpdatesNotice() {
   const { ownProfile } = useSocial();
-  const { isLoading: isShopLoading, welcomeGemReward } = useShop();
-  const [visible, setVisible] = useState(false);
-
-  useEffect(() => {
-    let active = true;
-    setVisible(false);
-    if (!user || isShopLoading || welcomeGemReward !== null) return () => { active = false; };
-
-    void hasSeenReleaseNotes(user, CURRENT_RELEASE_NOTES.version).then((seen) => {
-      if (active && !seen) setVisible(true);
-    }).catch(() => undefined);
-
-    return () => { active = false; };
-  }, [user, isShopLoading, welcomeGemReward]);
-
-  const dismiss = () => {
-    if (!user) return;
-    setVisible(false);
-    void markReleaseNotesSeen(user, CURRENT_RELEASE_NOTES.version).catch(() => undefined);
-  };
+  const { isLoading: isShopLoading, welcomeGemReward, releaseUpdates, dismissReleaseUpdates } = useShop();
+  const totalGems = releaseUpdates.reduce((total, release) => total + release.rewardGems, 0);
+  const firstVersion = releaseUpdates[0]?.version;
 
   return <AppNoticeModal
-    visible={visible}
-    title={CURRENT_RELEASE_NOTES.title}
-    message={CURRENT_RELEASE_NOTES.message}
-    changes={CURRENT_RELEASE_NOTES.changes}
-    highlight={CURRENT_RELEASE_NOTES.rewardGems ? `+${CURRENT_RELEASE_NOTES.rewardGems} GEMAS` : `VERSION ${CURRENT_RELEASE_NOTES.version}`}
-    version={CURRENT_RELEASE_NOTES.version}
-    celebration={<View accessibilityLabel="Vista previa Alfa User" style={{ alignItems: 'center', gap: 4 }}>
-      <ProfileAvatar avatarId={ownProfile?.avatarId} frameId="alfa-user" size={92} borderColor="#FBBF24" />
-      <ProfileTitleBadge titleId="alfa-user" size={42} />
-    </View>}
+    visible={!isShopLoading && welcomeGemReward === null && releaseUpdates.length > 0}
+    title={releaseUpdates.length === 1 ? releaseUpdates[0]?.title ?? 'Novedades' : `Novedades desde ${firstVersion ?? ''}`}
+    message={releaseUpdates.length === 1 ? releaseUpdates[0]?.message ?? '' : 'Mientras no estuviste, GymBro siguió creciendo. Tus recompensas ya fueron acreditadas y acá tenés el resumen.'}
+    highlight={totalGems ? `+${totalGems} GEMAS ACREDITADAS` : undefined}
+    celebration={<ScrollView accessibilityLabel="Historial de novedades" contentContainerStyle={styles.releaseHistory} style={styles.releaseScroll}>
+      {releaseUpdates.map((release) => <View key={release.version} style={styles.release}>
+        <Text style={styles.releaseVersion}>VERSION {release.version}</Text>
+        {releaseUpdates.length > 1 ? <><Text style={styles.releaseTitle}>{release.title}</Text><Text style={styles.releaseMessage}>{release.message}</Text></> : null}
+        {release.version === '0.4.1' ? <View accessibilityLabel="Vista previa Alfa User" style={styles.alfaPreview}>
+          <ProfileAvatar avatarId={ownProfile?.avatarId} frameId="alfa-user" size={92} borderColor="#FBBF24" />
+          <ProfileTitleBadge titleId="alfa-user" size={42} />
+        </View> : null}
+        {release.features.length ? <View><Text style={styles.sectionTitle}>FEATURES</Text>{release.features.map((feature) => <Text key={feature} style={styles.releaseItem}>• {feature}</Text>)}</View> : null}
+        {release.fixes.length ? <View><Text style={styles.sectionTitle}>FIXES</Text>{release.fixes.map((fix) => <Text key={fix} style={styles.releaseItem}>• {fix}</Text>)}</View> : null}
+        {release.rewardGems ? <Text style={styles.reward}>+{release.rewardGems} GEMAS ACREDITADAS</Text> : null}
+      </View>)}
+    </ScrollView>}
     actionLabel="A entrenar"
-    onClose={dismiss}
+    onClose={() => { void dismissReleaseUpdates(); }}
   />;
 }
 
@@ -90,7 +76,7 @@ export default function RootLayout() {
                 <RootStatusBar />
                 <NotificationRuntime />
                 <WelcomeGemRewardNotice />
-                <ReleaseNotesNotice />
+                <ReleaseUpdatesNotice />
                 <Stack screenOptions={{ headerShown: false, animation: 'fade' }}>
                 <Stack.Screen name="index" />
                 <Stack.Screen name="onboarding" options={{ animation: 'fade', gestureEnabled: false }} />
@@ -149,3 +135,16 @@ export default function RootLayout() {
     </GestureHandlerRootView>
   );
 }
+
+const styles = StyleSheet.create({
+  releaseScroll: { alignSelf: 'stretch', maxHeight: 320 },
+  releaseHistory: { gap: 14 },
+  release: { borderTopColor: 'rgba(148,163,184,0.25)', borderTopWidth: StyleSheet.hairlineWidth, gap: 6, paddingTop: 12 },
+  releaseVersion: { color: '#FBBF24', fontSize: 11, fontWeight: '900', letterSpacing: 1 },
+  releaseTitle: { color: '#FFFFFF', fontSize: 16, fontWeight: '900' },
+  releaseMessage: { color: '#CBD5E1', fontSize: 13, lineHeight: 18 },
+  sectionTitle: { color: '#94A3B8', fontSize: 11, fontWeight: '900', letterSpacing: 0.8, marginTop: 4 },
+  releaseItem: { color: '#CBD5E1', fontSize: 13, lineHeight: 18 },
+  reward: { color: '#FBBF24', fontSize: 12, fontWeight: '900', marginTop: 3 },
+  alfaPreview: { alignItems: 'center', gap: 4, marginVertical: 6 },
+});

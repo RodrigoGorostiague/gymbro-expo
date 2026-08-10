@@ -11,6 +11,7 @@ export const Alert = {
   alert: vi.fn(),
 };
 export const ActivityIndicator = createHost('ActivityIndicator');
+export const Image = createHost('Image');
 class AnimatedValue {
   constructor(public value: number) {}
   interpolate() { return this; }

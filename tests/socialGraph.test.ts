@@ -114,14 +114,14 @@ describe('social graph client boundary', () => {
       .mockResolvedValueOnce({ data: null, error: null })
       .mockResolvedValueOnce({ data: null, error: null });
 
-    await expect(getOwnProfile()).resolves.toEqual({ uid: 'member-1', alias: 'Bro', avatarId: 'capybara-athlete', frameId: 'principiante', titleId: 'principiante', categories: {}, categoryVisibility: {}, autoShareCompletedWorkouts: true, shareRoutineTemplate: true, shareMesocycleTemplate: true, sharePerformedSetDetails: true, shareSocialActivity: true, shareSocialProgress: true, shareSocialConsistency: true, shareSocialStatistics: true, shareSocialMuscleDistribution: true });
+    await expect(getOwnProfile()).resolves.toEqual({ uid: 'member-1', alias: 'Bro', avatarId: 'capybara-athlete', frameId: 'principiante', titleId: 'principiante', categories: {}, categoryVisibility: {}, autoShareCompletedWorkouts: true, shareRoutineTemplate: true, shareMesocycleTemplate: true, sharePerformedSetDetails: true, shareSocialActivity: true, shareSocialProgress: true, shareSocialConsistency: true, shareSocialStatistics: true, shareSocialMuscleDistribution: true, muscleBalanceTargetId: 'balanced' });
     await saveOwnProfile({ alias: 'Bro', categories: {}, categoryVisibility: {}, autoShareCompletedWorkouts: false });
     await syncOwnPresentationTheme('moon');
 
     expect(client.rpc).toHaveBeenNthCalledWith(1, 'get_own_profile', {});
     expect(client.rpc).toHaveBeenNthCalledWith(2, 'save_own_profile', {
       profile_input: {
-        alias: 'Bro', avatar_id: 'capybara-athlete', equipped_frame_id: 'principiante', equipped_title_id: 'principiante', categories: {}, category_visibility: {}, auto_share_completed_workouts: false, share_routine_template: true, share_mesocycle_template: true, share_performed_set_details: true, share_social_activity: true, share_social_progress: true, share_social_consistency: true, share_social_statistics: true, share_social_muscle_distribution: true,
+        alias: 'Bro', avatar_id: 'capybara-athlete', equipped_frame_id: 'principiante', equipped_title_id: 'principiante', categories: {}, category_visibility: {}, auto_share_completed_workouts: false, share_routine_template: true, share_mesocycle_template: true, share_performed_set_details: true, share_social_activity: true, share_social_progress: true, share_social_consistency: true, share_social_statistics: true, share_social_muscle_distribution: true, muscle_balance_target_id: 'balanced',
       },
     });
     expect(client.rpc).toHaveBeenNthCalledWith(3, 'update_own_presentation_theme', { theme_id: 'moon' });
@@ -167,7 +167,7 @@ describe('social graph client boundary', () => {
 
     await expect(getOwnProfile()).resolves.toEqual({
       uid: 'member-1', alias: 'Bro', avatarId: 'capybara-athlete', frameId: 'principiante', titleId: 'principiante', categories: { legacy: 'keep' }, categoryVisibility: { legacy: false },
-      autoShareCompletedWorkouts: false, shareRoutineTemplate: true, shareMesocycleTemplate: true, sharePerformedSetDetails: false, shareSocialActivity: true, shareSocialProgress: true, shareSocialConsistency: true, shareSocialStatistics: true, shareSocialMuscleDistribution: true,
+      autoShareCompletedWorkouts: false, shareRoutineTemplate: true, shareMesocycleTemplate: true, sharePerformedSetDetails: false, shareSocialActivity: true, shareSocialProgress: true, shareSocialConsistency: true, shareSocialStatistics: true, shareSocialMuscleDistribution: true, muscleBalanceTargetId: 'balanced',
     });
   });
 

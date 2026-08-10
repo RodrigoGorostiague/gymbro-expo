@@ -11,11 +11,19 @@ export type ExerciseVariant = string;
 
 export type SetType = 'C' | 'F' | number;
 
+export type EffortTarget =
+  | { kind: 'rir'; value: 0 | 1 | 2 | 3 | 4 | 5 }
+  | { kind: 'rpe'; value: 6 | 7 | 8 | 9 | 10 };
+
 export interface CatalogSet {
   id: string;
   tipo: SetType;
   weight: number;
   reps: number;
+  /** Groups contiguous physical sets as one backoff prescription. */
+  backoffGroupId?: string;
+  /** Optional intensity target for this physical set. */
+  effortTarget?: EffortTarget;
 }
 
 export interface Exercise {
@@ -301,7 +309,7 @@ export interface WorkoutRecapSharePayload {
       loadMode: ExerciseLoadMode;
       loadUnit: LoadUnit;
       variant: ExerciseVariant;
-      sets: Array<Pick<CatalogSet, 'tipo' | 'weight' | 'reps'>>;
+      sets: Array<Pick<CatalogSet, 'tipo' | 'weight' | 'reps' | 'effortTarget'> & { backoffGroup?: number }>;
     }>;
   };
   mesocycle?: {
@@ -361,6 +369,8 @@ export interface AttemptSetPlan {
   readonly type: SetType;
   readonly targetReps?: number;
   readonly targetLoad?: number;
+  readonly backoffGroupId?: string;
+  readonly effortTarget?: EffortTarget;
 }
 
 export interface AttemptSetResult {

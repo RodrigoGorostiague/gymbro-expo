@@ -1,5 +1,5 @@
 begin;
-select plan(40);
+select plan(45);
 
 insert into auth.users (id, instance_id, aud, role, email, encrypted_password, email_confirmed_at, raw_app_meta_data, raw_user_meta_data, created_at, updated_at)
 values ('40000000-0000-0000-0000-000000000001', '00000000-0000-0000-0000-000000000000', 'authenticated', 'authenticated', 'wallet@example.com', '', now(), '{}', '{}', now(), now()),
@@ -56,6 +56,11 @@ select is((select count(*) from public.reward_ledger_entries where owner_id = pu
 select is((select amount from public.reward_ledger_entries where owner_id = public.require_actor() and idempotency_key = 'release:0.4.0:100-gems'), 100, '0.4.0 release gift amount is fixed');
 select is((select count(*) from public.reward_ledger_entries where owner_id = public.require_actor() and idempotency_key = 'release:0.4.1:150-gems'), 1::bigint, '0.4.1 release gift has one ledger entry');
 select is((select amount from public.reward_ledger_entries where owner_id = public.require_actor() and idempotency_key = 'release:0.4.1:150-gems'), 150, '0.4.1 release gift amount is fixed');
+select is(jsonb_array_length(public.claim_pending_release_updates(6) -> 'releases'), 6, 'release digest returns every unseen compatible announcement');
+select is((public.claim_pending_release_updates(6) -> 'releases' -> 5 ->> 'rewardGems')::integer, 50, 'release digest reports the 0.5.0 reward');
+select lives_ok($$select public.acknowledge_release_updates(array['0.4.1', '0.5.0'])$$, 'release acknowledgements are stored per user');
+select is(jsonb_array_length(public.claim_pending_release_updates(6) -> 'releases'), 4, 'acknowledged releases are not returned again');
+select throws_ok($$select public.acknowledge_release_updates(array['missing'])$$, 'invalid release acknowledgement', 'unknown releases cannot be acknowledged');
 select lives_ok($$select public.purchase_reward_theme('arena')$$, 'new catalog themes can be purchased');
 select ok((public.load_reward_wallet() -> 'purchasedThemeIds') ? 'arena', 'new theme purchase is persisted in the authoritative wallet');
 

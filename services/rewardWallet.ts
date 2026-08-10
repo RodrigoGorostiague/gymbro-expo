@@ -12,6 +12,8 @@ export type RewardWallet = {
 
 export type WelcomeGemReward = { claimed: boolean; wallet: RewardWallet };
 export type ReleaseGemReward = { claimed: boolean; wallet: RewardWallet };
+export type ReleaseUpdate = { version: string; title: string; message: string; features: string[]; fixes: string[]; rewardGems: number; rewardClaimed: boolean };
+export type ReleaseUpdates = { claimed: boolean; wallet: RewardWallet; releases: ReleaseUpdate[] };
 
 function requireClient() {
   if (!supabase) throw new Error(supabaseConfigurationError ?? 'La billetera remota no está configurada.');
@@ -37,6 +39,23 @@ function isWelcomeGemReward(value: unknown): value is WelcomeGemReward {
 
 function isReleaseGemReward(value: unknown): value is ReleaseGemReward {
   return isWelcomeGemReward(value);
+}
+
+function isReleaseUpdate(value: unknown): value is ReleaseUpdate {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+  const release = value as Record<string, unknown>;
+  return typeof release.version === 'string' && typeof release.title === 'string' && typeof release.message === 'string'
+    && Array.isArray(release.features) && release.features.every((item) => typeof item === 'string')
+    && Array.isArray(release.fixes) && release.fixes.every((item) => typeof item === 'string')
+    && Number.isInteger(release.rewardGems) && (release.rewardGems as number) >= 0
+    && typeof release.rewardClaimed === 'boolean';
+}
+
+function isReleaseUpdates(value: unknown): value is ReleaseUpdates {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+  const updates = value as Record<string, unknown>;
+  return typeof updates.claimed === 'boolean' && isWallet(updates.wallet)
+    && Array.isArray(updates.releases) && updates.releases.every(isReleaseUpdate);
 }
 
 async function walletRpc(name: string, args: Record<string, unknown> = {}): Promise<RewardWallet> {
@@ -65,6 +84,18 @@ export async function claimPendingReleaseGemRewards(): Promise<ReleaseGemReward>
   if (error) throw new Error(`No se pudo acreditar el regalo de la versión: ${error.message}`);
   if (!isReleaseGemReward(data)) throw new Error('El regalo de la versión tiene un formato inválido.');
   return data;
+}
+
+export async function claimPendingReleaseUpdates(maxReleaseSequence: number): Promise<ReleaseUpdates> {
+  const { data, error } = await requireClient().rpc('claim_pending_release_updates', { max_release_sequence: maxReleaseSequence });
+  if (error) throw new Error(`No se pudieron cargar las novedades de la versión: ${error.message}`);
+  if (!isReleaseUpdates(data)) throw new Error('Las novedades de versión tienen un formato inválido.');
+  return data;
+}
+
+export async function acknowledgeReleaseUpdates(versions: readonly string[]): Promise<void> {
+  const { error } = await requireClient().rpc('acknowledge_release_updates', { versions: [...versions] });
+  if (error) throw new Error(`No se pudieron confirmar las novedades de la versión: ${error.message}`);
 }
 
 export function receiptTotal(receipt: RewardReceipt): number {

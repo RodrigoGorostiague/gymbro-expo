@@ -11,6 +11,7 @@ export interface CatalogMuscleGroup {
   visibleInFilters: boolean;
   displayName: string;
   path: string;
+  parentIds?: string[];
 }
 
 type CatalogExerciseRow = {
@@ -38,6 +39,7 @@ type CatalogMuscleGroupRow = {
   visible_in_filters: boolean;
   display_name: string;
   path: string;
+  parent_group_ids?: string[];
 };
 
 type CatalogFilterRow = CatalogExerciseRow & {
@@ -71,7 +73,7 @@ function toExercise(row: CatalogExerciseRow): Exercise {
 }
 
 export async function loadCatalogMuscleGroups(): Promise<CatalogMuscleGroup[]> {
-  const { data, error } = await requireCatalogClient().rpc('list_catalog_muscle_groups');
+  const { data, error } = await requireCatalogClient().rpc('list_catalog_muscle_groups_with_parents');
   if (error) throw new Error(`No se pudieron cargar los grupos musculares: ${error.message}`);
   return (data as CatalogMuscleGroupRow[] ?? []).map((row) => ({
     id: row.id,
@@ -81,6 +83,7 @@ export async function loadCatalogMuscleGroups(): Promise<CatalogMuscleGroup[]> {
     visibleInFilters: row.visible_in_filters,
     displayName: row.display_name,
     path: row.path,
+    parentIds: row.parent_group_ids ?? [],
   }));
 }
 

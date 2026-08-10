@@ -1,6 +1,7 @@
 import { supabase, supabaseConfigurationError } from './supabase';
 import { AvatarId, avatarIdOrDefault } from '../constants/avatars';
 import { ProfileFrameId, ProfileTitleId, profileFrameIdOrDefault, profileTitleIdOrDefault } from '../constants/profileFrames';
+import { MuscleBalanceTargetId, muscleBalanceTargetForId } from '../constants/muscleBalanceTargets';
 
 export type ProfileCategories = Record<string, string>;
 export type ProfileVisibility = Record<string, boolean>;
@@ -18,8 +19,9 @@ export type OwnProfile = Omit<PublicProfile, 'presentationThemeId'> & {
   shareSocialConsistency: boolean;
   shareSocialStatistics: boolean;
   shareSocialMuscleDistribution: boolean;
+  muscleBalanceTargetId: MuscleBalanceTargetId;
 };
-export type OwnProfileSave = Omit<OwnProfile, 'uid' | 'avatarId' | 'frameId' | 'titleId' | 'shareRoutineTemplate' | 'shareMesocycleTemplate' | 'sharePerformedSetDetails' | 'shareSocialActivity' | 'shareSocialProgress' | 'shareSocialConsistency' | 'shareSocialStatistics' | 'shareSocialMuscleDistribution'> & Partial<Pick<OwnProfile, 'avatarId' | 'frameId' | 'titleId' | 'shareRoutineTemplate' | 'shareMesocycleTemplate' | 'sharePerformedSetDetails' | 'shareSocialActivity' | 'shareSocialProgress' | 'shareSocialConsistency' | 'shareSocialStatistics' | 'shareSocialMuscleDistribution'>>;
+export type OwnProfileSave = Omit<OwnProfile, 'uid' | 'avatarId' | 'frameId' | 'titleId' | 'shareRoutineTemplate' | 'shareMesocycleTemplate' | 'sharePerformedSetDetails' | 'shareSocialActivity' | 'shareSocialProgress' | 'shareSocialConsistency' | 'shareSocialStatistics' | 'shareSocialMuscleDistribution' | 'muscleBalanceTargetId'> & Partial<Pick<OwnProfile, 'avatarId' | 'frameId' | 'titleId' | 'shareRoutineTemplate' | 'shareMesocycleTemplate' | 'sharePerformedSetDetails' | 'shareSocialActivity' | 'shareSocialProgress' | 'shareSocialConsistency' | 'shareSocialStatistics' | 'shareSocialMuscleDistribution' | 'muscleBalanceTargetId'>>;
 export type GraphSummary = {
   targetId: string;
   relationshipKind?: RelationshipKind | null;
@@ -131,7 +133,7 @@ export async function getOwnProfile(): Promise<OwnProfile | null> {
   if (error) throw new Error(error.message);
   if (!data) return null;
   const profile = data as Record<string, unknown>;
-  return { uid: String(profile.id), alias: String(profile.alias), avatarId: avatarIdOrDefault(profile.avatar_id), frameId: profileFrameIdOrDefault(profile.equipped_frame_id), titleId: profile.equipped_title_id === null ? null : profileTitleIdOrDefault(profile.equipped_title_id), categories: stringRecord(profile.categories), categoryVisibility: booleanRecord(profile.category_visibility), autoShareCompletedWorkouts: booleanOrDefault(profile.auto_share_completed_workouts), shareRoutineTemplate: booleanOrDefault(profile.share_routine_template), shareMesocycleTemplate: booleanOrDefault(profile.share_mesocycle_template), sharePerformedSetDetails: booleanOrDefault(profile.share_performed_set_details), shareSocialActivity: booleanOrDefault(profile.share_social_activity), shareSocialProgress: booleanOrDefault(profile.share_social_progress), shareSocialConsistency: booleanOrDefault(profile.share_social_consistency), shareSocialStatistics: booleanOrDefault(profile.share_social_statistics), shareSocialMuscleDistribution: booleanOrDefault(profile.share_social_muscle_distribution) };
+  return { uid: String(profile.id), alias: String(profile.alias), avatarId: avatarIdOrDefault(profile.avatar_id), frameId: profileFrameIdOrDefault(profile.equipped_frame_id), titleId: profile.equipped_title_id === null ? null : profileTitleIdOrDefault(profile.equipped_title_id), categories: stringRecord(profile.categories), categoryVisibility: booleanRecord(profile.category_visibility), autoShareCompletedWorkouts: booleanOrDefault(profile.auto_share_completed_workouts), shareRoutineTemplate: booleanOrDefault(profile.share_routine_template), shareMesocycleTemplate: booleanOrDefault(profile.share_mesocycle_template), sharePerformedSetDetails: booleanOrDefault(profile.share_performed_set_details), shareSocialActivity: booleanOrDefault(profile.share_social_activity), shareSocialProgress: booleanOrDefault(profile.share_social_progress), shareSocialConsistency: booleanOrDefault(profile.share_social_consistency), shareSocialStatistics: booleanOrDefault(profile.share_social_statistics), shareSocialMuscleDistribution: booleanOrDefault(profile.share_social_muscle_distribution), muscleBalanceTargetId: muscleBalanceTargetForId(profile.muscle_balance_target_id) };
 }
 
 export async function saveOwnProfile(profile: OwnProfileSave): Promise<void> {
@@ -152,6 +154,7 @@ export async function saveOwnProfile(profile: OwnProfileSave): Promise<void> {
       share_social_consistency: profile.shareSocialConsistency ?? true,
       share_social_statistics: profile.shareSocialStatistics ?? true,
       share_social_muscle_distribution: profile.shareSocialMuscleDistribution ?? true,
+      muscle_balance_target_id: muscleBalanceTargetForId(profile.muscleBalanceTargetId),
     },
   });
   if (error) throw new Error(error.message);
@@ -174,8 +177,8 @@ export async function getGraphSummary(targetId: string): Promise<GraphSummary> {
   return data as GraphSummary;
 }
 
-function nonNegativeInteger(value: unknown): number {
-  return typeof value === 'number' && Number.isInteger(value) && value >= 0 ? value : 0;
+function nonNegativeNumber(value: unknown): number {
+  return typeof value === 'number' && Number.isFinite(value) && value >= 0 ? value : 0;
 }
 
 export async function getSocialProfileInsights(targetId: string): Promise<SocialProfileInsights> {
@@ -191,9 +194,9 @@ function asSocialProfileInsights(data: unknown): SocialProfileInsights {
   return {
     ...(activity ? { activity: { lastCompletedAt: typeof activity.last_completed_at === 'string' ? activity.last_completed_at : null } } : {}),
     ...(progress && typeof progress.level === 'number' && typeof progress.rank === 'string' ? { progress: { level: progress.level, rank: progress.rank } } : {}),
-    ...(consistency ? { consistency: { workoutsLast28Days: nonNegativeInteger(consistency.workouts_last_28_days), activeWeeksLast90Days: nonNegativeInteger(consistency.active_weeks_last_90_days) } } : {}),
-    ...(statistics ? { statistics: { workoutsLast90Days: nonNegativeInteger(statistics.workouts_last_90_days), completedExercisesLast90Days: nonNegativeInteger(statistics.completed_exercises_last_90_days) } } : {}),
-    ...(Array.isArray(source.muscle_distribution) ? { muscleDistribution: source.muscle_distribution.flatMap((entry): MuscleDistributionEntry[] => { const value = asObject(entry); return value && typeof value.id === 'string' && typeof value.label === 'string' ? [{ id: value.id, label: value.label, value: nonNegativeInteger(value.value) }] : []; }) } : {}),
+    ...(consistency ? { consistency: { workoutsLast28Days: nonNegativeNumber(consistency.workouts_last_28_days), activeWeeksLast90Days: nonNegativeNumber(consistency.active_weeks_last_90_days) } } : {}),
+    ...(statistics ? { statistics: { workoutsLast90Days: nonNegativeNumber(statistics.workouts_last_90_days), completedExercisesLast90Days: nonNegativeNumber(statistics.completed_exercises_last_90_days) } } : {}),
+    ...(Array.isArray(source.muscle_distribution) ? { muscleDistribution: source.muscle_distribution.flatMap((entry): MuscleDistributionEntry[] => { const value = asObject(entry); return value && typeof value.id === 'string' && typeof value.label === 'string' ? [{ id: value.id, label: value.label, value: nonNegativeNumber(value.value) }] : []; }) } : {}),
   };
 }
 

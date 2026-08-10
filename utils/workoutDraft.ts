@@ -47,7 +47,7 @@ export function snapshotWorkoutRoutine(routine: Routine): Routine {
       attribution: exercise.attribution ? { ...exercise.attribution, secondary: [...exercise.attribution.secondary], ...(exercise.attribution.weights ? { weights: { ...exercise.attribution.weights } } : {}) } : undefined,
       catalog: exercise.catalog ? { ...exercise.catalog, muscleParticipations: exercise.catalog.muscleParticipations.map((participation) => ({ ...participation })) } : undefined,
       definitionSnapshot: exercise.definitionSnapshot ? { ...exercise.definitionSnapshot, muscleGroups: [...exercise.definitionSnapshot.muscleGroups] } : undefined,
-      sets: (exercise.sets ?? []).map((set) => ({ ...set })),
+      sets: (exercise.sets ?? []).map((set) => ({ ...set, ...(set.effortTarget ? { effortTarget: { ...set.effortTarget } } : {}) })),
     })),
   };
 }
@@ -75,7 +75,7 @@ export function createSessionExercise(exercise: Exercise, definitions: readonly 
     attribution: exercise.attribution ? { ...exercise.attribution, secondary: [...exercise.attribution.secondary], ...(exercise.attribution.weights ? { weights: { ...exercise.attribution.weights } } : {}) } : undefined,
     catalog: exercise.catalog ? { ...exercise.catalog, muscleParticipations: exercise.catalog.muscleParticipations.map((participation) => ({ ...participation })) } : undefined,
     variant: exercise.variant,
-    sets: sourceSets.map((set) => ({ id: nextId(), tipo: set.tipo, weight: set.weight, reps: set.reps })),
+    sets: sourceSets.map((set) => ({ ...set, id: nextId() })),
   };
 }
 

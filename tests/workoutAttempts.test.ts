@@ -31,7 +31,7 @@ const captureRoutine: Routine = {
   id: 'routine-1', name: 'Original routine', muscleGroups: ['pecho'], createdAt: '2026-01-01T00:00:00Z',
   exercises: [{ id: 'routine-exercise', catalogExerciseId: 'catalog-exercise', name: 'Press', muscleGroups: ['pecho', 'tríceps'], variant: 'barra',
     attribution: { primary: 'pecho', secondary: ['tríceps'] },
-    sets: [{ id: 'warmup', tipo: 'C', weight: 10, reps: 10 }, { id: 'failure', tipo: 'F', weight: 20, reps: 0 }] }],
+    sets: [{ id: 'warmup', tipo: 'C', weight: 10, reps: 10 }, { id: 'failure', tipo: 'F', weight: 20, reps: 0, backoffGroupId: 'backoff-1', effortTarget: { kind: 'rpe', value: 9 } }] }],
 };
 
 const lineage: WorkoutLineage = {
@@ -206,7 +206,7 @@ describe('workout attempt contracts', () => {
       rewardApplication: { id: 'rodaja:capture:v1', state: 'pending' }, lineage });
     expect(attempt.exercises[0]).toMatchObject({ exerciseId: 'catalog-exercise', recordedName: 'Press',
       attribution: { primary: 'pecho', secondary: ['tríceps'] } });
-    expect(attempt.exercises[0].sets[1]).toMatchObject({ plan: { type: 'F' }, result: { performance: { mode: 'external-load', unit: 'kg', reps: 8, load: 20 } } });
+    expect(attempt.exercises[0].sets[1]).toMatchObject({ plan: { type: 'F', backoffGroupId: 'backoff-1', effortTarget: { kind: 'rpe', value: 9 } }, result: { performance: { mode: 'external-load', unit: 'kg', reps: 8, load: 20 } } });
     expect(attemptToSession(attempt).exercises[0].muscleGroupIds).toEqual(['pecho', 'tríceps']);
     expect(getExerciseExposure(attempt.exercises[0].attribution!, attempt.exercises[0].sets)).toEqual({ pecho: 1, tríceps: 0.4 });
   });

@@ -23,8 +23,8 @@ describe('MuscleDistributionRadar', () => {
     let tree: TestRenderer.ReactTestRenderer | undefined;
     await act(async () => { tree = TestRenderer.create(React.createElement(MuscleDistributionRadar, { data: [{ id: 'chest', label: 'Pecho', value: 8 }, { id: 'back', label: 'Espalda', value: 3 }] })); });
     const chart = tree!.root.find((node) => String(node.type) === 'View' && node.props.accessibilityRole === 'image');
-    expect(chart.props.accessibilityLabel).toContain('Pecho, 8 ejercicios');
-    expect(tree!.root.findAll((node) => String(node.type) === 'Text').map((node) => node.children.join(''))).toEqual(expect.arrayContaining(['Pecho 8', 'Espalda 3']));
+    expect(chart.props.accessibilityLabel).toContain('Pecho, 8.00 puntos');
+    expect(tree!.root.findAll((node) => String(node.type) === 'Text').map((node) => node.children.join(''))).toEqual(expect.arrayContaining(['Pecho 8.0', 'Espalda 3.0']));
   });
 
   test('explains the empty ninety-day state', async () => {

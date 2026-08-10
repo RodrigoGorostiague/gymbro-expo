@@ -36,6 +36,7 @@ vi.mock('react-native', async () => {
   const host = (name: string) => ({ children, ...props }: { children?: React.ReactNode }) => ReactModule.createElement(name, props, children);
   return {
     Alert: { alert },
+    Image: host('Image'),
     RefreshControl: host('RefreshControl'),
     Platform: { OS: 'ios', Version: '17' },
     ScrollView: host('ScrollView'),
@@ -56,6 +57,7 @@ vi.mock('../services/communityBadge', () => ({ getCommunityBadgeCounts: feedServ
 vi.mock('../context/ThemeContext', () => ({
   useTheme: () => ({ theme: { text: '#111', textMuted: '#666', primary: '#00f', success: '#0a0' } }),
 }));
+vi.mock('../context/ShopContext', () => ({ useShop: () => ({ purchasedFrameIds: [] }) }));
 vi.mock('../components/AppScreenHeader', () => ({ AppScreenHeader: () => null }));
 vi.mock('../components/MuscleDistributionRadar', async () => {
   const ReactModule = await import('react');
@@ -97,6 +99,7 @@ import CommunityFeedScreen from '../app/community/feed';
 describe('Community feed', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    if (!social.ownProfile) social.ownProfile = { uid: 'member-1', alias: 'Blocker', categories: {}, categoryVisibility: {}, autoShareCompletedWorkouts: true } as typeof social.ownProfile;
     social.discover.mockResolvedValue({ profiles: [], nextCursor: null });
     social.circle.mockResolvedValue({ profiles: [], nextCursor: null });
     social.requests.mockResolvedValue({ profiles: [], nextCursor: null });
@@ -381,8 +384,9 @@ describe('Community feed', () => {
       shareSocialActivity: true,
       shareSocialProgress: true,
       shareSocialConsistency: true,
-      shareSocialStatistics: true,
-      shareSocialMuscleDistribution: true,
+       shareSocialStatistics: true,
+       shareSocialMuscleDistribution: true,
+       muscleBalanceTargetId: 'balanced',
     });
   });
 

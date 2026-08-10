@@ -1,5 +1,5 @@
 begin;
-select plan(28);
+select plan(32);
 
 insert into auth.users (id, instance_id, aud, role, email, encrypted_password, email_confirmed_at, raw_app_meta_data, raw_user_meta_data, created_at, updated_at)
 select format('40000000-0000-0000-0000-%s', lpad(value::text, 12, '0'))::uuid, '00000000-0000-0000-0000-000000000000', 'authenticated', 'authenticated', format('joint%s@example.com', value), '', now(), '{}', '{}', now(), now()
@@ -32,6 +32,10 @@ select lives_ok($$select public.respond_joint_workout_invite(current_setting('te
 select set_config('request.jwt.claim.sub', '40000000-0000-0000-0000-000000000001', true);
 select throws_like($$select public.graph_send_request('40000000-0000-0000-0000-000000000004', 'partner')$$, 'each account can have only one Partner', 'server rejects a second Partner request for an already partnered account');
 select is((select count(*)::integer from pg_proc where proname in ('send_joint_workout_action', 'list_joint_workout_actions')), 0, 'joint canned action functions are removed');
+select lives_ok($$select public.update_joint_workout_live_progress(current_setting('test.joint_id')::uuid, 'resting'::public.joint_workout_live_state, 1, 2, 3, 6, 90)$$, 'active participant publishes bounded aggregate live progress');
+select is((select participant.value ->> 'live_state' from jsonb_array_elements(public.list_joint_workouts() -> 0 -> 'participants') participant(value) where participant.value ->> 'id' = '40000000-0000-0000-0000-000000000001'), 'resting', 'live projection includes the participant state without workout detail');
+select is((select (participant.value ->> 'completed_sets')::integer from jsonb_array_elements(public.list_joint_workouts() -> 0 -> 'participants') participant(value) where participant.value ->> 'id' = '40000000-0000-0000-0000-000000000001'), 3, 'live projection includes completed set count');
+select throws_like($$select public.update_joint_workout_live_progress(current_setting('test.joint_id')::uuid, 'resting'::public.joint_workout_live_state, 3, 2, 3, 6, 90)$$, 'invalid joint workout live progress', 'server rejects impossible aggregate progress');
 select lives_ok($$select public.finish_joint_workout(current_setting('test.joint_id')::uuid, 'circle', '{"routineName":"Upper","durationSeconds":60,"exercises":[{"name":"Row","muscleGroupIds":["back"],"sets":[{"weight":80,"reps":8,"completed":true}]}],"sharePayload":{"version":1,"routine":{"name":"Upper","muscleGroups":["back"],"exercises":[{"name":"Row","muscleGroups":["back"],"loadMode":"external-load","loadUnit":"kg","variant":"barbell","sets":[{"tipo":1,"weight":80,"reps":8}]}]},"mesocycle":{"name":"Block","goal":"","durationWeeks":1,"weeks":[[{"routineIndex":0}]],"routines":[{"name":"Upper","muscleGroups":["back"],"exercises":[{"name":"Row","muscleGroups":["back"],"loadMode":"external-load","loadUnit":"kg","variant":"barbell","sets":[{"tipo":1,"weight":80,"reps":8}]}]}]},"performedSets":[{"exerciseIndex":0,"sets":[{"weight":80,"reps":8,"completed":true}]}]}}'::jsonb)$$, 'initiator completion stores the validated import payload');
 set local role postgres;
 select is((select status::text from public.joint_workout_participants where joint_workout_id = current_setting('test.joint_id')::uuid and participant_id = '40000000-0000-0000-0000-000000000004'), 'declined', 'an unaccepted invitation expires when the initiator finishes');

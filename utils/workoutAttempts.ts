@@ -51,7 +51,14 @@ export function createWorkoutAttempt(input: AttemptCaptureInput): WorkoutAttempt
         : mode === 'bodyweight' ? { mode, reps: actual.reps, bodyweight: actual.load, unit }
           : { mode, reps: actual.reps, assistance: actual.load, unit };
       return {
-        plan: { id, type: set.tipo, targetReps: set.tipo === 'F' ? undefined : set.reps, targetLoad: set.weight },
+        plan: {
+          id,
+          type: set.tipo,
+          targetReps: set.tipo === 'F' ? undefined : set.reps,
+          targetLoad: set.weight,
+          backoffGroupId: set.backoffGroupId,
+          effortTarget: set.effortTarget,
+        },
         result: { setId: id, performed: actual?.performed ?? false, performance },
       };
     }),

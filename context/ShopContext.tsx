@@ -10,11 +10,12 @@ import {
 import { PARTNER_PROFILE } from '../constants/kiss';
 import { subscribeToEquippedThemes, syncEquippedTheme } from '../services/themeSync';
 import { UserProfile } from '../types';
-import { claimPendingReleaseGemRewards, claimWelcomeGemReward, loadRewardWallet, purchaseRewardFrame, purchaseRewardTheme, RewardWallet, updateRewardWalletPreferences } from '../services/rewardWallet';
+import { acknowledgeReleaseUpdates, claimPendingReleaseUpdates, claimWelcomeGemReward, loadRewardWallet, purchaseRewardFrame, purchaseRewardTheme, ReleaseUpdate, RewardWallet, updateRewardWalletPreferences } from '../services/rewardWallet';
 import { useAuth } from './AuthContext';
 import { useData } from './DataContext';
 import { syncOwnPresentationTheme } from '../services/socialGraph';
 import { PROFILE_FRAMES } from '../constants/profileFrames';
+import { CURRENT_RELEASE } from '../constants/release';
 
 const DEFAULT_SHOP: RewardWallet = {
   balance: 0,
@@ -44,6 +45,8 @@ interface ShopContextValue {
   stopPreview: () => void;
   welcomeGemReward: number | null;
   dismissWelcomeGemReward: () => void;
+  releaseUpdates: ReleaseUpdate[];
+  dismissReleaseUpdates: () => Promise<void>;
 }
 
 const PREVIEW_DURATION_MS = 5000;
@@ -58,6 +61,7 @@ export function ShopProvider({ children }: { children: React.ReactNode }) {
   const [previewThemeId, setPreviewThemeId] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [welcomeGemReward, setWelcomeGemReward] = useState<number | null>(null);
+  const [releaseUpdates, setReleaseUpdates] = useState<ReleaseUpdate[]>([]);
   const previewTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const walletRequestRef = useRef(0);
 
@@ -88,6 +92,7 @@ export function ShopProvider({ children }: { children: React.ReactNode }) {
       walletRequestRef.current += 1;
       setShop(DEFAULT_SHOP);
       setWelcomeGemReward(null);
+      setReleaseUpdates([]);
       setPartnerEquippedThemeId(null);
       setIsLoading(false);
       return;
@@ -100,11 +105,12 @@ export function ShopProvider({ children }: { children: React.ReactNode }) {
     void (async () => {
       try {
         const { claimed } = await claimWelcomeGemReward().catch(() => ({ claimed: false }));
-        const release = await claimPendingReleaseGemRewards().catch(() => null);
+        const release = await claimPendingReleaseUpdates(CURRENT_RELEASE.sequence).catch(() => null);
         const loaded = release?.wallet ?? await loadRewardWallet();
         if (!active || walletRequestRef.current !== request) return;
         setShop(loaded);
         setWelcomeGemReward(claimed ? 250 : null);
+        setReleaseUpdates(release?.releases ?? []);
         syncEquippedTheme(user, loaded.equippedThemeId);
         void syncOwnPresentationTheme(loaded.equippedThemeId).catch(() => undefined);
       } catch {
@@ -238,6 +244,13 @@ export function ShopProvider({ children }: { children: React.ReactNode }) {
         stopPreview,
         welcomeGemReward,
         dismissWelcomeGemReward: () => setWelcomeGemReward(null),
+        releaseUpdates,
+        dismissReleaseUpdates: async () => {
+          const versions = releaseUpdates.map((release) => release.version);
+          setReleaseUpdates([]);
+          if (!versions.length) return;
+          try { await acknowledgeReleaseUpdates(versions); } catch { setReleaseUpdates((current) => current.length ? current : releaseUpdates); }
+        },
       }}
     >
       {children}

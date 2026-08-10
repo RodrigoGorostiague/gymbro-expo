@@ -11,6 +11,7 @@ import {
 import { router, useLocalSearchParams } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { AppNavBar } from '../../components/AppNavBar';
+import { EffortTargetControl } from '../../components/EffortTargetControl';
 import { ExercisePicker } from '../../components/ExercisePicker';
 import { GlassCard, ThemeBackground } from '../../components/GlassCard';
 import { HapticPressable } from '../../components/HapticPressable';
@@ -75,12 +76,7 @@ export default function EditRoutineScreen() {
       muscleParticipations: exercise.catalog.muscleParticipations.map((participation) => ({ ...participation })),
     } : undefined,
     variant: exercise.variant,
-    sets: exercise.defaultSets.map((set) => ({
-      id: generateId(),
-      tipo: set.tipo,
-      weight: set.weight,
-      reps: set.reps,
-    })),
+    sets: exercise.defaultSets.map((set) => ({ ...set, id: generateId() })),
     });
   };
 
@@ -180,6 +176,25 @@ export default function EditRoutineScreen() {
       ),
     );
     setDraftWeights((current) => ({ ...current, [nextId]: '' }));
+  };
+
+  const addBackoff = (exerciseId: string) => {
+    const groupId = generateId();
+    const firstId = generateId();
+    const secondId = generateId();
+    setExercises((current) => current.map((exercise) => {
+      if (exercise.id !== exerciseId) return exercise;
+      const source = exercise.sets.at(-1) ?? { tipo: nextEffectiveSetNumber(exercise.sets), weight: 0, reps: 0 };
+      const firstSetNumber = nextEffectiveSetNumber(exercise.sets);
+      const build = (id: string, offset: number): ExerciseSet => ({
+        ...source,
+        id,
+        tipo: firstSetNumber + offset,
+        backoffGroupId: groupId,
+      });
+      return { ...exercise, sets: [...exercise.sets, build(firstId, 0), build(secondId, 1)] };
+    }));
+    setDraftWeights((current) => ({ ...current, [firstId]: '', [secondId]: '' }));
   };
 
   const updateSet = (exerciseId: string, setId: string, patch: Partial<ExerciseSet>) => {
@@ -313,8 +328,17 @@ export default function EditRoutineScreen() {
                   <View style={{ width: 28 }} />
                 </View>
 
-                {exercise.sets.map((set, setIndex) => (
-                  <View key={set.id} style={styles.setRow}>
+                {exercise.sets.map((set, setIndex) => {
+                  const isBackoff = !!set.backoffGroupId;
+                  const firstInBackoff = isBackoff && (setIndex === 0 || exercise.sets[setIndex - 1]?.backoffGroupId !== set.backoffGroupId);
+                  const lastInBackoff = isBackoff && (setIndex === exercise.sets.length - 1 || exercise.sets[setIndex + 1]?.backoffGroupId !== set.backoffGroupId);
+                  const subseries = isBackoff ? exercise.sets.slice(0, setIndex + 1).filter((candidate) => candidate.backoffGroupId === set.backoffGroupId).length : 0;
+                  const backoffCount = isBackoff ? exercise.sets.filter((candidate) => candidate.backoffGroupId === set.backoffGroupId).length : 0;
+                  return <View key={set.id} style={[styles.setEditor, isBackoff && styles.backoffSetEditor, firstInBackoff && styles.backoffStart, lastInBackoff && styles.backoffEnd, { borderColor: theme.glassBorder, backgroundColor: theme.glass }]}>
+                    <Text style={[styles.setEditorTitle, { color: firstInBackoff ? theme.primary : theme.textMuted }]}>
+                      {isBackoff ? (firstInBackoff ? `Backoff · ${backoffCount} subseries` : `Subserie ${subseries}`) : `Serie ${setIndex + 1}`}
+                    </Text>
+                    <View style={styles.setRow}>
                     <View style={styles.typeControl}>
                       {(['C', 'effective', 'F'] as const).map((type) => {
                         const selected = type === 'effective' ? typeof set.tipo === 'number' : set.tipo === type;
@@ -348,14 +372,25 @@ export default function EditRoutineScreen() {
                     <HapticPressable onPress={() => removeSet(exercise.id, set.id)}>
                       <Text style={{ color: theme.textMuted }}>−</Text>
                     </HapticPressable>
-                  </View>
-                ))}
+                    </View>
+                    <EffortTargetControl
+                      value={set.effortTarget}
+                      onChange={(effortTarget) => updateSet(exercise.id, set.id, { effortTarget })}
+                    />
+                  </View>;
+                })}
 
                 <HapticPressable
                   onPress={() => addSet(exercise.id)}
                   style={[styles.addSetBtn, { borderColor: theme.glassBorder }]}
                 >
                   <Text style={{ color: theme.primary, fontWeight: '600' }}>+ Serie</Text>
+                </HapticPressable>
+                <HapticPressable
+                  onPress={() => addBackoff(exercise.id)}
+                  style={[styles.addBackoffBtn, { borderColor: theme.glassBorder }]}
+                >
+                  <Text style={{ color: theme.primary, fontWeight: '600' }}>+ Backoff (2 subseries)</Text>
                 </HapticPressable>
               </GlassCard>
             ))}
@@ -459,6 +494,11 @@ const styles = StyleSheet.create({
     gap: 8,
     marginBottom: 8,
   },
+  setEditor: { borderRadius: 12, borderWidth: 1, marginBottom: 10, padding: 10 },
+  setEditorTitle: { fontSize: 12, fontWeight: '900', marginBottom: 8 },
+  backoffSetEditor: { borderRadius: 0, borderBottomWidth: StyleSheet.hairlineWidth, borderTopWidth: 0, marginBottom: 0 },
+  backoffStart: { borderTopLeftRadius: 12, borderTopRightRadius: 12, borderTopWidth: 1, marginTop: 10 },
+  backoffEnd: { borderBottomLeftRadius: 12, borderBottomRightRadius: 12, borderBottomWidth: 1, marginBottom: 10 },
   typeControl: { width: 92, flexDirection: 'row', gap: 3 },
   typeOption: { flex: 1, minHeight: 38, borderWidth: 1, borderRadius: 8, alignItems: 'center', justifyContent: 'center' },
   setInput: { flex: 1, paddingVertical: 8 },
@@ -469,6 +509,14 @@ const styles = StyleSheet.create({
     paddingVertical: 10,
     alignItems: 'center',
     marginTop: 4,
+  },
+  addBackoffBtn: {
+    borderWidth: 1,
+    borderRadius: 10,
+    borderStyle: 'dashed',
+    paddingVertical: 10,
+    alignItems: 'center',
+    marginTop: 8,
   },
   footerActions: {
     marginTop: 4,
