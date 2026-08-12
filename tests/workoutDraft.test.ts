@@ -35,12 +35,13 @@ describe('active workout snapshot', () => {
     expect(attempt.completion.plannedSets).toBe(3);
   });
 
-  test('edits only an unfinished session snapshot and leaves its template untouched', () => {
+  test('edits the active session snapshot after another series is complete and leaves its template untouched', () => {
     const snapshot = snapshotWorkoutRoutine(routine);
     const edited = updateSessionExerciseSets(snapshot, 'first', {}, (sets) => [...sets, { id: 'session-only', tipo: 2, weight: 25, reps: 6 }], () => 'unused');
     expect(edited.exercises[0].sets).toHaveLength(2);
     expect(routine.exercises[0].sets).toHaveLength(1);
-    expect(updateSessionExerciseSets(edited, 'first', { 'first-first-set': true }, (sets) => [], () => 'unused')).toBe(edited);
+    const expandedAfterCompletion = updateSessionExerciseSets(edited, 'first', { 'first-first-set': true }, (sets) => [...sets, { id: 'after-completion', tipo: 3, weight: 30, reps: 5 }], () => 'unused');
+    expect(expandedAfterCompletion.exercises[0].sets).toHaveLength(3);
   });
 
   test('keeps per-subset intensity targets and backoff grouping in the session snapshot', () => {
@@ -62,11 +63,21 @@ describe('active workout snapshot', () => {
     expect(enriched.exercises[0].sets[0].effortTarget).toEqual({ kind: 'rir', value: 2 });
   });
 
-  test('changes an unfinished session set type and keeps failure prescriptions at zero reps', () => {
-    const snapshot = snapshotWorkoutRoutine(routine);
-    const edited = updateSessionExerciseSets(snapshot, 'first', {}, (sets) => withSessionSetType(sets, 'first-set', 'F'), () => 'unused');
+  test('renumbers working sets after a type change and assigns failure sets RIR 0', () => {
+    const snapshot = snapshotWorkoutRoutine({
+      ...routine,
+      exercises: [{ ...routine.exercises[0], sets: [
+        { id: 'warmup', tipo: 'C', weight: 10, reps: 8 },
+        { id: 'first-set', tipo: 1, weight: 20, reps: 8 },
+        { id: 'second-set', tipo: 2, weight: 25, reps: 6 },
+        { id: 'failure', tipo: 'F', weight: 20, reps: 8 },
+      ] }, routine.exercises[1]],
+    });
+    const warmed = updateSessionExerciseSets(snapshot, 'first', {}, (sets) => withSessionSetType(sets, 'first-set', 'C'), () => 'unused');
+    const edited = updateSessionExerciseSets(warmed, 'first', {}, (sets) => withSessionSetType(sets, 'second-set', 'F'), () => 'unused');
 
-    expect(edited.exercises[0].sets[0]).toMatchObject({ tipo: 'F', reps: 0 });
+    expect(warmed.exercises[0].sets.map((set) => set.tipo)).toEqual(['C', 'C', 1, 'F']);
+    expect(edited.exercises[0].sets[2]).toMatchObject({ tipo: 'F', reps: 6, effortTarget: { kind: 'rir', value: 0 } });
     expect(routine.exercises[0].sets[0]).toMatchObject({ tipo: 1, reps: 8 });
     expect(nextEffectiveSessionSetNumber([{ id: 'warmup', tipo: 'C', weight: 0, reps: 8 }, { id: 'effective', tipo: 3, weight: 20, reps: 8 }])).toBe(4);
   });

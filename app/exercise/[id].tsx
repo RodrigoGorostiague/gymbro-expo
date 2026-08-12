@@ -20,7 +20,7 @@ export default function ExerciseDetailScreen() {
     return (
       <ThemeBackground>
         <SafeAreaView style={styles.safe}>
-          <AppNavBar onBack={() => router.back()} backLabel="← Ejercicios" />
+          <AppNavBar onBack={() => router.back()} backLabel="Ejercicios" />
           <GlassCard><Text style={[styles.emptyTitle, { color: theme.text }]}>Ejercicio no disponible</Text><Text style={[styles.emptyText, { color: theme.textMuted }]}>Volvé al catálogo para elegir otro ejercicio.</Text></GlassCard>
         </SafeAreaView>
       </ThemeBackground>
@@ -32,7 +32,7 @@ export default function ExerciseDetailScreen() {
   return (
     <ThemeBackground>
       <SafeAreaView style={styles.safe}>
-        <AppNavBar onBack={() => router.back()} backLabel="← Ejercicios" />
+          <AppNavBar onBack={() => router.back()} backLabel="Ejercicios" />
         <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
           <GlassCard style={styles.hero}>
             <View style={[styles.monogram, { backgroundColor: theme.primary }]}><Text style={[styles.monogramText, { color: theme.onPrimary }]}>{exercise.name.slice(0, 1).toUpperCase()}</Text></View>

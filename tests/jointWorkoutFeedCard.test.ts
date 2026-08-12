@@ -45,4 +45,13 @@ describe('JointWorkoutFeedCard', () => {
     expect(tree!.root.find((node) => String(node.type) === 'ProfileAvatar').props.frameId).toBe('alfa');
     expect(tree!.root.find((node) => String(node.type) === 'ProfileTitleBadge').props.titleId).toBe('alfa');
   });
+
+  test('uses chevrons instead of plus and minus glyphs for disclosure', () => {
+    let tree: TestRenderer.ReactTestRenderer;
+    act(() => { tree = TestRenderer.create(React.createElement(JointWorkoutFeedCard, {
+      workoutId: 'joint-1', publishedAt: '2026-08-09T10:00:00Z', now: Date.UTC(2026, 7, 9, 11), participants: [],
+    })); });
+
+    expect(tree!.root.findByProps({ name: 'chevron-down' })).toBeTruthy();
+  });
 });

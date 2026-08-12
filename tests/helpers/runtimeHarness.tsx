@@ -2,7 +2,7 @@ import React from 'react';
 import TestRenderer, { act, type ReactTestInstance, type ReactTestRenderer } from 'react-test-renderer';
 import { vi } from 'vitest';
 import { __blurFocus, __setParams, router as expoRouter } from './expoRouterStub';
-import { Alert as nativeAlert, __resetAppState } from './reactNativeStub';
+import { Alert as nativeAlert, __resetAppState, __resetBackHandler } from './reactNativeStub';
 
 declare global {
   // eslint-disable-next-line no-var
@@ -69,7 +69,7 @@ function authContextMock() {
 
 function appNavBarMock() {
   return {
-  AppNavBar: ({ backLabel = '← Volver', onBack, trailing }: any) => React.createElement(
+  AppNavBar: ({ backLabel = 'Volver', onBack, trailing }: any) => React.createElement(
     'AppNavBar',
     { backLabel, onBack },
     React.createElement('Text', null, backLabel),
@@ -162,6 +162,7 @@ vi.mock('../../context/SocialContext', () => ({ useSocial: () => ({ circle: vi.f
 export function resetRuntimeHarness() {
   __blurFocus();
   __resetAppState();
+  __resetBackHandler();
   __setParams({});
   currentTheme = baseTheme;
   currentData = {};

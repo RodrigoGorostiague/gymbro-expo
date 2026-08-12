@@ -27,6 +27,7 @@ export const Animated = {
 export const Easing = { linear: (value: number) => value };
 
 const appStateListeners = new Set<(state: string) => void>();
+const hardwareBackListeners = new Set<() => boolean>();
 export const AppState = {
   addEventListener: vi.fn((_event: 'change', listener: (state: string) => void) => {
     appStateListeners.add(listener);
@@ -41,6 +42,22 @@ export function __emitAppState(state: string) {
 export function __resetAppState() {
   appStateListeners.clear();
   AppState.addEventListener.mockClear();
+}
+
+export const BackHandler = {
+  addEventListener: vi.fn((_event: 'hardwareBackPress', listener: () => boolean) => {
+    hardwareBackListeners.add(listener);
+    return { remove: () => hardwareBackListeners.delete(listener) };
+  }),
+};
+
+export function __emitHardwareBackPress() {
+  return [...hardwareBackListeners].reverse().some((listener) => listener());
+}
+
+export function __resetBackHandler() {
+  hardwareBackListeners.clear();
+  BackHandler.addEventListener.mockClear();
 }
 
 export const Dimensions = { get: () => ({ width: 390, height: 844 }) };

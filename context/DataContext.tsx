@@ -11,11 +11,14 @@ import { reconcileActiveWorkoutTiming } from '../utils/activeWorkoutTiming';
 import { hasActiveWorkoutReentryIntegrity, matchesActiveWorkout, WorkoutLaunchTarget } from '../utils/activeWorkoutReentry';
 import { applySessionEdits, attemptToSession } from '../utils/workoutAttempts';
 import { deleteCustomDefinition, planRecipientImport } from '../utils/catalogLibrary';
+import { AsyncTimeoutError, withTimeout } from '../utils/withTimeout';
 import { finalizeTrainingAttempt, importLegacyCustomDefinitions, loadTrainingState, saveTrainingState, TrainingState } from '../services/trainingState';
 import { loadExperienceProgress } from '../services/experience';
 import { useAuth } from './AuthContext';
 
 type PersistedWorkoutSession = WorkoutSession & { owner: UserProfile };
+
+const ACTIVE_WORKOUT_SAVE_TIMEOUT_MS = 12_000;
 
 interface DataContextValue {
   exercises: Exercise[];
@@ -99,6 +102,8 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
   const [activeWorkoutDraft, setActiveWorkoutDraft] = useState<ActiveWorkoutDraft | null>(null);
   const activeWorkoutDraftRef = useRef<ActiveWorkoutDraft | null>(null);
   activeWorkoutDraftRef.current = activeWorkoutDraft;
+  const activeWorkoutMutationQueueRef = useRef<Promise<void>>(Promise.resolve());
+  const activeWorkoutMutationVersionRef = useRef(0);
   const [quarantinedSessionCount, setQuarantinedSessionCount] = useState(0);
   const mesocyclesRef = useRef<Mesocycle[]>([]);
   const sessionsRef = useRef<PersistedWorkoutSession[]>([]);
@@ -215,14 +220,31 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
       setActiveWorkoutDraft(draft);
     }
   };
+  const enqueueActiveWorkoutSave = (draft: ActiveWorkoutDraft | null, version: number): Promise<void> => {
+    const operation = activeWorkoutMutationQueueRef.current.then(() => {
+      let timedOut = false;
+      const save = saveTrainingState({ activeWorkoutDraft: draft });
+      const reconcileLateSave = () => {
+        if (!timedOut || version >= activeWorkoutMutationVersionRef.current || activeUserRef.current !== draft?.owner) return;
+        void enqueueActiveWorkoutSave(activeWorkoutDraftRef.current, activeWorkoutMutationVersionRef.current).catch(() => undefined);
+      };
+      save.then(reconcileLateSave, reconcileLateSave);
+      return withTimeout(save, ACTIVE_WORKOUT_SAVE_TIMEOUT_MS, 'Active workout save').catch((error: unknown) => {
+        if (error instanceof AsyncTimeoutError) timedOut = true;
+        throw error;
+      });
+    });
+    activeWorkoutMutationQueueRef.current = operation.then(() => undefined, () => undefined);
+    return operation;
+  };
   const updateActiveWorkout = async (draft: ActiveWorkoutDraft) => {
     const current = activeWorkoutDraftRef.current;
     if (!current || draft.owner !== current.owner || draft.attemptId !== current.attemptId) throw new Error('El borrador activo no coincide.');
-    await saveTrainingState({ activeWorkoutDraft: draft });
-    if (activeUserRef.current === draft.owner && activeWorkoutDraftRef.current?.attemptId === draft.attemptId) {
-      activeWorkoutDraftRef.current = draft;
-      setActiveWorkoutDraft(draft);
-    }
+    // Publish immediately so rapid set completions compose from the latest rest end,
+    // then persist drafts in the same order to prevent an older timer from winning.
+    activeWorkoutDraftRef.current = draft;
+    setActiveWorkoutDraft(draft);
+    await enqueueActiveWorkoutSave(draft, ++activeWorkoutMutationVersionRef.current);
   };
   const cancelActiveWorkout = async () => { const owner = activeUserRef.current; if (!owner) throw new Error('Se requiere autenticación.'); await saveTrainingState({ activeWorkoutDraft: null }); if (activeUserRef.current === owner) { activeWorkoutDraftRef.current = null; setActiveWorkoutDraft(null); } };
   const clearActiveWorkoutIfMatches = async (target: WorkoutLaunchTarget) => {
@@ -645,6 +667,10 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
     const finalized = await finalizeTrainingAttempt(attempt);
     const next = existing ? attempts : [finalized.attempt, ...attempts];
     if (activeUserRef.current === owner) {
+      // A timed-out draft save may settle after finalization. Invalidate it and
+      // ensure its late reconciliation can only persist the cleared draft.
+      activeWorkoutMutationVersionRef.current += 1;
+      activeWorkoutDraftRef.current = null;
       setAttempts(next);
       setActiveWorkoutDraft(null);
       setExperienceProgress(finalized.experienceReceipt.progress);

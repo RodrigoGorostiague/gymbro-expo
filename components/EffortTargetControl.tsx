@@ -16,7 +16,7 @@ interface EffortTargetControlProps {
 export function EffortTargetControl({ value, disabled = false, onChange }: EffortTargetControlProps) {
   const { theme } = useTheme();
   const [pendingMode, setPendingMode] = useState<EffortTarget['kind'] | null>(null);
-  const [isEditing, setIsEditing] = useState(!value);
+  const [isEditing, setIsEditing] = useState(false);
   const mode: EffortMode = pendingMode ?? value?.kind ?? 'none';
   const choices = mode === 'rir' ? [0, 1, 2, 3, 4, 5] : mode === 'rpe' ? [6, 7, 8, 9, 10] : [];
   const tone = value ? effortTone(value) : null;
@@ -26,6 +26,7 @@ export function EffortTargetControl({ value, disabled = false, onChange }: Effor
     if (next === 'none') {
       setPendingMode(null);
       onChange(undefined);
+      setIsEditing(false);
       return;
     }
     setPendingMode(next);
@@ -38,17 +39,24 @@ export function EffortTargetControl({ value, disabled = false, onChange }: Effor
     setIsEditing(false);
   };
 
-  if (value && !isEditing) {
+  if (!isEditing) {
+    const accessibilityLabel = value
+      ? `Editar ${value.kind.toUpperCase()} ${value.value}`
+      : 'Configurar intensidad objetivo';
     return <View style={styles.wrap}>
       <Text style={[styles.label, { color: theme.textMuted }]}>Intensidad objetivo</Text>
       <HapticPressable
         accessibilityRole="button"
-        accessibilityLabel={`Editar ${value.kind.toUpperCase()} ${value.value}`}
+        accessibilityLabel={accessibilityLabel}
         accessibilityHint="Abre el selector de intensidad"
         disabled={disabled}
         onPress={() => setIsEditing(true)}
-        style={[styles.badge, { backgroundColor: `${tone!.color}24`, borderColor: tone!.color }]}
-      ><Text style={[styles.badgeText, { color: tone!.color }]}>{value.kind.toUpperCase()} {value.value}</Text><Ionicons name="pencil" size={13} color={tone!.color} /></HapticPressable>
+        style={value
+          ? [styles.badge, { backgroundColor: `${tone!.color}24`, borderColor: tone!.color }]
+          : [styles.powerButton, { backgroundColor: theme.glass, borderColor: theme.glassBorder }]}
+      >{value
+        ? <><Text style={[styles.badgeText, { color: tone!.color }]}>{value.kind.toUpperCase()} {value.value}</Text><Ionicons name="pencil" size={13} color={tone!.color} /></>
+        : <Ionicons name="power-outline" size={18} color={theme.textMuted} />}</HapticPressable>
     </View>;
   }
 
@@ -109,4 +117,5 @@ const styles = StyleSheet.create({
   value: { alignItems: 'center', borderRadius: 10, borderWidth: 1, flex: 1, minHeight: 38, justifyContent: 'center' },
   badge: { alignItems: 'center', alignSelf: 'flex-start', borderRadius: 999, borderWidth: 1, flexDirection: 'row', gap: 6, minHeight: 34, paddingHorizontal: 12 },
   badgeText: { fontSize: 13, fontWeight: '900' },
+  powerButton: { alignItems: 'center', alignSelf: 'flex-start', borderRadius: 999, borderWidth: 1, height: 34, justifyContent: 'center', width: 42 },
 });

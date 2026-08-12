@@ -11,6 +11,12 @@ export function nextEffectiveSessionSetNumber(sets: readonly RoutineSet[]): numb
   return Math.max(0, ...sets.map((set) => typeof set.tipo === 'number' ? set.tipo : 0)) + 1;
 }
 
+/** Keeps working-set labels contiguous while excluding warmup and failure sets. */
+export function normalizeSessionSetNumbers(sets: readonly RoutineSet[]): RoutineSet[] {
+  let number = 0;
+  return sets.map((set) => typeof set.tipo === 'number' ? { ...set, tipo: ++number } : set);
+}
+
 /** Mirrors routine set-type selection without touching the routine template. */
 export function withSessionSetType(sets: readonly RoutineSet[], setId: string, type: 'C' | 'effective' | 'F'): RoutineSet[] {
   const current = sets.find((set) => set.id === setId);
@@ -18,7 +24,9 @@ export function withSessionSetType(sets: readonly RoutineSet[], setId: string, t
   const tipo: SetType = type === 'effective'
     ? (typeof current.tipo === 'number' ? current.tipo : nextEffectiveSessionSetNumber(sets))
     : type;
-  return sets.map((set) => set.id === setId ? { ...set, tipo, ...(type === 'F' ? { reps: 0 } : {}) } : set);
+  return normalizeSessionSetNumbers(sets.map((set) => set.id === setId
+    ? { ...set, tipo, ...(type === 'F' ? { effortTarget: { kind: 'rir', value: 0 } } : {}) }
+    : set));
 }
 
 /** Reconciles runtime inputs with a changed snapshot, dropping removed set keys and seeding additions. */
@@ -83,16 +91,16 @@ export function appendSessionExercise(routine: Routine, exercise: Exercise, defi
   return { ...routine, exercises: [...routine.exercises, createSessionExercise(exercise, definitions, nextId)] };
 }
 
-/** Updates only an unfinished exercise prescription in the active session snapshot. */
+/** Updates the active-session prescription without touching the routine template. */
 export function updateSessionExerciseSets(
   routine: Routine,
   exerciseId: string,
-  completedSets: Readonly<Record<string, boolean>>,
+  _completedSets: Readonly<Record<string, boolean>>,
   update: (sets: readonly RoutineSet[]) => RoutineSet[],
   _nextId: IdFactory,
 ): Routine {
   const exercise = routine.exercises.find((candidate) => candidate.id === exerciseId);
-  if (!exercise || exercise.sets.some((set) => completedSets[`${exercise.id}-${set.id}`])) return routine;
+  if (!exercise) return routine;
   return { ...routine, exercises: routine.exercises.map((candidate) => candidate.id === exerciseId ? { ...candidate, sets: update(candidate.sets) } : candidate) };
 }
 

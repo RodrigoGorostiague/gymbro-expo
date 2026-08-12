@@ -7,7 +7,7 @@ import EditRoutineScreen from '../app/routine/[id]';
 import MesocycleSummaryScreen from '../app/mesocycle/summary/[id]';
 import ExecuteRoutineScreen from '../app/routine/execute/[id]';
 import { hasActiveWorkoutReentryIntegrity, matchesActiveWorkout } from '../utils/activeWorkoutReentry';
-import { __emitAppState } from './helpers/reactNativeStub';
+import { __emitAppState, __emitHardwareBackPress } from './helpers/reactNativeStub';
 
 vi.mock('react-native-url-polyfill/auto', () => ({}));
 vi.mock('../context/AuthContext', () => ({ useAuth: () => ({ user: 'rodaja', welcomeMessage: null, setWelcomeMessage: vi.fn() }) }));
@@ -171,7 +171,7 @@ describe('active workout re-entry', () => {
     }));
   });
 
-   test('keeps the operational workout status sticky above the exercise list', () => {
+     test('keeps the social hub outside the exercise scroller', () => {
     const routineWithSet = {
       ...routineA,
       exercises: [{ id: 'exercise-1', name: 'Press', muscleGroups: ['pecho'], variant: 'bar', sets: [{ id: 'set-1', tipo: 1 as const, weight: 10, reps: 8 }] }],
@@ -186,15 +186,44 @@ describe('active workout re-entry', () => {
     const screen = render(React.createElement(ExecuteRoutineScreen));
     const lists = screen.root.findAll((node) => (node.type as any) === 'FlatList');
 
-     expect(lists).toHaveLength(1);
-     expect(lists[0].props.contentContainerStyle).toEqual(expect.objectContaining({ paddingBottom: 120 }));
-     expect(lists[0].props.stickyHeaderIndices).toEqual([0]);
-     expect(findText(screen.root, 'Cronómetro')).toBeTruthy();
-     expect(findText(screen.root, 'Series: 0/1')).toBeTruthy();
+       expect(lists).toHaveLength(1);
+       expect(lists[0].props.contentContainerStyle).toEqual(expect.objectContaining({ paddingBottom: 120 }));
+       expect(lists[0].props.stickyHeaderIndices).toBeUndefined();
+       expect(lists[0].props.stickyHeaderHiddenOnScroll).toBeUndefined();
+       expect(lists[0].props.StickyHeaderComponent).toBeUndefined();
+       expect(findText(screen.root, 'Tiempo')).toBeTruthy();
+       expect(findText(screen.root, 'Descanso')).toBeTruthy();
+       expect(findText(screen.root, 'Series: 0/1')).toBeTruthy();
+       expect(screen.root.find((node) => node.props.accessibilityLabel === 'Pausar entrenamiento')).toBeTruthy();
      expect(screen.root.find((node) => node.props.accessibilityLabel === 'Mostrar entrenamiento conjunto')).toBeTruthy();
     expect(screen.root.find((node) => node.props.accessibilityLabel === 'Agregar ejercicio')).toBeTruthy();
      expect(screen.root.findAll((node) => (node.type as any) === 'ScrollView')).toHaveLength(0);
-   });
+    });
+
+    test('persists a completed set and its rest before hardware back leaves the session', async () => {
+      const routineWithSet = {
+        ...routineA,
+        exercises: [{ id: 'exercise-1', name: 'Press', muscleGroups: ['pecho'], variant: 'bar', sets: [{ id: 'set-1', tipo: 1 as const, weight: 10, reps: 8 }] }],
+      };
+      const updateActiveWorkout = vi.fn().mockResolvedValue(undefined);
+      setMockParams({ id: routineWithSet.id });
+      setMockData({
+        getRoutine: vi.fn(() => routineWithSet), mesocycles: [], exercises: [], definitions: [],
+        activeWorkoutDraft: { ...draft, routineId: routineWithSet.id, setValues: { 'exercise-1-set-1': { weight: '10', reps: '8' } } }, addAttempt: vi.fn(), startActiveWorkout: vi.fn(),
+        updateActiveWorkout, cancelActiveWorkout: vi.fn(), refreshActiveWorkoutTiming: vi.fn(),
+      });
+
+      const screen = render(React.createElement(ExecuteRoutineScreen));
+      press(screen.root.findAll((node) => (node.type as any) === 'HapticPressable').find((node) => node.props.accessibilityLabel === undefined)!);
+
+      await act(async () => { expect(__emitHardwareBackPress()).toBe(true); await Promise.resolve(); });
+
+      expect(updateActiveWorkout).toHaveBeenCalledWith(expect.objectContaining({
+        completedSets: { 'exercise-1-set-1': true },
+        restEndsAtMs: expect.any(Number),
+      }));
+      expect(mockRouter.back).toHaveBeenCalled();
+    });
 
    test('expands joint training from the sticky community control', async () => {
      const routineWithSet = {
@@ -216,7 +245,7 @@ describe('active workout re-entry', () => {
      await vi.waitFor(() => expect(findText(screen.root, 'Nadie de tu círculo está entrenando ahora.')).toBeTruthy());
    });
 
-   test('pauses both persisted timers before opening the workout decision menu', async () => {
+    test('pauses both persisted timers before opening the workout decision menu', async () => {
      const routineWithSet = {
        ...routineA,
        exercises: [{ id: 'exercise-1', name: 'Press', muscleGroups: ['pecho'], variant: 'bar', sets: [{ id: 'set-1', tipo: 1 as const, weight: 10, reps: 8 }] }],
@@ -238,8 +267,33 @@ describe('active workout re-entry', () => {
        restEndsAtMs: undefined,
      })));
      await vi.waitFor(() => expect(screen.root.find((node) => (node.type as any) === 'Modal').props.visible).toBe(true));
-     expect(findText(screen.root, 'Entrenamiento pausado')).toBeTruthy();
-   });
+      expect(findText(screen.root, 'Entrenamiento pausado')).toBeTruthy();
+    });
+
+    test('releases the pause control when persistence times out so the athlete can retry without remounting', async () => {
+      vi.useFakeTimers();
+      const routineWithSet = {
+        ...routineA,
+        exercises: [{ id: 'exercise-1', name: 'Press', muscleGroups: ['pecho'], variant: 'bar', sets: [{ id: 'set-1', tipo: 1 as const, weight: 10, reps: 8 }] }],
+      };
+      const updateActiveWorkout = vi.fn(() => new Promise<void>(() => undefined));
+      setMockParams({ id: routineWithSet.id });
+      setMockData({
+        getRoutine: vi.fn(() => routineWithSet), mesocycles: [], exercises: [], definitions: [],
+        activeWorkoutDraft: { ...draft, routineId: routineWithSet.id }, addAttempt: vi.fn(), startActiveWorkout: vi.fn(),
+        updateActiveWorkout, cancelActiveWorkout: vi.fn(), refreshActiveWorkoutTiming: vi.fn(),
+      });
+
+      const screen = render(React.createElement(ExecuteRoutineScreen));
+      const pause = () => screen.root.find((node) => node.props.accessibilityLabel === 'Pausar entrenamiento');
+      press(pause());
+      await act(async () => { vi.advanceTimersByTime(12_000); });
+      expect(mockAlert.alert).toHaveBeenCalledWith('No se pudo pausar', expect.stringContaining('timed out'));
+
+      const callsBeforeRetry = updateActiveWorkout.mock.calls.length;
+      press(pause());
+      expect(updateActiveWorkout).toHaveBeenCalledTimes(callsBeforeRetry + 1);
+    });
 
    test('keeps the mounted rest countdown moving while persistence is still pending and shows one completion badge', async () => {
     vi.useFakeTimers();
@@ -267,11 +321,13 @@ describe('active workout re-entry', () => {
     });
 
     const screen = render(React.createElement(ExecuteRoutineScreen));
-    const inputs = screen.root.findAll((node) => (node.type as any) === 'GlassInput');
-    changeText(inputs[0], '10');
-    changeText(inputs[1], '8');
-    press(screen.root.findAll((node) => (node.type as any) === 'HapticPressable').find((node) => node.props.accessibilityLabel === undefined)!);
-    expect(findText(screen.root, '00:03')).toBeTruthy();
+     const inputs = screen.root.findAll((node) => (node.type as any) === 'GlassInput');
+     changeText(inputs[0], '10');
+     changeText(inputs[1], '8');
+     mockAlert.alert.mockClear();
+     press(screen.root.findAll((node) => (node.type as any) === 'HapticPressable').find((node) => node.props.accessibilityLabel === undefined)!);
+     expect(mockAlert.alert).not.toHaveBeenCalled();
+     expect(findText(screen.root, '00:03')).toBeTruthy();
     expect(vi.getTimerCount()).toBeGreaterThan(0);
 
     mockAlert.alert.mockClear();
@@ -284,10 +340,48 @@ describe('active workout re-entry', () => {
      expect(mockAlert.alert).not.toHaveBeenCalled();
      expect(findText(screen.root, 'Descanso terminado')).toBeTruthy();
      press(screen.root.find((node) => node.props.accessibilityLabel === 'Cerrar aviso de descanso'));
-     expect(findText(screen.root, 'Descanso terminado')).toBeUndefined();
+      expect(findText(screen.root, 'Descanso terminado')).toBeUndefined();
    });
 
-  test('reopens a completed set so its values can be corrected and reconfirmed', () => {
+   test('replaces an active rest with the full countdown from the latest completed set', () => {
+     vi.useFakeTimers();
+     vi.setSystemTime(new Date('2026-07-30T20:00:00.000Z'));
+     const routineWithSets = {
+       ...routineA,
+       exercises: [{
+         id: 'exercise-1', name: 'Press', loadMode: 'external-load' as const, loadUnit: 'kg' as const,
+         sets: [
+           { id: 'set-1', tipo: 1 as const, weight: 10, reps: 8 },
+           { id: 'set-2', tipo: 2 as const, weight: 10, reps: 8 },
+         ],
+       }],
+     };
+     setMockParams({ id: routineWithSets.id });
+     setMockData({
+       getRoutine: vi.fn(() => routineWithSets),
+       activeWorkoutDraft: { ...draft, routineId: routineWithSets.id, restTimerSeconds: 3 },
+       addAttempt: vi.fn(), startActiveWorkout: vi.fn(), updateActiveWorkout: vi.fn(), cancelActiveWorkout: vi.fn(), refreshActiveWorkoutTiming: vi.fn(),
+     });
+
+     const screen = render(React.createElement(ExecuteRoutineScreen));
+     const inputs = screen.root.findAll((node) => (node.type as any) === 'GlassInput');
+     ['10', '8', '10', '8'].forEach((value, index) => changeText(inputs[index], value));
+     const completeNextSet = () => press(screen.root.findAll((node) => (node.type as any) === 'HapticPressable')
+       .find((node) => node.props.accessibilityLabel === undefined)!);
+
+     completeNextSet();
+     act(() => { vi.advanceTimersByTime(2_000); });
+     expect(findText(screen.root, '00:01')).toBeTruthy();
+     completeNextSet();
+     expect(findText(screen.root, '00:03')).toBeTruthy();
+
+     act(() => { vi.advanceTimersByTime(2_000); });
+     expect(findText(screen.root, 'Descanso terminado')).toBeUndefined();
+     act(() => { vi.advanceTimersByTime(1_000); });
+     expect(findText(screen.root, 'Descanso terminado')).toBeTruthy();
+   });
+
+    test('reopens a completed set so its values and intensity can be corrected and reconfirmed', () => {
     const routineWithSet = {
       ...routineA,
       exercises: [{
@@ -316,18 +410,112 @@ describe('active workout re-entry', () => {
     changeText(inputs[1], '8');
     press(screen.root.findAll((node) => (node.type as any) === 'HapticPressable').find((node) => node.props.accessibilityLabel === undefined)!);
 
-    expect(inputs[0].props.editable).toBe(false);
-    press(screen.root.find((node) => node.props.accessibilityLabel === 'Editar Serie 1'));
-    expect(inputs[0].props.editable).toBe(true);
-    expect(updateActiveWorkout).toHaveBeenCalledWith(expect.objectContaining({
-      completedSets: { 'exercise-1-set-1': false },
-    }));
+     expect(inputs[0].props.editable).toBe(false);
+     press(screen.root.find((node) => node.props.accessibilityLabel === 'Editar Serie 1'));
+     expect(inputs[0].props.editable).toBe(true);
+     expect(updateActiveWorkout).toHaveBeenCalledWith(expect.objectContaining({
+       completedSets: { 'exercise-1-set-1': false },
+     }));
 
-    changeText(inputs[0], '12.5');
+     press(screen.root.find((node) => node.props.accessibilityLabel === 'Configurar intensidad objetivo'));
+     press(screen.root.find((node) => node.props.accessibilityLabel === 'RPE'));
+     press(screen.root.find((node) => node.props.accessibilityLabel === 'RPE 8'));
+     expect(updateActiveWorkout).toHaveBeenLastCalledWith(expect.objectContaining({
+       routineSnapshot: expect.objectContaining({
+         exercises: [expect.objectContaining({ sets: [expect.objectContaining({ effortTarget: { kind: 'rpe', value: 8 } })] })],
+       }),
+     }));
+
+     changeText(inputs[0], '12.5');
     changeText(inputs[1], '7');
-    expect(updateActiveWorkout).toHaveBeenLastCalledWith(expect.objectContaining({
-      setValues: { 'exercise-1-set-1': { weight: '12.5', reps: '7' } },
-    }));
-  });
+      expect(updateActiveWorkout).toHaveBeenLastCalledWith(expect.objectContaining({
+        setValues: { 'exercise-1-set-1': { weight: '12.5', reps: '7' } },
+      }));
+    });
 
-});
+    test('keeps unfinished set editing and additions available after another set is complete', () => {
+      const routineWithSets = {
+        ...routineA,
+        exercises: [{
+          id: 'exercise-1',
+          name: 'Press',
+          loadMode: 'external-load' as const,
+          loadUnit: 'kg' as const,
+          sets: [
+            { id: 'set-1', tipo: 1 as const, weight: 10, reps: 8 },
+            { id: 'set-2', tipo: 2 as const, weight: 10, reps: 8 },
+          ],
+        }],
+      };
+      const updateActiveWorkout = vi.fn();
+      setMockParams({ id: routineWithSets.id });
+      setMockData({
+        getRoutine: vi.fn(() => routineWithSets),
+        activeWorkoutDraft: { ...draft, routineId: routineWithSets.id, completedSets: { 'exercise-1-set-1': true } },
+        addAttempt: vi.fn(),
+        startActiveWorkout: vi.fn(),
+        updateActiveWorkout,
+        cancelActiveWorkout: vi.fn(),
+        refreshActiveWorkoutTiming: vi.fn(),
+      });
+
+      const screen = render(React.createElement(ExecuteRoutineScreen));
+      const warmupButtons = screen.root.findAll((node) => (node.type as any) === 'HapticPressable' && node.props.accessibilityLabel === 'Calentamiento');
+      expect(warmupButtons).toHaveLength(1);
+      press(warmupButtons[0]);
+      expect(updateActiveWorkout).toHaveBeenLastCalledWith(expect.objectContaining({
+        routineSnapshot: expect.objectContaining({
+          exercises: [expect.objectContaining({ sets: [expect.objectContaining({ tipo: 1 }), expect.objectContaining({ tipo: 'C' })] })],
+        }),
+      }));
+
+      press(screen.root.find((node) => node.props.accessibilityLabel === 'Agregar serie a Press'));
+      expect(updateActiveWorkout).toHaveBeenLastCalledWith(expect.objectContaining({
+        routineSnapshot: expect.objectContaining({
+          exercises: [expect.objectContaining({ sets: expect.arrayContaining([expect.objectContaining({ id: 'set-1', tipo: 1 })]) })],
+        }),
+      }));
+      expect(screen.root.find((node) => node.props.accessibilityLabel === 'Agregar backoff a Press')).toBeTruthy();
+    });
+
+    test('configures, resets, and persists intensity for an unfinished series', () => {
+     const routineWithSet = {
+       ...routineA,
+       exercises: [{
+         id: 'exercise-1',
+         name: 'Press',
+         loadMode: 'external-load' as const,
+         loadUnit: 'kg' as const,
+         sets: [{ id: 'set-1', tipo: 1 as const, weight: 10, reps: 8 }],
+       }],
+     };
+     const updateActiveWorkout = vi.fn();
+     setMockParams({ id: routineWithSet.id });
+     setMockData({
+       getRoutine: vi.fn(() => routineWithSet),
+       activeWorkoutDraft: { ...draft, routineId: routineWithSet.id },
+       addAttempt: vi.fn(),
+       startActiveWorkout: vi.fn(),
+       updateActiveWorkout,
+       cancelActiveWorkout: vi.fn(),
+       refreshActiveWorkoutTiming: vi.fn(),
+     });
+
+     const screen = render(React.createElement(ExecuteRoutineScreen));
+     press(screen.root.find((node) => node.props.accessibilityLabel === 'Configurar intensidad objetivo'));
+     press(screen.root.find((node) => node.props.accessibilityLabel === 'RIR'));
+     press(screen.root.find((node) => node.props.accessibilityLabel === 'RIR 2'));
+
+     expect(screen.root.find((node) => node.props.accessibilityLabel === 'Editar RIR 2')).toBeTruthy();
+     expect(updateActiveWorkout).toHaveBeenLastCalledWith(expect.objectContaining({
+       routineSnapshot: expect.objectContaining({
+         exercises: [expect.objectContaining({ sets: [expect.objectContaining({ effortTarget: { kind: 'rir', value: 2 } })] })],
+       }),
+     }));
+
+     press(screen.root.find((node) => node.props.accessibilityLabel === 'Editar RIR 2'));
+     press(screen.root.find((node) => node.props.accessibilityLabel === 'Sin objetivo'));
+     expect(screen.root.find((node) => node.props.accessibilityLabel === 'Configurar intensidad objetivo')).toBeTruthy();
+   });
+
+ });

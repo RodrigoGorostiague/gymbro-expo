@@ -1,6 +1,7 @@
 import React from 'react';
 import TestRenderer, { act } from 'react-test-renderer';
-import { beforeEach, describe, expect, test, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
+import { __resetSafeAreaInsets, __setSafeAreaInsets } from './helpers/safeAreaStub';
 
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -21,6 +22,8 @@ vi.mock('../components/HapticPressable', () => ({ HapticPressable: ({ children, 
 import { InAppNotificationBadges } from '../components/InAppNotificationBadges';
 
 describe('InAppNotificationBadges', () => {
+  let renderer: TestRenderer.ReactTestRenderer | undefined;
+
   beforeEach(() => {
     vi.clearAllMocks();
     inbox.listNotificationInbox.mockResolvedValue([{ id: 'notice-1', kind: 'joint_workout_invite', title: 'Invitación', body: 'Bro te invitó.', data: { workout_id: 'workout-1', actor_avatar_id: 'capiboy' }, readAt: null, createdAt: '2026-08-08T00:00:00Z' }]);
@@ -31,8 +34,14 @@ describe('InAppNotificationBadges', () => {
     updateActiveWorkout.mockResolvedValue(undefined);
   });
 
+  afterEach(() => {
+    renderer?.unmount();
+    renderer = undefined;
+    __resetSafeAreaInsets();
+    vi.useRealTimers();
+  });
+
   test('accepts a live workout invitation without a routine selector and dismisses the badge', async () => {
-    let renderer: TestRenderer.ReactTestRenderer;
     await act(async () => { renderer = TestRenderer.create(React.createElement(InAppNotificationBadges)); await Promise.resolve(); await Promise.resolve(); });
     const accept = renderer!.root.findByProps({ 'aria-label': 'Aceptar invitación' });
     await act(async () => { accept.props.onClick(); await Promise.resolve(); await Promise.resolve(); });
@@ -44,7 +53,6 @@ describe('InAppNotificationBadges', () => {
 
   test('silently removes a stale workout invitation instead of rejecting the badge action', async () => {
     joint.respondToJointInvite.mockRejectedValue(new Error('joint workout unavailable'));
-    let renderer: TestRenderer.ReactTestRenderer;
     await act(async () => { renderer = TestRenderer.create(React.createElement(InAppNotificationBadges)); await Promise.resolve(); await Promise.resolve(); });
     const accept = renderer!.root.findByProps({ 'aria-label': 'Aceptar invitación' });
 
@@ -56,7 +64,6 @@ describe('InAppNotificationBadges', () => {
 
   test('invites a Circle member from a workout-start notification with the active routine snapshot', async () => {
     inbox.listNotificationInbox.mockResolvedValue([{ id: 'notice-2', kind: 'circle_workout_started', title: 'Bro empezó', body: 'Upper', data: { actor_id: 'member-2', actor_avatar_id: 'capiboy', activity_id: 'activity-1', expires_at: new Date(Date.now() + 60_000).toISOString() }, readAt: null, createdAt: '2026-08-08T00:00:00Z' }]);
-    let renderer: TestRenderer.ReactTestRenderer;
     await act(async () => { renderer = TestRenderer.create(React.createElement(InAppNotificationBadges)); await Promise.resolve(); await Promise.resolve(); });
     const invite = renderer!.root.findByProps({ 'aria-label': 'Invitar a entrenar' });
     await act(async () => { invite.props.onClick(); await Promise.resolve(); await Promise.resolve(); });
@@ -70,5 +77,23 @@ describe('InAppNotificationBadges', () => {
     expect(shouldDismissNotificationBadge(95, 0)).toBe(false);
     expect(shouldDismissNotificationBadge(96, 0)).toBe(true);
     expect(shouldDismissNotificationBadge(0, -650)).toBe(true);
+  });
+
+  test('keeps badges above the safe area and dismisses them to the left after 15 seconds', async () => {
+    vi.useFakeTimers();
+    __setSafeAreaInsets({ bottom: 32 });
+    await act(async () => { renderer = TestRenderer.create(React.createElement(InAppNotificationBadges)); await Promise.resolve(); await Promise.resolve(); });
+
+    expect(renderer!.root.findByProps({ testID: 'in-app-notification-stack' }).props.style).toEqual([
+      expect.objectContaining({ bottom: 24 }),
+      { bottom: 56 },
+    ]);
+
+    await act(async () => { await vi.advanceTimersByTimeAsync(14_999); });
+    expect(inbox.markNotificationRead).not.toHaveBeenCalled();
+
+    await act(async () => { await vi.advanceTimersByTimeAsync(1); await Promise.resolve(); });
+    expect(inbox.markNotificationRead).toHaveBeenCalledWith('notice-1');
+    expect(() => renderer!.root.findByProps({ 'aria-label': 'Aceptar invitación' })).toThrow();
   });
 });

@@ -17,6 +17,7 @@ import { useShop } from '../context/ShopContext';
 import { useSocial } from '../context/SocialContext';
 import { ProfileAvatar } from '../components/ProfileAvatar';
 import { ProfileTitleBadge } from '../components/ProfileTitleBadge';
+import { AppThemeLoadingOverlay } from '../components/AppThemeLoadingOverlay';
 
 function RootStatusBar() {
   const { theme } = useTheme();
@@ -74,6 +75,7 @@ export default function RootLayout() {
             <SocialProvider>
               <ThemeProvider>
                 <RootStatusBar />
+                <AppThemeLoadingOverlay />
                 <NotificationRuntime />
                 <WelcomeGemRewardNotice />
                 <ReleaseUpdatesNotice />

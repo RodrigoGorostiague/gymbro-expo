@@ -254,4 +254,107 @@ describe('DataProvider catalog library integration', () => {
     await vi.waitFor(() => expect(trainingState.save).toHaveBeenCalledWith({ activeWorkoutDraft: null }));
     await vi.waitFor(() => expect(storage.data.has('@gymbro/active-workout/v1/rodaja')).toBe(false));
   });
+
+  test('persists rapid active-workout updates in order so the newest rest replaces the previous one', async () => {
+    const activeWorkoutDraft = {
+      version: 1 as const, owner: 'rodaja' as const, attemptId: 'attempt-1', routineId: 'routine-1',
+      startedAtMs: 1, restTimerSeconds: 90, completedSets: {}, setValues: {},
+    };
+    trainingLibrary.value = { routines: [library().routines[0]], mesocycles: [] };
+    trainingState.value = { definitions: [], attempts: [], sessions: [], activeWorkoutDraft };
+    trainingState.load.mockResolvedValue(trainingState.value);
+    let resolveFirstSave: ((value: undefined) => void) | undefined;
+    let resolveSecondSave: ((value: undefined) => void) | undefined;
+    trainingState.save
+      .mockImplementationOnce(() => new Promise<undefined>((resolve) => { resolveFirstSave = resolve; }))
+      .mockImplementationOnce(() => new Promise<undefined>((resolve) => { resolveSecondSave = resolve; }));
+    let current: ReturnType<typeof useData> | undefined;
+    const Probe = () => { current = useData(); return null; };
+
+    await act(async () => { TestRenderer.create(React.createElement(DataProvider, null, React.createElement(Probe))); });
+    const first = current!.updateActiveWorkout({ ...activeWorkoutDraft, restEndsAtMs: 1_000 });
+    const second = current!.updateActiveWorkout({ ...activeWorkoutDraft, restEndsAtMs: 2_000 });
+
+    await vi.waitFor(() => expect(trainingState.save).toHaveBeenCalledTimes(1));
+    expect(trainingState.save).toHaveBeenLastCalledWith({ activeWorkoutDraft: expect.objectContaining({ restEndsAtMs: 1_000 }) });
+    resolveFirstSave!(undefined);
+    await first;
+    await vi.waitFor(() => expect(trainingState.save).toHaveBeenCalledTimes(2));
+    expect(trainingState.save).toHaveBeenLastCalledWith({ activeWorkoutDraft: expect.objectContaining({ restEndsAtMs: 2_000 }) });
+    resolveSecondSave!(undefined);
+    await second;
+    expect(current!.activeWorkoutDraft).toMatchObject({ restEndsAtMs: 2_000 });
+  });
+
+  test('recovers the active-workout queue after a save times out without remounting', async () => {
+    vi.useFakeTimers();
+    const activeWorkoutDraft = {
+      version: 1 as const, owner: 'rodaja' as const, attemptId: 'attempt-1', routineId: 'routine-1',
+      startedAtMs: 1, restTimerSeconds: 90, completedSets: {}, setValues: {},
+    };
+    trainingLibrary.value = { routines: [library().routines[0]], mesocycles: [] };
+    trainingState.value = { definitions: [], attempts: [], sessions: [], activeWorkoutDraft };
+    trainingState.load.mockResolvedValue(trainingState.value);
+    trainingState.save.mockImplementationOnce(() => new Promise<undefined>(() => undefined));
+    let current: ReturnType<typeof useData> | undefined;
+    const Probe = () => { current = useData(); return null; };
+
+    await act(async () => { TestRenderer.create(React.createElement(DataProvider, null, React.createElement(Probe))); });
+    const firstFailure = current!.updateActiveWorkout({ ...activeWorkoutDraft, restEndsAtMs: 1_000 }).catch((error: unknown) => error);
+    await act(async () => { await Promise.resolve(); });
+    expect(trainingState.save).toHaveBeenCalledTimes(1);
+
+    await act(async () => { await vi.advanceTimersByTimeAsync(12_000); });
+    const firstError = await firstFailure;
+    expect(firstError).toBeInstanceOf(Error);
+    expect((firstError as Error).message).toContain('Active workout save timed out');
+
+    await act(async () => { await current!.updateActiveWorkout({ ...activeWorkoutDraft, restEndsAtMs: 2_000 }); });
+
+    expect(trainingState.save).toHaveBeenCalledTimes(2);
+    expect(trainingState.save).toHaveBeenLastCalledWith({ activeWorkoutDraft: expect.objectContaining({ restEndsAtMs: 2_000 }) });
+    expect(current!.activeWorkoutDraft).toMatchObject({ restEndsAtMs: 2_000 });
+    vi.useRealTimers();
+  });
+
+  test('re-persists the newest rest after a timed-out stale save settles late', async () => {
+    vi.useFakeTimers();
+    const activeWorkoutDraft = {
+      version: 1 as const, owner: 'rodaja' as const, attemptId: 'attempt-1', routineId: 'routine-1',
+      startedAtMs: 1, restTimerSeconds: 90, completedSets: {}, setValues: {},
+    };
+    trainingLibrary.value = { routines: [library().routines[0]], mesocycles: [] };
+    trainingState.value = { definitions: [], attempts: [], sessions: [], activeWorkoutDraft };
+    trainingState.load.mockResolvedValue(trainingState.value);
+    let resolveFirstSave: ((value: undefined) => void) | undefined;
+    let remoteRestEndsAtMs: number | undefined;
+    const saveCalls = trainingState.save.mock.calls as unknown as Array<[{ activeWorkoutDraft?: { restEndsAtMs?: number } }]>;
+    trainingState.save
+      .mockImplementationOnce(() => new Promise<undefined>((resolve) => {
+        resolveFirstSave = (value) => {
+          remoteRestEndsAtMs = saveCalls[0][0].activeWorkoutDraft?.restEndsAtMs;
+          resolve(value);
+        };
+      }))
+      .mockImplementation(() => {
+        remoteRestEndsAtMs = saveCalls.at(-1)![0].activeWorkoutDraft?.restEndsAtMs;
+        return Promise.resolve(undefined);
+      });
+    let current: ReturnType<typeof useData> | undefined;
+    const Probe = () => { current = useData(); return null; };
+
+    await act(async () => { TestRenderer.create(React.createElement(DataProvider, null, React.createElement(Probe))); });
+    const firstFailure = current!.updateActiveWorkout({ ...activeWorkoutDraft, restEndsAtMs: 1_000 }).catch((error: unknown) => error);
+    await act(async () => { await Promise.resolve(); await vi.advanceTimersByTimeAsync(12_000); });
+    await firstFailure;
+
+    await act(async () => { await current!.updateActiveWorkout({ ...activeWorkoutDraft, restEndsAtMs: 2_000 }); });
+    expect(remoteRestEndsAtMs).toBe(2_000);
+
+    resolveFirstSave!(undefined);
+    await vi.waitFor(() => expect(trainingState.save).toHaveBeenCalledTimes(3));
+    expect(trainingState.save).toHaveBeenLastCalledWith({ activeWorkoutDraft: expect.objectContaining({ restEndsAtMs: 2_000 }) });
+    expect(remoteRestEndsAtMs).toBe(2_000);
+    vi.useRealTimers();
+  });
 });

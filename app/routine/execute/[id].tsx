@@ -1,7 +1,9 @@
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useEffectEvent, useRef, useState } from 'react';
 import {
   Alert,
   AppState,
+  BackHandler,
+  FlatList,
   Modal,
   Pressable,
   StyleSheet,
@@ -20,17 +22,14 @@ import { HapticPressable } from '../../../components/HapticPressable';
 import { ProfileAvatar } from '../../../components/ProfileAvatar';
 import { ProfileTitleBadge } from '../../../components/ProfileTitleBadge';
 import { JointWorkoutLiveRoster } from '../../../components/JointWorkoutLiveRoster';
-import { DraggableList } from '../../../components/DraggableList';
-import { ChatFab } from '../../../components/ChatFab';
 import { RestCompletionBadge } from '../../../components/RestCompletionBadge';
 import { GlassButton, GlassInput } from '../../../components/UI';
-import { getRandomSetEncouragementMessage } from '../../../constants/encouragement';
 import { useAuth } from '../../../context/AuthContext';
 import { useData } from '../../../context/DataContext';
 import { useShop } from '../../../context/ShopContext';
 import { useTheme } from '../../../context/ThemeContext';
 import { useSocial } from '../../../context/SocialContext';
-import { CompletedExercise, CompletedSet, Exercise, ExperienceReceipt, Routine, SetType, WorkoutAttempt } from '../../../types';
+import { ActiveWorkoutDraft, CompletedExercise, CompletedSet, Exercise, ExperienceReceipt, Routine, RoutineSet, SetType, WorkoutAttempt } from '../../../types';
 import { vibrateRestTimerComplete } from '../../../utils/haptics';
 import { generateId } from '../../../utils/storage';
 import { classifyTrainingFinalizationError } from '../../../services/trainingState';
@@ -40,16 +39,17 @@ import * as Haptics from 'expo-haptics';
 import { RewardReceipt } from '../../../types';
 import { matchesActiveWorkout } from '../../../utils/activeWorkoutReentry';
 import { reconcileActiveWorkoutTiming } from '../../../utils/activeWorkoutTiming';
+import { withTimeout } from '../../../utils/withTimeout';
 import { validateMesocycleExecutionLineage } from '../../../utils/mesocycleExecutionLineage';
-import { ActiveWorkoutInviteCandidate, completedJointWorkoutInput, directPartnerRecipient, finishJointWorkout, inviteActiveWorkoutMember, jointParticipantInviteCapacity, JointParticipant, JointWorkoutLiveState, listActiveWorkoutInviteCandidates, listJointWorkouts, updateJointWorkoutLiveProgress } from '../../../services/jointWorkouts';
+import { ActiveWorkoutInviteCandidate, completedJointWorkoutInput, finishJointWorkout, inviteActiveWorkoutMember, jointParticipantInviteCapacity, JointParticipant, JointWorkoutLiveState, listActiveWorkoutInviteCandidates, listJointWorkouts, updateJointWorkoutLiveProgress } from '../../../services/jointWorkouts';
 import { recapSharePayload } from '../../../services/workoutRecapFeed';
 import { closeWorkoutStartActivity, publishWorkoutStartActivity } from '../../../services/workoutStartActivity';
 import { attemptToSession } from '../../../utils/workoutAttempts';
-import { appendSessionExercise, moveWorkoutExercise, nextEffectiveSessionSetNumber, reconcileSessionSetValues, snapshotWorkoutRoutine, updateSessionExerciseSets, withSessionSetType } from '../../../utils/workoutDraft';
+import { appendSessionExercise, nextEffectiveSessionSetNumber, reconcileSessionSetValues, snapshotWorkoutRoutine, updateSessionExerciseSets, withSessionSetType } from '../../../utils/workoutDraft';
 import { getShopTheme } from '../../../constants/shopThemes';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
-import Animated, { FadeIn, ZoomIn, useAnimatedStyle, useSharedValue, withRepeat, withSequence, withTiming } from 'react-native-reanimated';
+import Animated, { FadeIn, ZoomIn } from 'react-native-reanimated';
 
 function readSingleParam(value: string | string[] | undefined): string | undefined {
   if (typeof value === 'string') {
@@ -93,6 +93,8 @@ function getSetTypeLabel(tipo: SetType): string {
 }
 
 type SetKey = string;
+
+const REMOTE_OPERATION_TIMEOUT_MS = 12_000;
 
 interface SetRuntimeValues {
   weight: string;
@@ -174,22 +176,22 @@ export default function ExecuteRoutineScreen() {
   const pauseMutationRef = useRef(false);
   const startInFlightRef = useRef(false);
   const publishedJointSessionRef = useRef<string | null>(null);
+  const activeWorkoutDraftRef = useRef(activeWorkoutDraft);
   const reconcileElapsedRef = useRef<() => void>(() => undefined);
   const handleRestCompleteRef = useRef<() => void>(() => undefined);
   const refreshActiveWorkoutTimingRef = useRef(refreshActiveWorkoutTiming);
   const restTimerConfig = parseInt(restSeconds, 10) || 90;
-  const pausePulse = useSharedValue(1);
-  const pauseControlIsActive = phase === 'active' && !activeWorkoutDraft?.pausedAtMs && !pauseMenuVisible;
-  const pauseDotStyle = useAnimatedStyle(() => ({
-    opacity: pausePulse.value,
-    transform: [{ scale: 0.78 + pausePulse.value * 0.22 }],
-  }));
-
   useEffect(() => {
-    pausePulse.value = pauseControlIsActive
-      ? withRepeat(withSequence(withTiming(0.35, { duration: 700 }), withTiming(1, { duration: 700 })), -1, true)
-      : withTiming(1, { duration: 120 });
-  }, [pauseControlIsActive, pausePulse]);
+    activeWorkoutDraftRef.current = activeWorkoutDraft;
+  }, [activeWorkoutDraft]);
+
+  const updateCurrentActiveWorkout = useCallback((updater: (draft: ActiveWorkoutDraft) => ActiveWorkoutDraft) => {
+    const current = activeWorkoutDraftRef.current;
+    if (!current) return Promise.resolve();
+    const next = updater(current);
+    activeWorkoutDraftRef.current = next;
+    return updateActiveWorkout(next);
+  }, [updateActiveWorkout]);
 
   const unavailableCleanupStartedRef = useRef(false);
   useEffect(() => {
@@ -252,6 +254,19 @@ export default function ExecuteRoutineScreen() {
     };
   }, [phase]));
 
+  const persistAndLeaveActiveWorkout = useEffectEvent(() => {
+    if (phase !== 'active' || pauseMenuVisible || pickerVisible || isFinishing) return false;
+    void updateCurrentActiveWorkout((draft) => draft).then(() => router.back()).catch((error) => {
+      Alert.alert('No se pudo guardar el entrenamiento', error instanceof Error ? error.message : 'Vuelve a intentarlo.');
+    });
+    return true;
+  });
+
+  useFocusEffect(useCallback(() => {
+    const subscription = BackHandler.addEventListener('hardwareBackPress', persistAndLeaveActiveWorkout);
+    return () => subscription.remove();
+  }, []));
+
   useEffect(() => {
     if (!sourceRoutine || !activeWorkoutDraft || !matchesActiveWorkout(activeWorkoutDraft, { owner: user, routineId: sourceRoutine.id, ...(lineage ? { lineage } : {}) }) || phase !== 'setup') return;
     attemptIdRef.current = activeWorkoutDraft.attemptId;
@@ -261,14 +276,14 @@ export default function ExecuteRoutineScreen() {
     setCompletedSets(activeWorkoutDraft.completedSets);
     const snapshot = activeWorkoutDraft.routineSnapshot ?? snapshotWorkoutRoutine(sourceRoutine);
     setWorkoutRoutine(snapshot);
-    if (!activeWorkoutDraft.routineSnapshot) void updateActiveWorkout({ ...activeWorkoutDraft, routineSnapshot: snapshot });
+    if (!activeWorkoutDraft.routineSnapshot) void updateCurrentActiveWorkout((draft) => ({ ...draft, routineSnapshot: snapshot }));
     setJointWorkoutId(activeWorkoutDraft.jointWorkoutId ?? initialJointWorkoutId ?? null);
     const timing = reconcileActiveWorkoutTiming(activeWorkoutDraft, Date.now());
     setRestRemaining(timing.restRemainingSeconds);
     setIsResting(timing.isResting);
     setElapsed(timing.elapsedSeconds);
     setPhase('active');
-  }, [activeWorkoutDraft, initialJointWorkoutId, lineage, phase, sourceRoutine, updateActiveWorkout, user]);
+  }, [activeWorkoutDraft, initialJointWorkoutId, lineage, phase, sourceRoutine, updateCurrentActiveWorkout, user]);
 
   useEffect(() => {
     if (phase === 'active' && attemptIdRef.current && !activeWorkoutDraft) setPhase('setup');
@@ -301,7 +316,14 @@ export default function ExecuteRoutineScreen() {
 
   const publishJointLiveProgress = useCallback((nextCompletedSets: Record<SetKey, boolean>, state: JointWorkoutLiveState, restSeconds?: number) => {
     if (!jointWorkoutId || !routine) return;
-    void updateJointWorkoutLiveProgress(jointWorkoutId, { state, ...jointProgress(routine, nextCompletedSets), ...(state === 'resting' && restSeconds ? { restSeconds } : {}) }).catch(() => undefined);
+    void withTimeout(
+      updateJointWorkoutLiveProgress(jointWorkoutId, { state, ...jointProgress(routine, nextCompletedSets), ...(state === 'resting' && restSeconds ? { restSeconds } : {}) }),
+      REMOTE_OPERATION_TIMEOUT_MS,
+      'Joint workout status update',
+    ).then(() => withTimeout(listJointWorkouts(), REMOTE_OPERATION_TIMEOUT_MS, 'Joint workout roster refresh')).then((sessions) => {
+      const current = sessions.find((session) => session.id === jointWorkoutId);
+      setJointTargets(current?.participants.filter((participant) => !participant.isSelf) ?? []);
+    }).catch(() => undefined);
   }, [jointWorkoutId, routine]);
 
   useEffect(() => {
@@ -346,10 +368,10 @@ export default function ExecuteRoutineScreen() {
     setRestCompletionBadgeVisible(false);
     setRestRemaining(restTimerConfig);
     setIsResting(true);
-    if (activeWorkoutDraft) void updateActiveWorkout({ ...activeWorkoutDraft, restEndsAtMs });
+    void updateCurrentActiveWorkout((draft) => ({ ...draft, completedSets: nextCompletedSets, restEndsAtMs }));
     startRestCountdown(restEndsAtMs);
     publishJointLiveProgress(nextCompletedSets, 'resting', restTimerConfig);
-  }, [activeWorkoutDraft, completedSets, publishJointLiveProgress, restTimerConfig, startRestCountdown, updateActiveWorkout]);
+  }, [completedSets, publishJointLiveProgress, restTimerConfig, startRestCountdown, updateCurrentActiveWorkout]);
 
   const continueActiveWorkout = (draft: NonNullable<typeof activeWorkoutDraft>) => {
     const params: Record<string, string> = { id: draft.routineId };
@@ -400,12 +422,7 @@ export default function ExecuteRoutineScreen() {
 
   const persistWorkoutRoutine = (next: Routine, nextSetValues?: Record<SetKey, SetRuntimeValues>) => {
     setWorkoutRoutine(next);
-    if (activeWorkoutDraft) void updateActiveWorkout({ ...activeWorkoutDraft, routineSnapshot: next, ...(nextSetValues ? { setValues: nextSetValues } : {}) });
-  };
-
-  const moveExercise = (from: number, to: number) => {
-    if (!routine) return;
-    persistWorkoutRoutine(moveWorkoutExercise(routine, from, to));
+    void updateCurrentActiveWorkout((draft) => ({ ...draft, routineSnapshot: next, ...(nextSetValues ? { setValues: nextSetValues } : {}) }));
   };
 
   const addSessionExercise = (exercise: Exercise) => {
@@ -426,9 +443,13 @@ export default function ExecuteRoutineScreen() {
       if (restRef.current) clearInterval(restRef.current);
       restRef.current = null;
       restEndsAtMsRef.current = null;
-      await updateActiveWorkout({ ...activeWorkoutDraft, restEndsAtMs: undefined, pausedAtMs: nowMs, pausedRestRemainingSeconds: timing.restRemainingSeconds });
+      await withTimeout(updateCurrentActiveWorkout((draft) => ({ ...draft, restEndsAtMs: undefined, pausedAtMs: nowMs, pausedRestRemainingSeconds: timing.restRemainingSeconds })), REMOTE_OPERATION_TIMEOUT_MS, 'Pause workout');
       setElapsed(timing.elapsedSeconds); setRestRemaining(timing.restRemainingSeconds); setIsResting(timing.restRemainingSeconds > 0);
       publishJointLiveProgress(completedSets, 'paused');
+      return true;
+    } catch (error) {
+      Alert.alert('No se pudo pausar', error instanceof Error ? error.message : 'Vuelve a intentarlo.');
+      return false;
     } finally { pauseMutationRef.current = false; }
   };
 
@@ -440,8 +461,7 @@ export default function ExecuteRoutineScreen() {
       const pauseMs = Math.max(0, nowMs - activeWorkoutDraft.pausedAtMs);
       const remaining = Math.max(0, activeWorkoutDraft.pausedRestRemainingSeconds ?? 0);
       const restEndsAtMs = remaining ? nowMs + remaining * 1000 : undefined;
-      const resumed = { ...activeWorkoutDraft, pausedAtMs: undefined, pausedRestRemainingSeconds: undefined, pausedDurationMs: (activeWorkoutDraft.pausedDurationMs ?? 0) + pauseMs, restEndsAtMs };
-      await updateActiveWorkout(resumed);
+      await withTimeout(updateCurrentActiveWorkout((draft) => ({ ...draft, pausedAtMs: undefined, pausedRestRemainingSeconds: undefined, pausedDurationMs: (draft.pausedDurationMs ?? 0) + pauseMs, restEndsAtMs })), REMOTE_OPERATION_TIMEOUT_MS, 'Resume workout');
       if (restEndsAtMs) {
         restEndsAtMsRef.current = restEndsAtMs;
         restCompletionAlertedRef.current = false;
@@ -450,6 +470,10 @@ export default function ExecuteRoutineScreen() {
         startRestCountdown(restEndsAtMs);
       }
       publishJointLiveProgress(completedSets, restEndsAtMs ? 'resting' : 'training', restEndsAtMs ? remaining : undefined);
+      return true;
+    } catch (error) {
+      Alert.alert('No se pudo reanudar', error instanceof Error ? error.message : 'Vuelve a intentarlo.');
+      return false;
     } finally { pauseMutationRef.current = false; }
   };
 
@@ -458,8 +482,7 @@ export default function ExecuteRoutineScreen() {
       setPauseMenuVisible(true);
       return;
     }
-    await pauseWorkout();
-    setPauseMenuVisible(true);
+    if (await pauseWorkout()) setPauseMenuVisible(true);
   };
 
   const resumeFromPauseMenu = async () => {
@@ -480,7 +503,7 @@ export default function ExecuteRoutineScreen() {
 
   const loadJointState = async (workoutId = jointWorkoutId) => {
     if (!workoutId) return;
-    const sessions = await listJointWorkouts();
+    const sessions = await withTimeout(listJointWorkouts(), REMOTE_OPERATION_TIMEOUT_MS, 'Joint workout roster refresh');
     const current = sessions.find((session) => session.id === workoutId);
     setJointTargets(current?.participants.filter((participant) => !participant.isSelf) ?? []);
   };
@@ -506,12 +529,13 @@ export default function ExecuteRoutineScreen() {
       for (const profile of selected) {
         try {
           {
-            activeWorkoutId = await inviteActiveWorkoutMember(profile.id, routine);
-            if (activeWorkoutId !== jointWorkoutId) {
-            setJointWorkoutId(activeWorkoutId);
+            const invitedWorkoutId = await withTimeout(inviteActiveWorkoutMember(profile.id, routine), REMOTE_OPERATION_TIMEOUT_MS, 'Joint workout invitation');
+            activeWorkoutId = invitedWorkoutId;
+            if (invitedWorkoutId !== jointWorkoutId) {
+            setJointWorkoutId(invitedWorkoutId);
             setJointExpanded(false);
-            if (activeWorkoutDraft) void updateActiveWorkout({ ...activeWorkoutDraft, jointWorkoutId: activeWorkoutId });
-            router.setParams({ jointWorkoutId: activeWorkoutId });
+            void updateCurrentActiveWorkout((draft) => ({ ...draft, jointWorkoutId: invitedWorkoutId }));
+            router.setParams({ jointWorkoutId: invitedWorkoutId });
             }
           }
           successfulIds.add(profile.id);
@@ -530,36 +554,33 @@ export default function ExecuteRoutineScreen() {
     } finally { setJointBusy(false); }
   };
 
-  const loadJointInviteCandidates = async (resetSelection = false) => {
+  const loadJointInviteCandidates = async (resetSelection = false, showLoading = true) => {
     if (phase !== 'active') return;
-    setJointBusy(true);
+    if (showLoading) setJointBusy(true);
     try {
-      const candidates = await listActiveWorkoutInviteCandidates();
+      const candidates = await withTimeout(listActiveWorkoutInviteCandidates(), REMOTE_OPERATION_TIMEOUT_MS, 'Active workout connections');
       setJointInviteCandidates(candidates);
       setSelectedJointInviteIds((current) => current.filter((id) => candidates.some((candidate) => candidate.id === id)));
       if (resetSelection) setSelectedJointInviteIds([]);
     } catch (error) {
       if (resetSelection) Alert.alert('No se pudieron cargar tus conexiones', error instanceof Error ? error.message : 'Inténtalo nuevamente.');
-    } finally { setJointBusy(false); }
+    } finally { if (showLoading) setJointBusy(false); }
   };
 
   const toggleJointHeader = () => {
-    setJointExpanded((expanded) => {
-      if (!expanded) void loadJointInviteCandidates(false);
-      return !expanded;
-    });
+    setJointExpanded((expanded) => !expanded);
   };
 
   useEffect(() => {
-    if (phase !== 'active' || !isJointExpanded) return;
-    void loadJointInviteCandidates(false);
+    if (phase !== 'active') return;
+    void loadJointInviteCandidates(false, isJointExpanded);
   }, [isJointExpanded, phase, realtimeRevision]);
 
   const updateSetValue = (setKey: SetKey, field: keyof SetRuntimeValues, value: string) => {
     if (completedSets[setKey]) return;
     setSetValues((prev) => {
       const next = { ...prev, [setKey]: { ...prev[setKey], [field]: value } };
-      if (activeWorkoutDraft) void updateActiveWorkout({ ...activeWorkoutDraft, setValues: next });
+       void updateCurrentActiveWorkout((draft) => ({ ...draft, setValues: next }));
       return next;
     });
   };
@@ -578,14 +599,10 @@ export default function ExecuteRoutineScreen() {
 
     completingSetsRef.current.add(setKey);
     try {
-      setCompletedSets((prev) => {
-        const next = { ...prev, [setKey]: true };
-        if (activeWorkoutDraft) void updateActiveWorkout({ ...activeWorkoutDraft, completedSets: next });
-        startRestTimer(next);
-        return next;
-      });
+      const next = { ...completedSets, [setKey]: true };
+      setCompletedSets(next);
+      startRestTimer(next);
       if (theme.interaction === 'set-celebration') setCelebrationNonce((value) => value + 1);
-      Alert.alert('¡Serie!', getRandomSetEncouragementMessage(), [{ text: '¡Vamos!' }]);
     } finally {
       completingSetsRef.current.delete(setKey);
     }
@@ -593,12 +610,10 @@ export default function ExecuteRoutineScreen() {
 
   const reopenSet = (setKey: SetKey) => {
     if (!completedSets[setKey]) return;
-    setCompletedSets((prev) => {
-      const next = { ...prev, [setKey]: false };
-      if (activeWorkoutDraft) void updateActiveWorkout({ ...activeWorkoutDraft, completedSets: next });
-      publishJointLiveProgress(next, 'training');
-      return next;
-    });
+    const next = { ...completedSets, [setKey]: false };
+    setCompletedSets(next);
+    void updateCurrentActiveWorkout((draft) => ({ ...draft, completedSets: next }));
+    publishJointLiveProgress(next, 'training');
   };
 
   const finishWorkout = async (jointVisibility?: 'public' | 'circle' | 'private') => {
@@ -641,7 +656,9 @@ export default function ExecuteRoutineScreen() {
           [`${exercise.exerciseId}:${set.setId}`, { performed: set.completed, reps: set.reps, load: set.weight }]))),
       });
       attemptRef.current = attempt;
-      const finalized = await addAttempt(attempt);
+      // attemptRef keeps the attempt ID stable after a timeout, so a user retry
+      // reaches the server's existing finalization instead of creating a new one.
+      const finalized = await withTimeout(addAttempt(attempt), REMOTE_OPERATION_TIMEOUT_MS, 'Save workout');
       void closeWorkoutStartActivity().catch(() => undefined);
       if (jointWorkoutId) {
         const sharePayload = recapSharePayload(
@@ -651,7 +668,7 @@ export default function ExecuteRoutineScreen() {
           routines,
           { shareRoutineTemplate: true, shareMesocycleTemplate: true, sharePerformedSetDetails: true },
         );
-        await finishJointWorkout(jointWorkoutId, jointVisibility ?? 'circle', completedJointWorkoutInput(routine, elapsed, exercises, sharePayload));
+        await withTimeout(finishJointWorkout(jointWorkoutId, jointVisibility ?? 'circle', completedJointWorkoutInput(routine, elapsed, exercises, sharePayload)), REMOTE_OPERATION_TIMEOUT_MS, 'Finish joint workout');
       }
       setRewardReceipt(finalized.receipt);
       setExperienceReceipt(finalized.experienceReceipt);
@@ -682,6 +699,17 @@ export default function ExecuteRoutineScreen() {
     const merged = patchSetValues(reconcileSessionSetValues(next, setValues));
     setSetValues(merged);
     persistWorkoutRoutine(next, merged);
+  };
+
+  const updateSessionSetEffortTarget = (exerciseId: string, setId: string, effortTarget: RoutineSet['effortTarget']) => {
+    if (!routine || completedSets[`${exerciseId}-${setId}`]) return;
+    const next = {
+      ...routine,
+      exercises: routine.exercises.map((exercise) => exercise.id === exerciseId
+        ? { ...exercise, sets: exercise.sets.map((set) => set.id === setId ? { ...set, effortTarget } : set) }
+        : exercise),
+    };
+    persistWorkoutRoutine(next);
   };
 
   const updateSessionSetType = (exerciseId: string, setId: string, type: 'C' | 'effective' | 'F') => {
@@ -731,7 +759,7 @@ export default function ExecuteRoutineScreen() {
     return (
       <ThemeBackground>
         <SafeAreaView style={styles.safe}>
-          <AppNavBar onBack={() => router.back()} backLabel="← Cancelar" />
+          <AppNavBar onBack={() => router.back()} backLabel="Cancelar" />
           <AppScreenHeader title={routine.name} subtitle="Configura el entrenamiento antes de iniciar" />
           <GlassCard>
             <Text style={[styles.label, { color: theme.textMuted }]}>
@@ -811,73 +839,45 @@ export default function ExecuteRoutineScreen() {
   const jointInviteLimit = jointWorkoutId ? jointParticipantInviteCapacity(jointTargets) : 3;
   const selectedJointInviteCount = selectedJointInviteIds.length;
   const selectedJointInviteMembers = selectedJointInviteIds.reduce((count, id) => count + (jointInviteCandidates.find((candidate) => candidate.id === id)?.groupMemberCount ?? 1), 0);
-  const partnerRecipientId = directPartnerRecipient({ id: jointWorkoutId ?? '', createdAt: '', participants: jointTargets });
 
   return (
-    <ThemeBackground>
+      <ThemeBackground>
       <SafeAreaView style={styles.safe}>
-        <DraggableList
-          items={routine.exercises}
-          dragEnabled={false}
-          labelForItem={(exercise) => `ejercicio ${exercise.name}`}
-           onReorder={moveExercise}
-           renderPlaceholder={(exercise) => <View
-             pointerEvents="none"
-             accessible
-             accessibilityLabel={`Posición temporal del ejercicio ${exercise.name || 'sin nombre'}`}
-             style={[styles.exercisePlaceholder, { borderColor: theme.glassBorder, backgroundColor: theme.glass }]}
-           >
-             <View style={styles.exercisePlaceholderHeader}>
-               <View style={[styles.skeletonTitle, { backgroundColor: theme.glassBorder }]} />
-               <View style={[styles.skeletonHandle, { backgroundColor: theme.glassBorder }]} />
-             </View>
-             <View style={[styles.skeletonMetadata, { backgroundColor: theme.glassBorder }]} />
-             {exercise.sets.map((set) => <View key={set.id} style={[styles.skeletonSet, { borderColor: theme.glassBorder }]}>
-               <View style={[styles.skeletonSetLabel, { backgroundColor: theme.glassBorder }]} />
-               <View style={styles.skeletonSetValues}>
-                 <View style={[styles.skeletonValue, { backgroundColor: theme.glassBorder }]} />
-                 <View style={[styles.skeletonValue, { backgroundColor: theme.glassBorder }]} />
-               </View>
-             </View>)}
-           </View>}
-           style={styles.exerciseList}
-           contentContainerStyle={styles.exerciseListContent}
-           stickyHeaderIndices={[0]}
-           ListHeaderComponent={<View style={[styles.stickyWorkoutStatus, { backgroundColor: theme.tabBarBackground, borderColor: theme.glassBorder }]}>
-        <View style={styles.timerBar}>
-           <GlassCard style={styles.timerCard}>
-            <Text style={[styles.timerLabel, { color: theme.textMuted }]}>Cronómetro</Text>
-            <Text style={[styles.timerValue, { color: theme.text }]}>
-              {formatTime(elapsed)}
-            </Text>
-          </GlassCard>
-          <HapticPressable accessibilityRole="button" accessibilityLabel={activeWorkoutDraft?.pausedAtMs ? 'Resolver entrenamiento pausado' : 'Pausar entrenamiento'} accessibilityHint="Abre las opciones para reanudar, finalizar o cancelar" onPress={() => void showPauseMenu()} style={[styles.pauseControl, { borderColor: theme.glassBorder, backgroundColor: theme.glass }]}>
-            <Animated.View style={[styles.pauseDot, { backgroundColor: activeWorkoutDraft?.pausedAtMs ? theme.textMuted : theme.accent }, pauseDotStyle]} />
-          </HapticPressable>
-          <View style={styles.restColumn}>
-            <GlassCard style={[styles.timerCard, isResting ? styles.restActive : undefined]}>
-              <Text style={[styles.timerLabel, { color: theme.textMuted }]}>Descanso</Text>
-              <Text style={[styles.timerValue, { color: isResting ? theme.accent : theme.textMuted }]}>{isResting ? formatTime(restRemaining) : formatTime(restTimerConfig)}</Text>
+        <View style={[styles.stickySocialHub, { backgroundColor: theme.tabBarBackground, borderColor: theme.glassBorder }]}>
+          <View style={styles.fixedWorkoutControls}>
+            <GlassCard style={styles.fixedTimerCard}>
+              <Text style={[styles.fixedTimerLabel, { color: theme.textMuted }]}>Tiempo</Text>
+              <Text style={[styles.fixedTimerValue, { color: theme.text }]}>{formatTime(elapsed)}</Text>
+            </GlassCard>
+            <HapticPressable accessibilityRole="button" accessibilityLabel={activeWorkoutDraft?.pausedAtMs ? 'Resolver entrenamiento pausado' : 'Pausar entrenamiento'} accessibilityHint="Abre las opciones para reanudar, finalizar o cancelar" onPress={() => void showPauseMenu()} style={[styles.fixedPauseControl, { borderColor: theme.glassBorder, backgroundColor: theme.glass }]}>
+              <Ionicons name={activeWorkoutDraft?.pausedAtMs ? 'play' : 'pause'} size={20} color={activeWorkoutDraft?.pausedAtMs ? theme.textMuted : theme.accent} />
+            </HapticPressable>
+            <GlassCard style={[styles.fixedTimerCard, isResting ? styles.restActive : undefined]}>
+              <Text style={[styles.fixedTimerLabel, { color: theme.textMuted }]}>Descanso</Text>
+              <Text style={[styles.fixedTimerValue, { color: isResting ? theme.accent : theme.textMuted }]}>{isResting ? formatTime(restRemaining) : formatTime(restTimerConfig)}</Text>
             </GlassCard>
           </View>
+          <JointWorkoutLiveRoster workoutId={jointWorkoutId ?? undefined} participants={jointTargets} availableCandidates={jointInviteCandidates} expanded={isJointExpanded} onToggle={toggleJointHeader} />
+          {isJointExpanded ? <View style={[styles.jointHeaderPanel, { borderTopColor: theme.glassBorder }]}>
+            {jointInviteCandidates.length ? <View style={styles.jointInviteList}>
+              <Text style={{ color: theme.textMuted }}>Entrenando en tu círculo</Text>
+              {jointInviteCandidates.map((profile) => {
+                const recipientTheme = getShopTheme(profile.themeId ?? '') ?? getShopTheme('profile-rodaja')!;
+                const selected = selectedJointInviteIds.includes(profile.id);
+                const selectionFull = !selected && selectedJointInviteMembers + profile.groupMemberCount > jointInviteLimit;
+                return <Pressable key={profile.id} accessibilityRole="checkbox" accessibilityLabel={`Invitar a ${profile.alias}`} accessibilityState={{ selected, disabled: isJointBusy || selectionFull }} disabled={isJointBusy || selectionFull} onPress={() => toggleJointInviteCandidate(profile.id)}><GlassCard style={[styles.jointInviteMember, selected && styles.jointInviteMemberSelected]}><LinearGradient colors={[recipientTheme.primary, recipientTheme.accent, recipientTheme.secondary]} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={styles.jointInviteBanner}><ProfileAvatar avatarId={profile.avatarId} frameId={profile.frameId} size={40} borderColor="rgba(255,255,255,0.7)" /><View style={styles.jointInviteCopy}><Text style={styles.jointInviteAlias}>{profile.alias}</Text><ProfileTitleBadge titleId={profile.titleId} /><Text style={styles.jointInviteRelationship}>{profile.groupMemberCount === 1 ? `${profile.relationshipKind === 'partner' ? 'Partner' : 'Bro'} · entrenando ahora` : `Grupo de ${profile.groupMemberCount} entrenando ahora`}</Text></View>{selected ? <View style={styles.jointInviteSelectedBadge}><Text style={styles.jointInviteSelectedBadgeText}>Seleccionado</Text></View> : null}</LinearGradient></GlassCard></Pressable>;
+              })}
+              <View style={styles.jointInviteAction}><Text style={[styles.jointInviteCount, { color: theme.textMuted }]}>{selectedJointInviteCount ? `${selectedJointInviteCount} invitación${selectedJointInviteCount === 1 ? '' : 'es'} · ${selectedJointInviteMembers} persona${selectedJointInviteMembers === 1 ? '' : 's'} se sumarán` : 'Elegí a quién invitar'}</Text><GlassButton title={`Invitar a ${selectedJointInviteCount} ${selectedJointInviteCount === 1 ? 'persona' : 'personas'}`} loading={isJointBusy} disabled={isJointBusy || !selectedJointInviteCount} onPress={() => void inviteSelectedToJointWorkout()} /></View>
+            </View> : <Text style={[styles.jointHeaderEmpty, { color: theme.textMuted }]}>{isJointBusy ? 'Actualizando personas activas...' : 'Nadie de tu círculo está entrenando ahora.'}</Text>}
+          </View> : null}
         </View>
-
-        <View style={styles.stickyMetaRow}>
-          <Text style={[styles.progress, { color: theme.textMuted }]}>Series: {doneSets}/{totalSets}</Text>
-          <JointWorkoutLiveRoster participants={jointTargets} expanded={isJointExpanded} onToggle={toggleJointHeader} />
-        </View>
-        {isJointExpanded ? <View style={[styles.jointHeaderPanel, { borderTopColor: theme.glassBorder }]}>
-          {jointInviteCandidates.length ? <View style={styles.jointInviteList}>
-            <Text style={{ color: theme.textMuted }}>Entrenando en tu círculo</Text>
-            {jointInviteCandidates.map((profile) => {
-              const recipientTheme = getShopTheme(profile.themeId ?? '') ?? getShopTheme('profile-rodaja')!;
-              const selected = selectedJointInviteIds.includes(profile.id);
-              const selectionFull = !selected && selectedJointInviteMembers + profile.groupMemberCount > jointInviteLimit;
-              return <Pressable key={profile.id} accessibilityRole="checkbox" accessibilityLabel={`Invitar a ${profile.alias}`} accessibilityState={{ selected, disabled: isJointBusy || selectionFull }} disabled={isJointBusy || selectionFull} onPress={() => toggleJointInviteCandidate(profile.id)}><GlassCard style={[styles.jointInviteMember, selected && styles.jointInviteMemberSelected]}><LinearGradient colors={[recipientTheme.primary, recipientTheme.accent, recipientTheme.secondary]} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={styles.jointInviteBanner}><ProfileAvatar avatarId={profile.avatarId} frameId={profile.frameId} size={40} borderColor="rgba(255,255,255,0.7)" /><View style={styles.jointInviteCopy}><Text style={styles.jointInviteAlias}>{profile.alias}</Text><ProfileTitleBadge titleId={profile.titleId} /><Text style={styles.jointInviteRelationship}>{profile.groupMemberCount === 1 ? `${profile.relationshipKind === 'partner' ? 'Partner' : 'Bro'} · entrenando ahora` : `Grupo de ${profile.groupMemberCount} entrenando ahora`}</Text></View>{selected ? <View style={styles.jointInviteSelectedBadge}><Text style={styles.jointInviteSelectedBadgeText}>Seleccionado</Text></View> : null}</LinearGradient></GlassCard></Pressable>;
-            })}
-            <View style={styles.jointInviteAction}><Text style={[styles.jointInviteCount, { color: theme.textMuted }]}>{selectedJointInviteCount ? `${selectedJointInviteCount} invitación${selectedJointInviteCount === 1 ? '' : 'es'} · ${selectedJointInviteMembers} persona${selectedJointInviteMembers === 1 ? '' : 's'} se sumarán` : 'Elegí a quién invitar'}</Text><GlassButton title={`Invitar a ${selectedJointInviteCount} ${selectedJointInviteCount === 1 ? 'persona' : 'personas'}`} loading={isJointBusy} disabled={isJointBusy || !selectedJointInviteCount} onPress={() => void inviteSelectedToJointWorkout()} /></View>
-          </View> : <Text style={[styles.jointHeaderEmpty, { color: theme.textMuted }]}>{isJointBusy ? 'Actualizando personas activas...' : 'Nadie de tu círculo está entrenando ahora.'}</Text>}
-        </View> : null}
+        <FlatList
+            data={routine.exercises}
+            keyExtractor={(exercise) => exercise.id}
+            style={styles.exerciseList}
+            contentContainerStyle={styles.exerciseListContent}
+            ListHeaderComponent={<View style={[styles.stickyWorkoutStatus, { backgroundColor: theme.tabBarBackground, borderColor: theme.glassBorder }]}>
+        <Text style={[styles.progress, { color: theme.textMuted }]}>Series: {doneSets}/{totalSets}</Text>
            </View>}
            ListFooterComponent={<GlassCard style={styles.addExerciseCard}>
             <HapticPressable
@@ -890,8 +890,7 @@ export default function ExecuteRoutineScreen() {
               <Text style={[styles.addExerciseChevron, { color: theme.textMuted }]}>⌄</Text>
             </HapticPressable>
           </GlassCard>}
-        >
-          {(exercise, exIndex) => <>
+            renderItem={({ item: exercise, index: exIndex }) => <>
             <GlassCard style={styles.exerciseCard}>
               <Text style={[styles.exerciseName, { color: theme.text }]}>
                 {exIndex + 1}. {exercise.name || 'Sin nombre'}
@@ -900,7 +899,6 @@ export default function ExecuteRoutineScreen() {
                 {exercise.sets.map((set, setIndex) => {
                  const setKey = `${exercise.id}-${set.id}`;
                   const completed = !!completedSets[setKey];
-                  const canEditPrescription = !exercise.sets.some((candidate) => completedSets[`${exercise.id}-${candidate.id}`]);
                   const values = setValues[setKey] ?? { weight: '', reps: '' };
                   const isBackoff = !!set.backoffGroupId;
                   const firstInBackoff = isBackoff && (setIndex === 0 || exercise.sets[setIndex - 1]?.backoffGroupId !== set.backoffGroupId);
@@ -916,8 +914,9 @@ export default function ExecuteRoutineScreen() {
                         isBackoff && styles.backoffSetCard,
                         firstInBackoff && styles.backoffStart,
                         lastInBackoff && styles.backoffEnd,
+                        isFailureSet(set.tipo) && styles.failureSetCard,
                         {
-                        borderColor: completed ? theme.success : theme.glassBorder,
+                        borderColor: completed ? theme.success : isFailureSet(set.tipo) ? '#EF4444' : theme.glassBorder,
                         backgroundColor: completed ? `${theme.glass}` : 'rgba(0,0,0,0.15)',
                       },
                     ]}
@@ -926,7 +925,7 @@ export default function ExecuteRoutineScreen() {
                       <Text style={[styles.setTitle, { color: theme.text }]}> 
                         {getSetTypeLabel(set.tipo)}
                       </Text>
-                      <Text style={[styles.setTypeHint, { color: theme.textMuted }]}>
+                      <Text style={[styles.setTypeHint, { color: isFailureSet(set.tipo) ? '#EF4444' : theme.textMuted }]}>
                         {isBackoff ? (firstInBackoff ? `Backoff · ${backoffCount} subseries` : `Subserie ${subseries}`) : isFailureSet(set.tipo) ? 'Sin repeticiones' : `Serie ${setIndex + 1}`}
                       </Text>
                       {completed && (
@@ -936,7 +935,7 @@ export default function ExecuteRoutineScreen() {
                       )}
                     </View>
 
-                    {canEditPrescription ? <View style={styles.sessionSetControls}>
+                    {!completed ? <View style={styles.sessionSetControls}>
                       <View style={styles.typeControl}>
                         {(['C', 'effective', 'F'] as const).map((type) => {
                           const selected = type === 'effective' ? typeof set.tipo === 'number' : set.tipo === type;
@@ -999,11 +998,8 @@ export default function ExecuteRoutineScreen() {
 
                     <EffortTargetControl
                       value={set.effortTarget}
-                      disabled={completed || !canEditPrescription}
-                      onChange={(effortTarget) => updateSessionSets(
-                        exercise.id,
-                        (sets) => sets.map((candidate) => candidate.id === set.id ? { ...candidate, effortTarget } : candidate),
-                      )}
+                      disabled={completed}
+                      onChange={(effortTarget) => updateSessionSetEffortTarget(exercise.id, set.id, effortTarget)}
                     />
 
                     {completed ? (
@@ -1027,17 +1023,17 @@ export default function ExecuteRoutineScreen() {
                   </View>
                 );
                })}
-               {exercise.sets.some((set) => completedSets[`${exercise.id}-${set.id}`]) ? <Text style={[styles.sessionSetsLockedNote, { color: theme.textMuted }]}>La prescripción queda bloqueada después de completar una serie.</Text> : <View style={styles.sessionAddActions}>
+                <View style={styles.sessionAddActions}>
                  <HapticPressable accessibilityLabel={`Agregar serie a ${exercise.name}`} onPress={() => updateSessionSets(exercise.id, (sets) => [...sets, { id: generateId(), tipo: nextEffectiveSessionSetNumber(sets), weight: 0, reps: 0 }])} style={[styles.editSetBtn, { borderColor: theme.glassBorder }]}>
                    <Text style={[styles.editSetBtnText, { color: theme.primary }]}>+ Serie</Text>
                  </HapticPressable>
                  <HapticPressable accessibilityLabel={`Agregar backoff a ${exercise.name}`} onPress={() => addSessionBackoff(exercise.id)} style={[styles.editSetBtn, { borderColor: theme.glassBorder }]}>
                    <Text style={[styles.editSetBtnText, { color: theme.primary }]}>+ Backoff</Text>
                  </HapticPressable>
-               </View>}
+                </View>
             </GlassCard>
-           </>}
-        </DraggableList>
+            </>}
+         />
 
         <Modal
           transparent
@@ -1063,8 +1059,6 @@ export default function ExecuteRoutineScreen() {
 
         <ExercisePicker exercises={catalogExercises} routineMuscleGroups={[]} catalogMode visible={pickerVisible} onClose={() => setPickerVisible(false)} onSelect={addSessionExercise} />
 
-        {partnerRecipientId ? <ChatFab recipientId={partnerRecipientId} /> : null}
-
       </SafeAreaView>
       <ExclusiveSetCelebration active={celebrationNonce} theme={theme} />
       {restCompletionBadgeVisible ? <RestCompletionBadge visible onDismiss={() => setRestCompletionBadgeVisible(false)} /> : null}
@@ -1078,11 +1072,13 @@ const styles = StyleSheet.create({
   label: { fontSize: 13, marginBottom: 8 },
   hint: { fontSize: 12, marginTop: 10, lineHeight: 18 },
   spacer: { height: 16 },
-   timerBar: {
-     flexDirection: 'row',
-     gap: 10,
-   },
-   stickyWorkoutStatus: { borderBottomWidth: 1, gap: 8, paddingTop: 8, paddingBottom: 10 },
+    stickyWorkoutStatus: { borderBottomWidth: 1, gap: 8, paddingTop: 8, paddingBottom: 10 },
+   stickySocialHub: { borderBottomWidth: 1, gap: 8, marginHorizontal: -16, paddingBottom: 10, paddingHorizontal: 16, paddingTop: 8 },
+   fixedWorkoutControls: { alignItems: 'center', flexDirection: 'row', gap: 8 },
+   fixedTimerCard: { alignItems: 'center', flex: 1, paddingVertical: 6 },
+   fixedTimerLabel: { fontSize: 10, fontWeight: '700' },
+   fixedTimerValue: { fontSize: 18, fontWeight: '900', marginTop: 2 },
+   fixedPauseControl: { alignItems: 'center', borderRadius: 14, borderWidth: 1, height: 50, justifyContent: 'center', width: 50 },
    stickyMetaRow: { alignItems: 'center', flexDirection: 'row', justifyContent: 'space-between' },
    stickyParticipants: { alignItems: 'center', flexDirection: 'row', gap: 5, minHeight: 28 },
    stickyParticipantsLabel: { fontSize: 12, fontWeight: '700' },
@@ -1094,21 +1090,11 @@ const styles = StyleSheet.create({
    jointHeaderPanelMeta: { fontSize: 12 },
    jointHeaderRoster: { flexDirection: 'row', flexWrap: 'wrap', gap: 6 },
    jointHeaderEmpty: { fontSize: 12, textAlign: 'center' },
-   restColumn: { flex: 1, gap: 2 },
-   pauseControl: { alignItems: 'center', alignSelf: 'center', borderRadius: 14, borderWidth: 1, minHeight: 52, justifyContent: 'center', paddingHorizontal: 12 },
-   pauseDot: { borderRadius: 8, height: 16, width: 16 },
   cancelLink: { alignSelf: 'flex-end', paddingHorizontal: 4, paddingVertical: 2 },
   cancelLinkText: { fontSize: 12, fontWeight: '700', textDecorationLine: 'underline' },
-  timerCard: {
-    flex: 1,
-    alignItems: 'center',
-    paddingVertical: 8,
-  },
-  restActive: {
-    transform: [{ scale: 1.02 }],
-  },
-  timerLabel: { fontSize: 12, fontWeight: '600' },
-  timerValue: { fontSize: 32, fontWeight: '900', marginTop: 4 },
+   restActive: {
+     transform: [{ scale: 1.02 }],
+   },
    progress: { fontSize: 13, fontWeight: '800' },
   addExerciseCard: { gap: 10, marginBottom: 12 },
   addExerciseHeader: { alignItems: 'center', flexDirection: 'row', justifyContent: 'space-between', minHeight: 40 },
@@ -1118,27 +1104,19 @@ const styles = StyleSheet.create({
   addExerciseChangeGroup: { fontSize: 13, fontWeight: '800' },
    exerciseList: { flex: 1 },
    exerciseListContent: { paddingBottom: 120 },
-   exercisePlaceholder: { borderRadius: 16, borderStyle: 'dashed', borderWidth: 1, gap: 10, marginBottom: 14, padding: 16 },
-   exercisePlaceholderHeader: { alignItems: 'center', flexDirection: 'row', gap: 12 },
-   skeletonTitle: { borderRadius: 6, height: 20, flex: 1, opacity: 0.55 },
-   skeletonHandle: { borderRadius: 4, height: 20, opacity: 0.45, width: 20 },
-   skeletonMetadata: { borderRadius: 5, height: 12, opacity: 0.35, width: '42%' },
-   skeletonSet: { borderRadius: 14, borderWidth: 1, gap: 10, padding: 12 },
-   skeletonSetLabel: { borderRadius: 5, height: 14, opacity: 0.45, width: '35%' },
-   skeletonSetValues: { flexDirection: 'row', gap: 10 },
-   skeletonValue: { borderRadius: 8, flex: 1, height: 42, opacity: 0.35 },
    exerciseCard: { marginBottom: 14 },
   exerciseName: {
     fontSize: 17,
     fontWeight: '800',
     marginBottom: 12,
   },
-  setCard: {
+   setCard: {
     borderRadius: 14,
     borderWidth: 1,
     padding: 12,
     marginBottom: 10,
-  },
+   },
+   failureSetCard: { borderColor: '#EF4444', borderLeftWidth: 4 },
   backoffSetCard: { borderRadius: 0, borderBottomWidth: StyleSheet.hairlineWidth, borderTopWidth: 0, marginBottom: 0 },
   backoffStart: { borderTopLeftRadius: 14, borderTopRightRadius: 14, borderTopWidth: 1, marginTop: 10 },
   backoffEnd: { borderBottomLeftRadius: 14, borderBottomRightRadius: 14, borderBottomWidth: 1, marginBottom: 10 },
@@ -1168,7 +1146,6 @@ const styles = StyleSheet.create({
   typeOption: { minWidth: 34, alignItems: 'center', borderRadius: 10, borderWidth: 1, paddingHorizontal: 9, paddingVertical: 8 },
   removeSetBtn: { borderWidth: 1, borderRadius: 10, paddingHorizontal: 10, paddingVertical: 8 },
   removeSetBtnText: { fontSize: 12, fontWeight: '700' },
-   sessionSetsLockedNote: { marginTop: 12, fontSize: 12, textAlign: 'center' },
    sessionAddActions: { flexDirection: 'row', gap: 8 },
   completedBadgeText: {
     color: '#FFF',

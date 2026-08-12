@@ -3,6 +3,7 @@ import { Alert, Animated as RNAnimated, StyleSheet, Text, View } from 'react-nat
 import { router } from 'expo-router';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import Animated, { runOnJS, useAnimatedStyle, useSharedValue, withTiming } from 'react-native-reanimated';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useAuth } from '../context/AuthContext';
 import { useData } from '../context/DataContext';
 import { useTheme } from '../context/ThemeContext';
@@ -35,11 +36,21 @@ function InAppNotificationBadge({ item, busy, canInviteWorkoutStart, onAct, onDi
   const { theme } = useTheme();
   const entrance = useRef(new RNAnimated.Value(84)).current;
   const translateX = useSharedValue(0);
+  const isDismissing = useSharedValue(false);
+  const expiryTimeout = useRef<ReturnType<typeof setTimeout> | null>(null);
   const avatarId = typeof item.data.actor_avatar_id === 'string' ? item.data.actor_avatar_id : undefined;
   const frameId = typeof item.data.actor_frame_id === 'string' ? item.data.actor_frame_id : undefined;
   const isInvite = invitationWorkoutId(item) !== null;
   const isWorkoutStart = workoutStartActorId(item) !== null && canInviteWorkoutStart;
   const swipeStyle = useAnimatedStyle(() => ({ transform: [{ translateX: translateX.value }] }));
+  const dismissWithSwipe = (direction: number) => {
+    'worklet';
+    if (isDismissing.value) return;
+    isDismissing.value = true;
+    translateX.value = withTiming(direction < 0 ? -480 : 480, { duration: 160 }, (finished) => {
+      if (finished) runOnJS(onDismiss)();
+    });
+  };
   const pan = Gesture.Pan()
     .activeOffsetX([-10, 10])
     .failOffsetY([-10, 10])
@@ -47,9 +58,7 @@ function InAppNotificationBadge({ item, busy, canInviteWorkoutStart, onAct, onDi
     .onEnd((event) => {
       if (shouldDismissNotificationBadge(event.translationX, event.velocityX)) {
         const direction = event.translationX || event.velocityX;
-        translateX.value = withTiming(direction < 0 ? -480 : 480, { duration: 160 }, (finished) => {
-          if (finished) runOnJS(onDismiss)();
-        });
+        dismissWithSwipe(direction);
       }
       else translateX.value = withTiming(0, { duration: 160 });
     });
@@ -59,11 +68,23 @@ function InAppNotificationBadge({ item, busy, canInviteWorkoutStart, onAct, onDi
     playSocialNotificationSound();
   }, [entrance]);
 
+  useEffect(() => {
+    expiryTimeout.current = setTimeout(() => dismissWithSwipe(-1), 15_000);
+    return () => {
+      if (expiryTimeout.current) clearTimeout(expiryTimeout.current);
+    };
+  }, []);
+
+  const act = () => {
+    if (expiryTimeout.current) clearTimeout(expiryTimeout.current);
+    onAct();
+  };
+
   return <GestureDetector gesture={pan}><Animated.View style={swipeStyle}><RNAnimated.View accessibilityRole="alert" style={[styles.badge, { backgroundColor: theme.tabBarBackground, borderColor: theme.primary, transform: [{ translateY: entrance }] }]}>
     <ProfileAvatar avatarId={avatarId} frameId={frameId} size={42} borderColor={theme.primary} />
     <View style={styles.copy}><Text numberOfLines={1} style={[styles.title, { color: theme.text }]}>{item.title}</Text>{item.body ? <Text numberOfLines={2} style={[styles.body, { color: theme.textMuted }]}>{item.body}</Text> : null}</View>
-    <HapticPressable accessibilityRole="button" accessibilityLabel={isInvite ? 'Aceptar invitación' : isWorkoutStart ? 'Invitar a entrenar' : 'Abrir notificación'} disabled={busy} onPress={onAct} style={[styles.action, { backgroundColor: theme.primary }]}><Text style={[styles.actionText, { color: theme.onPrimary }]}>{isInvite ? 'Aceptar' : isWorkoutStart ? 'Invitar' : 'Ver'}</Text></HapticPressable>
-    <HapticPressable accessibilityRole="button" accessibilityLabel="Cerrar notificación" disabled={busy} onPress={onDismiss} style={styles.close}><Text style={[styles.closeText, { color: theme.textMuted }]}>×</Text></HapticPressable>
+    <HapticPressable accessibilityRole="button" accessibilityLabel={isInvite ? 'Aceptar invitación' : isWorkoutStart ? 'Invitar a entrenar' : 'Abrir notificación'} disabled={busy} onPress={act} style={[styles.action, { backgroundColor: theme.primary }]}><Text style={[styles.actionText, { color: theme.onPrimary }]}>{isInvite ? 'Aceptar' : isWorkoutStart ? 'Invitar' : 'Ver'}</Text></HapticPressable>
+    <HapticPressable accessibilityRole="button" accessibilityLabel="Cerrar notificación" disabled={busy} onPress={() => dismissWithSwipe(-1)} style={styles.close}><Text style={[styles.closeText, { color: theme.textMuted }]}>×</Text></HapticPressable>
   </RNAnimated.View></Animated.View></GestureDetector>;
 }
 
@@ -71,6 +92,7 @@ export function InAppNotificationBadges() {
   const { user } = useAuth();
   const { activeWorkoutDraft, updateActiveWorkout } = useData();
   const { theme } = useTheme();
+  const insets = useSafeAreaInsets();
   const [items, setItems] = useState<NotificationInboxItem[]>([]);
   const [busy, setBusy] = useState<string | null>(null);
   const load = useCallback(async () => setItems((await listNotificationInbox(8)).filter((item) => !item.readAt).sort((left, right) => left.createdAt.localeCompare(right.createdAt))), []);
@@ -117,7 +139,7 @@ export function InAppNotificationBadges() {
         setItems((current) => current.filter((candidate) => candidate.id !== item.id));
         return;
       }
-      Alert.alert('No se pudo procesar la invitación', error instanceof Error ? error.message : 'Intentá nuevamente.');
+      Alert.alert('No se pudo procesar la invitación', error instanceof Error ? error.message : 'Vuelve a intentarlo.');
     } finally { setBusy(null); }
   };
 
@@ -127,7 +149,7 @@ export function InAppNotificationBadges() {
     return Boolean(activeWorkoutDraft?.routineSnapshot) && Number.isFinite(expiresAt) && expiresAt > Date.now();
   });
 
-  return <View pointerEvents="box-none" style={styles.stack}>
+  return <View pointerEvents="box-none" style={[styles.stack, { bottom: 24 + insets.bottom }]} testID="in-app-notification-stack">
     {visibleItems.map((item) => <InAppNotificationBadge key={item.id} item={item} busy={busy === item.id} canInviteWorkoutStart={Boolean(activeWorkoutDraft?.routineSnapshot)} onAct={() => void act(item)} onDismiss={() => void dismiss(item)} />)}
   </View>;
 }

@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 import { router, useFocusEffect } from 'expo-router';
+import { Ionicons } from '@expo/vector-icons';
 import { useTheme } from '../context/ThemeContext';
 import { getJointWorkoutDetail, JointParticipant, JointWorkout, setJointParticipantReaction } from '../services/jointWorkouts';
 import { GlassCard } from './GlassCard';
@@ -82,7 +83,7 @@ export function JointWorkoutFeedCard({ workoutId, participants: previewParticipa
 
   return <GlassCard style={styles.card}>
     <HapticPressable accessibilityRole="button" accessibilityLabel="Expandir entrenamiento conjunto" accessibilityState={{ expanded }} onPress={() => setExpanded((value) => !value)} style={styles.trigger}>
-      <View style={styles.heading}><View><Text style={[styles.title, { color: theme.text }]}>Entrenamiento conjunto</Text><Text style={{ color: theme.textMuted }}>{expanded ? 'Ocultar participantes' : 'Ver participantes y resultados'}</Text></View><View style={styles.headingMeta}><Text style={[styles.publishedAt, { color: theme.textMuted }]}>{formatRelativeTime(publishedAt, now)}</Text><Text style={[styles.chevron, { color: theme.primary }]}>{expanded ? '−' : '+'}</Text></View></View>
+      <View style={styles.heading}><View><Text style={[styles.title, { color: theme.text }]}>Entrenamiento conjunto</Text><Text style={{ color: theme.textMuted }}>{expanded ? 'Ocultar participantes' : 'Ver participantes y resultados'}</Text></View><View style={styles.headingMeta}><Text style={[styles.publishedAt, { color: theme.textMuted }]}>{formatRelativeTime(publishedAt, now)}</Text><Ionicons name={expanded ? 'chevron-up' : 'chevron-down'} size={22} color={theme.primary} /></View></View>
       <View style={styles.people}>{participants.map((participant) => <View key={participant.id} style={styles.person}><ProfileAvatar avatarId={participant.avatarId} frameId={participant.frameId} size={30} borderColor={theme.primary} /><View style={styles.personCopy}><Text numberOfLines={1} style={{ color: theme.text }}>{participant.alias}</Text>{participant.titleId ? <ProfileTitleBadge titleId={participant.titleId} /> : null}</View></View>)}</View>
     </HapticPressable>
     {expanded ? <View style={styles.detail}>{error ? <Text accessibilityRole="alert" style={{ color: theme.textMuted }}>{error}</Text> : null}{!workout && !error ? <Text style={{ color: theme.textMuted }}>Cargando resultados...</Text> : null}{workout ? <View style={styles.participants}>{participants.map((participant) => {
@@ -100,7 +101,6 @@ const styles = StyleSheet.create({
   headingMeta: { alignItems: 'flex-end' },
   publishedAt: { fontSize: 11, fontWeight: '700' },
   title: { fontSize: 20, fontWeight: '900' },
-  chevron: { fontSize: 28, fontWeight: '400' },
   people: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
   person: { alignItems: 'center', flexDirection: 'row', gap: 6, maxWidth: 180 },
   personCopy: { flexShrink: 1, gap: 3 },

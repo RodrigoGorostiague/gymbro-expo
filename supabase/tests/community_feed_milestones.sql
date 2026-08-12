@@ -1,5 +1,5 @@
 begin;
-select plan(10);
+select plan(11);
 
 insert into auth.users (id, instance_id, aud, role, email, encrypted_password, email_confirmed_at, raw_app_meta_data, raw_user_meta_data, created_at, updated_at)
 values
@@ -11,6 +11,8 @@ insert into public.profiles(id, alias) values
 insert into public.relationships(member_low, member_high, kind)
 values ('60000000-0000-0000-0000-000000000001', '60000000-0000-0000-0000-000000000002', 'bro');
 insert into public.exercises(id, canonical_name) values ('EX-6000', 'Catalog Bench Press');
+insert into public.workout_start_activities(author_id, routine_name, expires_at)
+values ('60000000-0000-0000-0000-000000000001', 'Upper', now() + interval '1 hour');
 
 set local role authenticated;
 select set_config('request.jwt.claim.sub', '60000000-0000-0000-0000-000000000001', true);
@@ -26,6 +28,9 @@ returns jsonb language sql as $attempt$
 $attempt$;
 
 select lives_ok($$select public.finalize_training_attempt(pg_temp.attempt('baseline', '2026-08-03T12:00:00Z', 20))$$, 'baseline finalizes');
+set local role postgres;
+select is((select closed_at is not null from public.workout_start_activities where author_id = public.require_actor()), true, 'individual completion closes workout-start presence transactionally');
+set local role authenticated;
 select lives_ok($$select public.finalize_training_attempt(pg_temp.attempt('pr', '2026-08-10T12:00:00Z', 30))$$, 'personal record finalizes');
 set local role postgres;
 select is((select count(*) from public.community_activities where author_id = public.require_actor() and kind = 'personal_record'), 1::bigint, 'personal record activity is server-generated once');

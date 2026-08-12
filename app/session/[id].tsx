@@ -246,7 +246,7 @@ export default function SessionDetailScreen() {
   return (
     <ThemeBackground>
       <SafeAreaView style={styles.safe}>
-        <AppNavBar onBack={() => router.back()} backLabel="← Progreso" />
+        <AppNavBar onBack={() => router.back()} backLabel="Progreso" />
         <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={styles.flex}>
           <ScrollView
             contentContainerStyle={styles.scroll}

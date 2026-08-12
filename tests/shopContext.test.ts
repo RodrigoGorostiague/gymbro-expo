@@ -52,7 +52,7 @@ describe('ShopProvider reward wallet refresh', () => {
 
     await act(async () => { renderer = TestRenderer.create(render()); });
     expect(wallet.claim).toHaveBeenCalledOnce();
-    expect(wallet.claimUpdates).toHaveBeenCalledWith(6);
+    expect(wallet.claimUpdates).toHaveBeenCalledWith(7);
     expect(wallet.load).not.toHaveBeenCalled();
 
     await act(async () => { renderer.update(render()); });

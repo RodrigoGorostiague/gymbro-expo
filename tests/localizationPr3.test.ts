@@ -5,7 +5,6 @@ import { describe, expect, test } from 'vitest';
 const root = resolve(import.meta.dirname, '..');
 const sources = [
   'app/(tabs)/shop.tsx',
-  'components/ChatFab.tsx',
   'components/CombineWithPartnerCard.tsx',
   'components/ThemePreviewBar.tsx',
   'constants/encouragement.ts',
