@@ -52,8 +52,9 @@ describe('ShopProvider reward wallet refresh', () => {
 
     await act(async () => { renderer = TestRenderer.create(render()); });
     expect(wallet.claim).toHaveBeenCalledOnce();
-    expect(wallet.claimUpdates).toHaveBeenCalledWith(7);
+    expect(wallet.claimUpdates).toHaveBeenCalledWith(8);
     expect(wallet.load).not.toHaveBeenCalled();
+    expect(current?.isInitialLoading).toBe(false);
 
     await act(async () => { renderer.update(render()); });
     expect(wallet.claim).toHaveBeenCalledOnce();
@@ -69,6 +70,7 @@ describe('ShopProvider reward wallet refresh', () => {
     expect(wallet.claimUpdates).toHaveBeenCalledTimes(2);
     expect(wallet.load).not.toHaveBeenCalled();
     expect(current?.gems).toBe(9);
+    expect(current?.isInitialLoading).toBe(false);
   });
 
   test('ignores an older wallet response after an attempt-triggered refresh', async () => {

@@ -1,18 +1,16 @@
-import React from 'react';
+import React, { act } from 'react';
 import { beforeEach, describe, expect, test, vi } from 'vitest';
 import { findTextsContaining, render } from './helpers/runtimeHarness';
 
-const inbox = vi.hoisted(() => ({ listNotificationInbox: vi.fn(), subscribeToNotificationInboxChanges: vi.fn() }));
-const sendJointSocialMessage = vi.hoisted(() => vi.fn());
-vi.mock('../services/notificationInbox', () => inbox);
-vi.mock('../services/jointSocialMessages', () => ({ sendJointSocialMessage }));
+const chat = vi.hoisted(() => ({ listJointWorkoutChatMessages: vi.fn(), sendJointWorkoutChatMessage: vi.fn(), subscribeToJointWorkoutChatChanges: vi.fn() }));
+vi.mock('../services/jointWorkoutChat', () => chat);
 import { JointWorkoutLiveRoster } from '../components/JointWorkoutLiveRoster';
 
 describe('JointWorkoutLiveRoster', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    inbox.listNotificationInbox.mockResolvedValue([]);
-    inbox.subscribeToNotificationInboxChanges.mockResolvedValue(() => undefined);
+    chat.listJointWorkoutChatMessages.mockResolvedValue([]);
+    chat.subscribeToJointWorkoutChatChanges.mockResolvedValue(() => undefined);
   });
 
   test('shows participant state and aggregate progress only when expanded', () => {
@@ -29,10 +27,42 @@ describe('JointWorkoutLiveRoster', () => {
     expect(roster.root.findByProps({ name: 'people-outline' })).toBeTruthy();
   });
 
-  test('shows the received message as a participant bubble', async () => {
-    inbox.listNotificationInbox.mockResolvedValue([{ id: 'message-1', kind: 'joint_social_message', title: 'Cami te envió un mensaje', body: '¡Una más, puedes hacerlo! 💪', data: { workout_id: 'workout-1', actor_id: 'bro-1' }, readAt: null, createdAt: new Date().toISOString() }]);
+  test('shows an unread chat indicator while collapsed and clears it when opened', async () => {
+    let notifyChatChange: (() => void) | undefined;
+    chat.subscribeToJointWorkoutChatChanges.mockImplementation(async (_workoutId: string, onChange: () => void) => {
+      notifyChatChange = onChange;
+      return () => undefined;
+    });
+    const collapsed = React.createElement(JointWorkoutLiveRoster, { workoutId: 'workout-1', expanded: false, onToggle: () => undefined, participants: [] });
+    const roster = render(collapsed);
+    await vi.waitFor(() => expect(notifyChatChange).toBeTypeOf('function'));
+    await act(async () => { notifyChatChange?.(); });
+    expect(roster.root.findByProps({ testID: 'joint-workout-chat-unread' })).toBeTruthy();
+    await act(async () => { roster.update(React.createElement(JointWorkoutLiveRoster, { workoutId: 'workout-1', expanded: true, onToggle: () => undefined, participants: [] })); });
+    expect(() => roster.root.findByProps({ testID: 'joint-workout-chat-unread' })).toThrow();
+  });
+
+  test('shows only server-authorized private chat messages', async () => {
+    chat.listJointWorkoutChatMessages.mockResolvedValue([{ id: 'message-1', senderId: 'bro-1', senderAlias: 'Cami', senderAvatarId: 'capigirl', body: '¡Una más, puedes hacerlo! 💪', mentionedParticipantIds: ['self'], createdAt: new Date().toISOString() }]);
     const roster = render(React.createElement(JointWorkoutLiveRoster, { workoutId: 'workout-1', expanded: true, onToggle: () => undefined, participants: [{ id: 'bro-1', alias: 'Cami', avatarId: 'capigirl', status: 'active', relationshipKind: 'bro' }] }));
     await vi.waitFor(() => expect(findTextsContaining(roster.root, '¡Una más, puedes hacerlo! 💪')).toHaveLength(1));
+  });
+
+  test('autocompletes an @ mention before sending a private chat message', async () => {
+    chat.sendJointWorkoutChatMessage.mockResolvedValue(undefined);
+    const roster = render(React.createElement(JointWorkoutLiveRoster, { workoutId: 'workout-1', expanded: true, onToggle: () => undefined, participants: [{ id: 'bro-1', alias: 'Cami', avatarId: 'capigirl', status: 'active', relationshipKind: 'bro' }] }));
+    await act(async () => { roster.root.findByProps({ placeholder: 'Mensaje para todos. Escribí @ para hacerlo privado' }).props.onChangeText('Vamos @ca'); });
+    await act(async () => { roster.root.findByProps({ accessibilityLabel: 'Agregar mención para Cami' }).props.onPress(); });
+    await act(async () => { roster.root.findByProps({ accessibilityLabel: 'Enviar mensaje del entrenamiento' }).props.onPress(); });
+    expect(chat.sendJointWorkoutChatMessage).toHaveBeenCalledWith('workout-1', 'Vamos @Cami', ['bro-1']);
+  });
+
+  test('sends a public workout chat message without an @ mention', async () => {
+    chat.sendJointWorkoutChatMessage.mockResolvedValue(undefined);
+    const roster = render(React.createElement(JointWorkoutLiveRoster, { workoutId: 'workout-1', expanded: true, onToggle: () => undefined, participants: [] }));
+    await act(async () => { roster.root.findByProps({ placeholder: 'Mensaje para todos. Escribí @ para hacerlo privado' }).props.onChangeText('Buen trabajo equipo'); });
+    await act(async () => { roster.root.findByProps({ accessibilityLabel: 'Enviar mensaje del entrenamiento' }).props.onPress(); });
+    expect(chat.sendJointWorkoutChatMessage).toHaveBeenCalledWith('workout-1', 'Buen trabajo equipo', []);
   });
 
   test('shows available athletes separately and keeps completed athletes out of the compact roster', () => {

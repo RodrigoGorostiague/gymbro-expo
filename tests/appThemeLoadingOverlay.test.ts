@@ -5,7 +5,7 @@ import { beforeEach, describe, expect, test, vi } from 'vitest';
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
 
 const auth = vi.hoisted(() => ({ user: 'member-1' as string | null }));
-const shop = vi.hoisted(() => ({ isLoading: true }));
+const shop = vi.hoisted(() => ({ isInitialLoading: true }));
 
 vi.mock('../context/AuthContext', () => ({ useAuth: () => auth }));
 vi.mock('../context/ShopContext', () => ({ useShop: () => shop }));
@@ -16,7 +16,7 @@ import { AppThemeLoadingOverlay } from '../components/AppThemeLoadingOverlay';
 describe('AppThemeLoadingOverlay', () => {
   beforeEach(() => {
     auth.user = 'member-1';
-    shop.isLoading = true;
+    shop.isInitialLoading = true;
   });
 
   test('covers the authenticated app while its equipped theme is loading', () => {
@@ -34,7 +34,7 @@ describe('AppThemeLoadingOverlay', () => {
     expect(tree!.toJSON()).toBeNull();
 
     auth.user = 'member-1';
-    shop.isLoading = false;
+    shop.isInitialLoading = false;
     act(() => { tree!.update(React.createElement(AppThemeLoadingOverlay)); });
     expect(tree!.toJSON()).toBeNull();
   });

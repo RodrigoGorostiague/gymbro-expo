@@ -1,5 +1,5 @@
 begin;
-select plan(37);
+select plan(47);
 
 insert into auth.users (id, instance_id, aud, role, email, encrypted_password, email_confirmed_at, raw_app_meta_data, raw_user_meta_data, created_at, updated_at)
 select format('40000000-0000-0000-0000-%s', lpad(value::text, 12, '0'))::uuid, '00000000-0000-0000-0000-000000000000', 'authenticated', 'authenticated', format('joint%s@example.com', value), '', now(), '{}', '{}', now(), now()
@@ -38,21 +38,46 @@ select lives_ok($$select public.update_joint_workout_live_progress(current_setti
 select is((select participant.value ->> 'live_state' from jsonb_array_elements(public.list_joint_workouts() -> 0 -> 'participants') participant(value) where participant.value ->> 'id' = '40000000-0000-0000-0000-000000000001'), 'resting', 'live projection includes the participant state without workout detail');
 select is((select (participant.value ->> 'completed_sets')::integer from jsonb_array_elements(public.list_joint_workouts() -> 0 -> 'participants') participant(value) where participant.value ->> 'id' = '40000000-0000-0000-0000-000000000001'), 3, 'live projection includes completed set count');
 select throws_like($$select public.update_joint_workout_live_progress(current_setting('test.joint_id')::uuid, 'resting'::public.joint_workout_live_state, 3, 2, 3, 6, 90)$$, 'invalid joint workout live progress', 'server rejects impossible aggregate progress');
-select lives_ok($$select public.send_joint_social_message(current_setting('test.joint_id')::uuid, '40000000-0000-0000-0000-000000000003', 'Tu pareja te envía un beso 💋', 'preset')$$, 'an active Partner receives a session-scoped preset message');
+select lives_ok($$select public.send_joint_workout_chat_message(current_setting('test.joint_id')::uuid, '¿Listo para la siguiente serie?', array['40000000-0000-0000-0000-000000000003']::uuid[])$$, 'an active participant can send a private mention chat message');
 set local role postgres;
-select is((select count(*)::integer from public.notification_inbox where recipient_id = '40000000-0000-0000-0000-000000000003' and kind = 'joint_social_message'), 1, 'the session message is created through the durable notification inbox');
-select ok((select data @> jsonb_build_object('workout_id', current_setting('test.joint_id')::uuid::text, 'actor_id', '40000000-0000-0000-0000-000000000001') from public.notification_inbox where recipient_id = '40000000-0000-0000-0000-000000000003' and kind = 'joint_social_message'), 'the message payload identifies its session and sender for the live roster');
+select is((select count(*)::integer from public.joint_workout_chat_messages where joint_workout_id = current_setting('test.joint_id')::uuid), 1, 'the private chat message is stored durably in its own table');
+select is((select count(*)::integer from public.joint_workout_chat_mentions mention join public.joint_workout_chat_messages message on message.id = mention.message_id where message.joint_workout_id = current_setting('test.joint_id')::uuid and mention.participant_id = '40000000-0000-0000-0000-000000000003'), 1, 'the private chat message persists its explicit mention recipient');
+select is((select count(*)::integer from public.notification_inbox where recipient_id = '40000000-0000-0000-0000-000000000003' and kind = 'joint_workout_chat_mention'), 1, 'only the mentioned participant receives a durable chat notification');
 set local role authenticated;
 select set_config('request.jwt.claim.sub', '40000000-0000-0000-0000-000000000002', true);
-select throws_like($$select public.send_joint_social_message(current_setting('test.joint_id')::uuid, '40000000-0000-0000-0000-000000000003', 'Tu pareja te envía un beso 💋', 'preset')$$, 'invalid joint social message preset', 'a Bro cannot use a Partner-only preset');
+select is(jsonb_array_length(public.list_joint_workout_chat_messages(current_setting('test.joint_id')::uuid)), 0, 'an unmentioned session participant cannot read or infer the private chat message');
 select set_config('request.jwt.claim.sub', '40000000-0000-0000-0000-000000000001', true);
-select lives_ok($$select public.send_joint_social_message(current_setting('test.joint_id')::uuid, '40000000-0000-0000-0000-000000000002', 'Excelente serie', 'custom')$$, 'an active Bro receives a bounded custom session message');
+select is(jsonb_array_length(public.list_joint_workout_chat_messages(current_setting('test.joint_id')::uuid)), 1, 'the private chat sender can read their sent message');
+select set_config('request.jwt.claim.sub', '40000000-0000-0000-0000-000000000003', true);
+select is(jsonb_array_length(public.list_joint_workout_chat_messages(current_setting('test.joint_id')::uuid)), 1, 'the mentioned participant can read the private chat message');
+select set_config('request.jwt.claim.sub', '40000000-0000-0000-0000-000000000001', true);
+select lives_ok($$select public.send_joint_workout_chat_message(current_setting('test.joint_id')::uuid, 'Mensaje para todo el equipo', array[]::uuid[])$$, 'an active participant can send a public chat message without mentions');
+select set_config('request.jwt.claim.sub', '40000000-0000-0000-0000-000000000002', true);
+select is(jsonb_array_length(public.list_joint_workout_chat_messages(current_setting('test.joint_id')::uuid)), 1, 'an unmentioned participant can read the public chat message but not the private one');
+select set_config('request.jwt.claim.sub', '40000000-0000-0000-0000-000000000003', true);
+select is(jsonb_array_length(public.list_joint_workout_chat_messages(current_setting('test.joint_id')::uuid)), 2, 'a mentioned participant can read both the public and private chat messages');
+select ok(has_table_privilege('authenticated', 'public.joint_workout_chat_messages', 'select'), 'authenticated users have the table permission required for RLS-authorized chat Realtime events');
+select set_config('request.jwt.claim.sub', '40000000-0000-0000-0000-000000000001', true);
 select lives_ok($$select public.finish_joint_workout(current_setting('test.joint_id')::uuid, 'circle', '{"routineName":"Upper","durationSeconds":60,"exercises":[{"name":"Row","muscleGroupIds":["back"],"sets":[{"weight":80,"reps":8,"completed":true}]}],"sharePayload":{"version":1,"routine":{"name":"Upper","muscleGroups":["back"],"exercises":[{"name":"Row","muscleGroups":["back"],"loadMode":"external-load","loadUnit":"kg","variant":"barbell","sets":[{"tipo":1,"weight":80,"reps":8}]}]},"mesocycle":{"name":"Block","goal":"","durationWeeks":1,"weeks":[[{"routineIndex":0}]],"routines":[{"name":"Upper","muscleGroups":["back"],"exercises":[{"name":"Row","muscleGroups":["back"],"loadMode":"external-load","loadUnit":"kg","variant":"barbell","sets":[{"tipo":1,"weight":80,"reps":8}]}]}]},"performedSets":[{"exerciseIndex":0,"sets":[{"weight":80,"reps":8,"completed":true}]}]}}'::jsonb)$$, 'initiator completion stores the validated import payload');
 set local role postgres;
 select is((select status::text from public.joint_workout_participants where joint_workout_id = current_setting('test.joint_id')::uuid and participant_id = '40000000-0000-0000-0000-000000000004'), 'declined', 'an unaccepted invitation expires when the initiator finishes');
 select is((select count(*)::integer from public.joint_workout_posts where joint_workout_id = current_setting('test.joint_id')::uuid), 1, 'first real completion creates the single live group post');
 select is((select completed_at is null from public.joint_workouts where id = current_setting('test.joint_id')::uuid), true, 'accepted active participants keep the group live after initiator completion');
 select is((select closed_at is not null from public.workout_start_activities where author_id = '40000000-0000-0000-0000-000000000001'), true, 'completion closes the initiator workout-start presence transactionally');
+insert into public.joint_workout_participants (joint_workout_id, participant_id, status, joined_at)
+values (current_setting('test.joint_id')::uuid, '40000000-0000-0000-0000-000000000005', 'active', now());
+delete from public.relationships where member_low = '40000000-0000-0000-0000-000000000001' and member_high = '40000000-0000-0000-0000-000000000005';
+set local role authenticated;
+select set_config('request.jwt.claim.sub', '40000000-0000-0000-0000-000000000005', true);
+select is(jsonb_array_length(public.list_joint_workout_posts()), 1, 'a session member without a direct relationship can reopen its joint post');
+select ok(jsonb_path_exists(public.get_joint_workout_detail(current_setting('test.joint_id')::uuid), '$.participants[*] ? (@.id == "40000000-0000-0000-0000-000000000001" && @.workout.routineName == "Upper")'), 'a session member can access a completed co-participant result');
+select set_config('request.jwt.claim.sub', '40000000-0000-0000-0000-000000000002', true);
+select lives_ok($$select public.finish_joint_workout(current_setting('test.joint_id')::uuid, 'private', '{"routineName":"Lower","durationSeconds":70,"exercises":[{"name":"Squat","muscleGroupIds":["legs"],"sets":[{"weight":100,"reps":5,"completed":true}]}]}'::jsonb)$$, 'a later participant completion updates the existing group post');
+select set_config('request.jwt.claim.sub', '40000000-0000-0000-0000-000000000005', true);
+select ok(jsonb_path_exists(public.get_joint_workout_detail(current_setting('test.joint_id')::uuid), '$.participants[*] ? (@.id == "40000000-0000-0000-0000-000000000002" && @.workout.routineName == "Lower")'), 'a session member can access a result completed after the first finisher');
+set local role postgres;
+insert into public.relationships (member_low, member_high, kind)
+values ('40000000-0000-0000-0000-000000000001', '40000000-0000-0000-0000-000000000005', 'bro');
 update public.joint_workout_participants set visibility = 'public' where joint_workout_id = current_setting('test.joint_id')::uuid and participant_id = '40000000-0000-0000-0000-000000000001';
 set local role authenticated;
 select set_config('request.jwt.claim.sub', '40000000-0000-0000-0000-000000000005', true);

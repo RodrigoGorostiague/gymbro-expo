@@ -9,10 +9,16 @@ import ExecuteRoutineScreen from '../app/routine/execute/[id]';
 import { hasActiveWorkoutReentryIntegrity, matchesActiveWorkout } from '../utils/activeWorkoutReentry';
 import { __emitAppState, __emitHardwareBackPress } from './helpers/reactNativeStub';
 
+const finishJointWorkout = vi.hoisted(() => vi.fn());
+
 vi.mock('react-native-url-polyfill/auto', () => ({}));
 vi.mock('../context/AuthContext', () => ({ useAuth: () => ({ user: 'rodaja', welcomeMessage: null, setWelcomeMessage: vi.fn() }) }));
 vi.mock('../context/ShopContext', () => ({ useShop: () => ({ retryPendingRewards: vi.fn() }) }));
 vi.mock('../components/LogoutButton', () => ({ LogoutButton: () => null }));
+vi.mock('../services/jointWorkouts', async (importOriginal) => ({
+  ...await importOriginal<typeof import('../services/jointWorkouts')>(),
+  finishJointWorkout,
+}));
 
 const routineA = { id: 'routine-a', name: 'Upper', muscleGroups: ['pecho'], exercises: [], createdAt: '' };
 const routineB = { ...routineA, id: 'routine-b', name: 'Lower' };
@@ -145,6 +151,40 @@ describe('active workout re-entry', () => {
     expect(mockRouter.setParams).toHaveBeenCalledWith({ jointWorkoutId: 'joint-1' });
   });
 
+  test('keeps an accredited joint completion successful when its publication fails and retries only the publication', async () => {
+    const routineWithSet = {
+      ...routineA,
+      exercises: [{ id: 'exercise-1', name: 'Press', muscleGroups: ['pecho'], loadMode: 'external-load' as const, loadUnit: 'kg' as const, sets: [{ id: 'set-1', tipo: 1 as const, weight: 10, reps: 8 }] }],
+    };
+    const addAttempt = vi.fn().mockResolvedValue({
+      attempt: {},
+      receipt: { balance: 12, entries: [{ kind: 'valid_sets', amount: 1, breakdown: {} }], weekly: {} },
+      experienceReceipt: undefined,
+    });
+    finishJointWorkout.mockRejectedValueOnce(new Error('Joint service unavailable')).mockResolvedValueOnce(undefined);
+    setMockParams({ id: routineWithSet.id, jointWorkoutId: 'joint-1' });
+    setMockData({
+      getRoutine: vi.fn(() => routineWithSet), mesocycles: [], routines: [routineWithSet], exercises: [], definitions: [],
+      activeWorkoutDraft: { ...draft, routineId: routineWithSet.id, jointWorkoutId: 'joint-1' }, addAttempt, startActiveWorkout: vi.fn(),
+      updateActiveWorkout: vi.fn(), cancelActiveWorkout: vi.fn(), refreshActiveWorkoutTiming: vi.fn(),
+    });
+
+    const screen = render(React.createElement(ExecuteRoutineScreen));
+    press(screen.root.find((node) => node.props.accessibilityLabel === 'Pausar entrenamiento'));
+    await vi.waitFor(() => expect(findText(screen.root, 'Entrenamiento pausado')).toBeTruthy());
+    press(findButton(screen.root, 'Finalizar entrenamiento'));
+
+    await vi.waitFor(() => expect(findText(screen.root, '¡Entrenamiento completado!')).toBeTruthy());
+    expect(findText(screen.root, '+1 gemas')).toBeTruthy();
+    expect(findText(screen.root, 'Tu resultado conjunto todavía no se publicó')).toBeTruthy();
+    expect(mockAlert.alert).not.toHaveBeenCalledWith('No se pudo finalizar el entrenamiento', expect.any(String));
+
+    press(findButton(screen.root, 'Reintentar publicación'));
+    await vi.waitFor(() => expect(finishJointWorkout).toHaveBeenCalledTimes(2));
+    await vi.waitFor(() => expect(findText(screen.root, 'Tu resultado conjunto todavía no se publicó')).toBeUndefined());
+    expect(addAttempt).toHaveBeenCalledTimes(1);
+  });
+
   test('keeps exercise addition collapsed at the end until a parent group is selected', () => {
     const routineWithSet = {
       ...routineA,
@@ -187,14 +227,15 @@ describe('active workout re-entry', () => {
     const lists = screen.root.findAll((node) => (node.type as any) === 'FlatList');
 
        expect(lists).toHaveLength(1);
-       expect(lists[0].props.contentContainerStyle).toEqual(expect.objectContaining({ paddingBottom: 120 }));
+        expect(lists[0].props.contentContainerStyle).toEqual(expect.objectContaining({ paddingBottom: 104, paddingTop: 82 }));
        expect(lists[0].props.stickyHeaderIndices).toBeUndefined();
-       expect(lists[0].props.stickyHeaderHiddenOnScroll).toBeUndefined();
-       expect(lists[0].props.StickyHeaderComponent).toBeUndefined();
-       expect(findText(screen.root, 'Tiempo')).toBeTruthy();
-       expect(findText(screen.root, 'Descanso')).toBeTruthy();
-       expect(findText(screen.root, 'Series: 0/1')).toBeTruthy();
-       expect(screen.root.find((node) => node.props.accessibilityLabel === 'Pausar entrenamiento')).toBeTruthy();
+        expect(lists[0].props.stickyHeaderHiddenOnScroll).toBeUndefined();
+        expect(lists[0].props.StickyHeaderComponent).toBeUndefined();
+        expect(lists[0].props.onScroll).toEqual(expect.any(Function));
+        expect(lists[0].props.scrollEventThrottle).toBe(16);
+        expect(findText(screen.root, '00:00')).toBeTruthy();
+        expect(findText(screen.root, '01:30')).toBeTruthy();
+        expect(screen.root.find((node) => node.props.accessibilityLabel === 'Pausar entrenamiento')).toBeTruthy();
      expect(screen.root.find((node) => node.props.accessibilityLabel === 'Mostrar entrenamiento conjunto')).toBeTruthy();
     expect(screen.root.find((node) => node.props.accessibilityLabel === 'Agregar ejercicio')).toBeTruthy();
      expect(screen.root.findAll((node) => (node.type as any) === 'ScrollView')).toHaveLength(0);
@@ -280,7 +321,7 @@ describe('active workout re-entry', () => {
       setMockParams({ id: routineWithSet.id });
       setMockData({
         getRoutine: vi.fn(() => routineWithSet), mesocycles: [], exercises: [], definitions: [],
-        activeWorkoutDraft: { ...draft, routineId: routineWithSet.id }, addAttempt: vi.fn(), startActiveWorkout: vi.fn(),
+        activeWorkoutDraft: { ...draft, routineId: routineWithSet.id, routineSnapshot: routineWithSet }, addAttempt: vi.fn(), startActiveWorkout: vi.fn(),
         updateActiveWorkout, cancelActiveWorkout: vi.fn(), refreshActiveWorkoutTiming: vi.fn(),
       });
 
@@ -295,7 +336,7 @@ describe('active workout re-entry', () => {
       expect(updateActiveWorkout).toHaveBeenCalledTimes(callsBeforeRetry + 1);
     });
 
-   test('keeps the mounted rest countdown moving while persistence is still pending and shows one completion badge', async () => {
+    test('keeps the mounted rest countdown moving while persistence is still pending and shows one completion badge', async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date('2026-07-30T20:00:00.000Z'));
     const routineWithSet = {
@@ -381,7 +422,7 @@ describe('active workout re-entry', () => {
      expect(findText(screen.root, 'Descanso terminado')).toBeTruthy();
    });
 
-    test('reopens a completed set so its values and intensity can be corrected and reconfirmed', () => {
+    test('reopens a completed set so its values and intensity can be corrected and reconfirmed', async () => {
     const routineWithSet = {
       ...routineA,
       exercises: [{
@@ -426,11 +467,37 @@ describe('active workout re-entry', () => {
        }),
      }));
 
-     changeText(inputs[0], '12.5');
-    changeText(inputs[1], '7');
+      changeText(inputs[0], '12.5');
+     changeText(inputs[1], '7');
+      expect(updateActiveWorkout).not.toHaveBeenLastCalledWith(expect.objectContaining({
+         setValues: { 'exercise-1-set-1': { weight: '12.5', reps: '7' } },
+       }));
+      await act(async () => { inputs[1].props.onBlur(); });
       expect(updateActiveWorkout).toHaveBeenLastCalledWith(expect.objectContaining({
         setValues: { 'exercise-1-set-1': { weight: '12.5', reps: '7' } },
       }));
+    });
+
+    test('shows a non-blocking save indicator while an active workout change persists', async () => {
+      const routineWithSet = {
+        ...routineA,
+        exercises: [{ id: 'exercise-1', name: 'Press', muscleGroups: ['pecho'], loadMode: 'external-load' as const, loadUnit: 'kg' as const, sets: [{ id: 'set-1', tipo: 1 as const, weight: 10, reps: 8 }] }],
+      };
+      const updateActiveWorkout = vi.fn(() => new Promise<void>(() => undefined));
+      setMockParams({ id: routineWithSet.id });
+      setMockData({
+        getRoutine: vi.fn(() => routineWithSet), mesocycles: [], exercises: [], definitions: [],
+        activeWorkoutDraft: { ...draft, routineId: routineWithSet.id }, addAttempt: vi.fn(), startActiveWorkout: vi.fn(),
+        updateActiveWorkout, cancelActiveWorkout: vi.fn(), refreshActiveWorkoutTiming: vi.fn(),
+      });
+
+      const screen = render(React.createElement(ExecuteRoutineScreen));
+      const input = screen.root.findAll((node) => (node.type as any) === 'GlassInput')[0];
+      changeText(input, '12.5');
+
+      expect(findText(screen.root, 'Guardando datos...')).toBeTruthy();
+      expect(input.props.editable).not.toBe(false);
+      expect(screen.root.find((node) => node.props.accessibilityLabel === 'Guardando datos').props.accessibilityState).toEqual({ busy: true });
     });
 
     test('keeps unfinished set editing and additions available after another set is complete', () => {
@@ -460,9 +527,11 @@ describe('active workout re-entry', () => {
       });
 
       const screen = render(React.createElement(ExecuteRoutineScreen));
+      press(screen.root.find((node) => node.props.accessibilityLabel === 'Editar Serie 2'));
       const warmupButtons = screen.root.findAll((node) => (node.type as any) === 'HapticPressable' && node.props.accessibilityLabel === 'Calentamiento');
       expect(warmupButtons).toHaveLength(1);
       press(warmupButtons[0]);
+      expect(screen.root.find((node) => node.props.accessibilityLabel === 'Editar Calentamiento')).toBeTruthy();
       expect(updateActiveWorkout).toHaveBeenLastCalledWith(expect.objectContaining({
         routineSnapshot: expect.objectContaining({
           exercises: [expect.objectContaining({ sets: [expect.objectContaining({ tipo: 1 }), expect.objectContaining({ tipo: 'C' })] })],

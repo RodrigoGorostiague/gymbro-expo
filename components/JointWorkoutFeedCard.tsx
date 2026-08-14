@@ -65,7 +65,7 @@ export function JointWorkoutFeedCard({ workoutId, participants: previewParticipa
       if (!detail) setError('El detalle ya no está disponible.');
     }).catch(() => setError('No se pudo cargar el detalle del grupo.'));
   }, [workoutId]);
-  useEffect(() => { if (expanded) load(); }, [expanded, load]);
+  useEffect(() => { if (expanded) load(); }, [expanded, load, previewParticipants]);
   useFocusEffect(useCallback(() => { if (expanded) load(); }, [expanded, load]));
 
   const participants = workout?.participants ?? previewParticipants;

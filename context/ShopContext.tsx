@@ -36,6 +36,7 @@ interface ShopContextValue {
   combineWithPartner: boolean;
   previewThemeId: string | null;
   isLoading: boolean;
+  isInitialLoading: boolean;
   purchaseTheme: (themeId: string) => Promise<boolean>;
   purchaseFrame: (frameId: string) => Promise<boolean>;
   equipTheme: (themeId: string) => void;
@@ -60,6 +61,7 @@ export function ShopProvider({ children }: { children: React.ReactNode }) {
   const [partnerEquippedThemeId, setPartnerEquippedThemeId] = useState<string | null>(null);
   const [previewThemeId, setPreviewThemeId] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+  const [isInitialLoading, setIsInitialLoading] = useState(true);
   const [welcomeGemReward, setWelcomeGemReward] = useState<number | null>(null);
   const [releaseUpdates, setReleaseUpdates] = useState<ReleaseUpdate[]>([]);
   const previewTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -95,13 +97,15 @@ export function ShopProvider({ children }: { children: React.ReactNode }) {
       setReleaseUpdates([]);
       setPartnerEquippedThemeId(null);
       setIsLoading(false);
+      setIsInitialLoading(false);
       return;
     }
 
     const request = walletRequestRef.current + 1;
     walletRequestRef.current = request;
     let active = true;
-    setIsLoading(true);
+    const isInitialLoad = isInitialLoading;
+    if (isInitialLoad) setIsLoading(true);
     void (async () => {
       try {
         const { claimed } = await claimWelcomeGemReward().catch(() => ({ claimed: false }));
@@ -116,7 +120,10 @@ export function ShopProvider({ children }: { children: React.ReactNode }) {
       } catch {
         // Keep the safe empty wallet until a future dependency change retries the claim.
       } finally {
-        if (active && walletRequestRef.current === request) setIsLoading(false);
+        if (active && walletRequestRef.current === request && isInitialLoad) {
+          setIsLoading(false);
+          setIsInitialLoading(false);
+        }
       }
     })();
     return () => {
@@ -235,6 +242,7 @@ export function ShopProvider({ children }: { children: React.ReactNode }) {
         combineWithPartner: shop.combineWithPartner,
         previewThemeId,
         isLoading,
+        isInitialLoading,
         purchaseTheme,
         purchaseFrame,
         equipTheme,

@@ -9,7 +9,7 @@ const gymbroIcon = process.env.NODE_ENV === 'test' ? 0 : require('../assets/gymb
 
 export function AppThemeLoadingOverlay() {
   const { user } = useAuth();
-  const { isLoading } = useShop();
+  const { isInitialLoading } = useShop();
   const { theme } = useTheme();
   const rotation = useSharedValue(0);
 
@@ -21,7 +21,7 @@ export function AppThemeLoadingOverlay() {
     transform: [{ perspective: 900 }, { rotateY: `${rotation.value}deg` }],
   }));
 
-  if (!user || !isLoading) return null;
+  if (!user || !isInitialLoading) return null;
 
   return (
     <View

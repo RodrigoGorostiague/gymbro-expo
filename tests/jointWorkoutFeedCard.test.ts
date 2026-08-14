@@ -11,7 +11,8 @@ vi.mock('react-native', async () => {
 });
 vi.mock('expo-router', () => ({ router: { push: vi.fn() }, useFocusEffect: () => undefined }));
 vi.mock('../context/ThemeContext', () => ({ useTheme: () => ({ theme: { text: '#111', textMuted: '#666', primary: '#0f0' } }) }));
-vi.mock('../services/jointWorkouts', () => ({ getJointWorkoutDetail: vi.fn(), setJointParticipantReaction: vi.fn() }));
+const getJointWorkoutDetail = vi.hoisted(() => vi.fn());
+vi.mock('../services/jointWorkouts', () => ({ getJointWorkoutDetail, setJointParticipantReaction: vi.fn() }));
 vi.mock('../components/GlassCard', async () => {
   const ReactModule = await import('react');
   return { GlassCard: ({ children }: { children: React.ReactNode }) => ReactModule.createElement('GlassCard', null, children) };
@@ -30,7 +31,10 @@ vi.mock('../components/ProfileTitleBadge', async () => {
 });
 vi.mock('../components/UI', () => ({ GlassButton: () => null }));
 vi.mock('../components/JointParticipantProfileCard', () => ({ JointParticipantProfileCard: () => null }));
-vi.mock('../components/WorkoutPublicationCard', () => ({ WorkoutPublicationCard: () => null }));
+vi.mock('../components/WorkoutPublicationCard', async () => {
+  const ReactModule = await import('react');
+  return { WorkoutPublicationCard: (props: Record<string, unknown>) => ReactModule.createElement('WorkoutPublicationCard', props) };
+});
 
 import { JointWorkoutFeedCard } from '../components/JointWorkoutFeedCard';
 
@@ -53,5 +57,24 @@ describe('JointWorkoutFeedCard', () => {
     })); });
 
     expect(tree!.root.findByProps({ name: 'chevron-down' })).toBeTruthy();
+  });
+
+  test('refreshes an expanded post when another participant finishes', async () => {
+    const firstDetail = { id: 'joint-1', createdAt: '2026-08-09T10:00:00Z', participants: [{ id: 'athlete-1', alias: 'Alex', avatarId: 'capigirl', status: 'completed' as const, relationshipKind: 'bro' as const, workout: { routineName: 'Upper', durationSeconds: 60, exercises: [] } }, { id: 'athlete-2', alias: 'Sam', avatarId: 'capiboy', status: 'active' as const, relationshipKind: 'bro' as const }] };
+    const updatedDetail = { ...firstDetail, participants: [{ ...firstDetail.participants[0] }, { id: 'athlete-2', alias: 'Sam', avatarId: 'capiboy', status: 'completed' as const, relationshipKind: 'bro' as const, workout: { routineName: 'Lower', durationSeconds: 70, exercises: [] } }] };
+    getJointWorkoutDetail.mockResolvedValueOnce(firstDetail).mockResolvedValueOnce(updatedDetail);
+    let tree: TestRenderer.ReactTestRenderer;
+    await act(async () => { tree = TestRenderer.create(React.createElement(JointWorkoutFeedCard, {
+      workoutId: 'joint-1', publishedAt: '2026-08-09T10:00:00Z', participants: firstDetail.participants,
+    })); });
+    await act(async () => { tree!.root.findByProps({ accessibilityLabel: 'Expandir entrenamiento conjunto' }).props.onPress(); });
+    await act(async () => undefined);
+    await act(async () => { tree!.update(React.createElement(JointWorkoutFeedCard, {
+      workoutId: 'joint-1', publishedAt: '2026-08-09T10:00:00Z', participants: updatedDetail.participants,
+    })); });
+    await act(async () => undefined);
+
+    expect(getJointWorkoutDetail).toHaveBeenCalledTimes(2);
+    expect(tree!.root.findAll((node) => String(node.type) === 'WorkoutPublicationCard')).toHaveLength(2);
   });
 });

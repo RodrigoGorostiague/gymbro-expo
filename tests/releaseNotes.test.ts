@@ -5,7 +5,7 @@ import { CURRENT_RELEASE } from '../constants/release';
 
 describe('release notes', () => {
   test('declares the current app release boundary', () => {
-    expect(CURRENT_RELEASE).toEqual({ version: '0.5.1', sequence: 7 });
+    expect(CURRENT_RELEASE).toEqual({ version: '0.6.0', sequence: 8 });
   });
 
   test('matches the user-facing version configured for Expo and npm', () => {
