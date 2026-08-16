@@ -834,6 +834,43 @@ function normalizeRoutineSnapshot(value: unknown): Routine | undefined {
   return routine as Routine;
 }
 
+function normalizePlannedSessionPlanningState(value: unknown): NonNullable<PlannedSession['planningState']> {
+  return value === 'in_progress' || value === 'skipped' || value === 'rescheduled' || value === 'cancelled'
+    ? value
+    : 'pending';
+}
+
+function normalizePlannedSessionTransition(value: unknown): PlannedSession['planningTransition'] {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined;
+  const transition = value as Partial<NonNullable<PlannedSession['planningTransition']>>;
+  if (typeof transition.at !== 'string') return undefined;
+  return {
+    from: normalizePlannedSessionPlanningState(transition.from),
+    to: normalizePlannedSessionPlanningState(transition.to),
+    at: transition.at,
+    reason: typeof transition.reason === 'string' ? transition.reason : undefined,
+  };
+}
+
+function plannedSessionLifecycleFields(session: Partial<PlannedSession>): {
+  planningState: NonNullable<PlannedSession['planningState']>;
+  planningTransition?: PlannedSession['planningTransition'];
+  recoveryForPlannedSessionId?: string;
+  recoveredByPlannedSessionId?: string;
+  isExtraordinary?: boolean;
+} {
+  const planningTransition = normalizePlannedSessionTransition(session.planningTransition);
+  const recoveryForPlannedSessionId = typeof session.recoveryForPlannedSessionId === 'string' ? session.recoveryForPlannedSessionId : undefined;
+  const recoveredByPlannedSessionId = typeof session.recoveredByPlannedSessionId === 'string' ? session.recoveredByPlannedSessionId : undefined;
+  return {
+    planningState: normalizePlannedSessionPlanningState(session.planningState),
+    ...(planningTransition ? { planningTransition } : {}),
+    ...(recoveryForPlannedSessionId ? { recoveryForPlannedSessionId } : {}),
+    ...(recoveredByPlannedSessionId ? { recoveredByPlannedSessionId } : {}),
+    ...(session.isExtraordinary === true ? { isExtraordinary: true } : {}),
+  };
+}
+
 function normalizePlannedSession(value: unknown, index: number): PlannedSession {
   const session = value && typeof value === 'object' && !Array.isArray(value)
     ? value as Partial<PlannedSession> & { routineId?: unknown; routineName?: unknown }
@@ -853,6 +890,7 @@ function normalizePlannedSession(value: unknown, index: number): PlannedSession 
     progressionNote: typeof session.progressionNote === 'string' ? session.progressionNote : undefined,
     note: typeof session.note === 'string' ? session.note : undefined,
     routineSnapshot: normalizeRoutineSnapshot(session.routineSnapshot),
+    ...plannedSessionLifecycleFields(session),
   };
 }
 
@@ -871,6 +909,7 @@ function normalizeMesocycleEntry(value: unknown, index: number): PlannedSession 
       progressionNote: typeof candidate.progressionNote === 'string' ? candidate.progressionNote : undefined,
       note: typeof candidate.note === 'string' ? candidate.note : undefined,
       routineSnapshot: normalizeRoutineSnapshot(candidate.routineSnapshot),
+      ...plannedSessionLifecycleFields(candidate),
     } : null;
   }
   return null;

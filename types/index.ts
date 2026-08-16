@@ -155,6 +155,15 @@ export type MesocycleStatus = 'draft' | 'active' | 'completed' | 'archived';
 
 export type PlannedSessionRoutineSource = 'local' | 'shared';
 
+export type PlannedSessionPlanningState = 'pending' | 'in_progress' | 'skipped' | 'rescheduled' | 'cancelled';
+
+export interface PlannedSessionPlanningTransition {
+  from: PlannedSessionPlanningState;
+  to: PlannedSessionPlanningState;
+  at: string;
+  reason?: string;
+}
+
 export interface PlannedSessionRef {
   routineId: string;
   routineName: string;
@@ -171,6 +180,13 @@ export interface PlannedSession {
   order: number;
   progressionNote?: string;
   note?: string;
+  /** Legacy sessions normalize to pending so existing plans remain executable. */
+  planningState?: PlannedSessionPlanningState;
+  planningTransition?: PlannedSessionPlanningTransition;
+  /** Bidirectional lineage between an original slot and its recovery replacement. */
+  recoveryForPlannedSessionId?: string;
+  recoveredByPlannedSessionId?: string;
+  isExtraordinary?: boolean;
 }
 
 export type MesocycleEntry = PlannedSession | { id: string; kind: 'rest' };

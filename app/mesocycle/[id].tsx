@@ -10,7 +10,7 @@ import { HapticPressable } from '../../components/HapticPressable';
 import { GlassButton, GlassInput } from '../../components/UI';
 import { useData } from '../../context/DataContext';
 import { useTheme } from '../../context/ThemeContext';
-import { Mesocycle, MesocycleEntry, MesocycleStatus, Routine } from '../../types';
+import { Mesocycle, MesocycleEntry, MesocycleStatus, PlannedSessionPlanningState, Routine } from '../../types';
 import {
   buildMesocycleDraft,
   clonePlannedWeekEntries,
@@ -20,6 +20,7 @@ import {
   deriveMesocycleScheduleProjection,
   MesocycleScheduleProjectionEntry,
   snapshotPlannedRoutine,
+  transitionPlannedSession,
 } from '../../utils/mesocycles';
 import { generateId } from '../../utils/storage';
 import { muscleGroupLabels } from '../../utils/catalogMuscleGroups';
@@ -40,6 +41,13 @@ const STATUS_OPTIONS: { value: MesocycleStatus; label: string; guidance: string 
   { value: 'active', label: 'Activo', guidance: 'Habilita las sesiones vinculadas y las recompensas.' },
   { value: 'completed', label: 'Completado', guidance: 'Se conserva el historial, pero no se pueden iniciar sesiones planificadas.' },
   { value: 'archived', label: 'Archivado', guidance: 'Se conserva el historial, pero no se pueden iniciar sesiones planificadas.' },
+];
+const PLANNING_STATE_OPTIONS: { value: PlannedSessionPlanningState; label: string }[] = [
+  { value: 'pending', label: 'Pendiente' },
+  { value: 'in_progress', label: 'En curso' },
+  { value: 'skipped', label: 'Omitida' },
+  { value: 'rescheduled', label: 'Reprogramada' },
+  { value: 'cancelled', label: 'Cancelada' },
 ];
 
 export default function MesocycleDetailScreen() {
@@ -92,6 +100,15 @@ export default function MesocycleDetailScreen() {
       ? { ...week, entries: clonePlannedWeekEntries(value.weeks.find((candidate) => candidate.weekNumber === weekNumber - 1)?.entries ?? []) }
       : week),
   }));
+  const changePlanningState = (weekNumber: number, entryId: string, state: PlannedSessionPlanningState) => change((value) => ({
+    ...value,
+    weeks: value.weeks.map((week) => week.weekNumber !== weekNumber ? week : {
+      ...week,
+      entries: week.entries.map((entry) => !isRest(entry) && entry.id === entryId
+        ? transitionPlannedSession(entry, state, new Date().toISOString())
+        : entry),
+    }),
+  }));
 
   const derivedStartDate = deriveFirstEntryStartDate([...draft.weeks].sort((a, b) => a.weekNumber - b.weekNumber).flatMap((week) => week.entries));
   const effectiveStartDate = startDate || derivedStartDate;
@@ -135,7 +152,8 @@ export default function MesocycleDetailScreen() {
       onAddRoutine={addRoutine}
       onAddRest={addRest}
       onRemove={(entryId) => removeEntry(week.weekNumber, entryId)}
-      onMove={(from, to) => moveEntry(week.weekNumber, from, to)}
+       onMove={(from, to) => moveEntry(week.weekNumber, from, to)}
+      onPlanningStateChange={(entryId, state) => changePlanningState(week.weekNumber, entryId, state)}
       lockedEntryIds={new Set(week.entries.filter((entry) => !isRest(entry) && hasPlannedSessionAttempt(attempts, draft.id, week.weekNumber, entry.id)).map((entry) => entry.id))}
        onCopy={() => copyPrevious(week.weekNumber)}
     />)}
@@ -155,7 +173,7 @@ export default function MesocycleDetailScreen() {
   </ScrollView></SafeAreaView></ThemeBackground>;
 }
 
-function WeekCard({ week, progress, scheduleByEntry, theme, open, routines, catalogMuscleGroups, onOpen, onAddRoutine, onAddRest, onRemove, onMove, lockedEntryIds, onCopy }: {
+function WeekCard({ week, progress, scheduleByEntry, theme, open, routines, catalogMuscleGroups, onOpen, onAddRoutine, onAddRest, onRemove, onMove, onPlanningStateChange, lockedEntryIds, onCopy }: {
   week: Mesocycle['weeks'][number];
   progress: ReturnType<typeof deriveMesocycleAdherence>['weeks'][number];
   scheduleByEntry: Map<string, MesocycleScheduleProjectionEntry>;
@@ -168,6 +186,7 @@ function WeekCard({ week, progress, scheduleByEntry, theme, open, routines, cata
   onAddRest: (weekNumber: number) => void;
   onRemove: (entryId: string) => void;
   onMove: (fromIndex: number, toIndex: number) => void;
+  onPlanningStateChange: (entryId: string, state: PlannedSessionPlanningState) => void;
   lockedEntryIds: ReadonlySet<string>;
   onCopy: () => void;
 }) {
@@ -186,6 +205,10 @@ function WeekCard({ week, progress, scheduleByEntry, theme, open, routines, cata
           {date ? <Text style={[styles.dateLabel, { color: theme.primary }]}>{date.weekday} · {date.date}</Text> : null}
           <Text style={{ color: theme.text }}>{isRest(entry) ? `${index + 1}. Descanso` : `${index + 1}. ${entry.ref.routineName}`}</Text>
           {isRest(entry) ? <Text style={{ color: theme.textMuted }}>Recuperación programada</Text> : unavailable ? <Text style={{ color: '#F5B041' }}>Rutina no disponible</Text> : <Text style={{ color: theme.textMuted }}>{projection?.kind === 'routine' ? `${muscleGroupLabels(catalogMuscleGroups, projection.routine.muscleGroups).join(' · ')} · ${projection.routine.exerciseCount} ejercicios` : null}</Text>}
+          {!isRest(entry) && projection?.kind === 'routine' ? <><View style={styles.planningStates}>{PLANNING_STATE_OPTIONS.map((option) => {
+            const selected = projection.planningState === option.value;
+            return <HapticPressable key={option.value} accessibilityRole="button" accessibilityLabel={`Marcar ${entry.ref.routineName} como ${option.label}`} accessibilityState={{ selected }} onPress={() => onPlanningStateChange(entry.id, option.value)} style={[styles.planningState, { borderColor: selected ? theme.primary : theme.glassBorder, backgroundColor: selected ? theme.primary : 'transparent' }]}><Text style={{ color: selected ? theme.onPrimary : theme.textMuted }}>{option.label}</Text></HapticPressable>;
+          })}</View>{projection.isExtraordinary ? <Text style={{ color: theme.textMuted }}>Sesión extraordinaria</Text> : null}</> : null}
         </View>
         <View><HapticPressable disabled={locked} style={styles.removeAction} accessibilityRole="button" accessibilityLabel={`Quitar ${isRest(entry) ? 'día de descanso' : entry.ref.routineName} del plan`} accessibilityHint={locked ? 'Esta sesión tiene intentos y conserva su historial.' : 'Elimina esta entrada sin cambiar el orden de las demás.'} onPress={() => onRemove(entry.id)}><Ionicons name="trash-outline" size={18} color={theme.textMuted} /></HapticPressable><Text accessibilityRole="adjustable" accessibilityLabel={`Reordenar ${isRest(entry) ? 'día de descanso' : entry.ref.routineName}`} onLongPress={locked ? undefined : drag} style={[styles.dragHandle, { color: theme.textMuted }, locked && styles.dragDisabled]}>☰</Text></View>
       </View>;
@@ -205,5 +228,5 @@ function WeekCard({ week, progress, scheduleByEntry, theme, open, routines, cata
 }
 
 const styles = StyleSheet.create({
-   safe: { flex: 1, paddingHorizontal: 20, paddingTop: 8 }, scroll: { paddingBottom: 40 }, title: { fontSize: 26, fontWeight: '900', marginBottom: 8 }, card: { marginBottom: 14 }, heading: { fontSize: 18, fontWeight: '800' }, statusOptions: { flexDirection: 'row', flexWrap: 'wrap', gap: 10, marginTop: 10 }, optionChip: { borderWidth: 1, borderRadius: 999, paddingHorizontal: 14, paddingVertical: 10 }, statusGuidance: { fontSize: 13, lineHeight: 18, marginTop: 10 }, entry: { marginTop: 10, paddingTop: 10, borderTopWidth: 1, flexDirection: 'row', gap: 10 }, entryContent: { flex: 1, gap: 3 }, dateLabel: { fontSize: 12, fontWeight: '800', textTransform: 'capitalize' }, locked: { fontSize: 11, marginLeft: 2 }, removeAction: { width: 36, height: 28, alignItems: 'center', justifyContent: 'center' }, dragHandle: { fontSize: 20, minHeight: 30, paddingHorizontal: 8, textAlign: 'center' }, dragDisabled: { opacity: 0.35 }, placeholder: { borderStyle: 'dashed', borderWidth: 1, borderRadius: 10, gap: 7, marginTop: 10, padding: 12 }, placeholderDate: { borderRadius: 4, height: 10, opacity: 0.45, width: '28%' }, placeholderTitle: { borderRadius: 5, height: 16, opacity: 0.55, width: '62%' }, placeholderMetadata: { borderRadius: 4, height: 12, opacity: 0.35, width: '48%' }, dragging: { opacity: 0.94 }, actions: { gap: 8, marginTop: 12 }, routinePicker: { gap: 8, marginTop: 14 }, pickerTitle: { fontSize: 15, fontWeight: '800' }, search: { borderWidth: 1, borderRadius: 12, paddingHorizontal: 12, paddingVertical: 10 }, option: { borderWidth: 1, borderRadius: 14, padding: 12, flexDirection: 'row', alignItems: 'center', gap: 12 }, optionTitle: { fontSize: 15, fontWeight: '800' }, optionMeta: { fontSize: 12, marginTop: 3 }, occurrenceBadge: { minWidth: 22, height: 22, borderRadius: 11, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 6 }, occurrenceText: { fontSize: 12, fontWeight: '900' },
+   safe: { flex: 1, paddingHorizontal: 20, paddingTop: 8 }, scroll: { paddingBottom: 40 }, title: { fontSize: 26, fontWeight: '900', marginBottom: 8 }, card: { marginBottom: 14 }, heading: { fontSize: 18, fontWeight: '800' }, statusOptions: { flexDirection: 'row', flexWrap: 'wrap', gap: 10, marginTop: 10 }, optionChip: { borderWidth: 1, borderRadius: 999, paddingHorizontal: 14, paddingVertical: 10 }, statusGuidance: { fontSize: 13, lineHeight: 18, marginTop: 10 }, entry: { marginTop: 10, paddingTop: 10, borderTopWidth: 1, flexDirection: 'row', gap: 10 }, entryContent: { flex: 1, gap: 3 }, dateLabel: { fontSize: 12, fontWeight: '800', textTransform: 'capitalize' }, planningStates: { flexDirection: 'row', flexWrap: 'wrap', gap: 4, marginTop: 4 }, planningState: { borderWidth: 1, borderRadius: 999, paddingHorizontal: 7, paddingVertical: 3 }, locked: { fontSize: 11, marginLeft: 2 }, removeAction: { width: 36, height: 28, alignItems: 'center', justifyContent: 'center' }, dragHandle: { fontSize: 20, minHeight: 30, paddingHorizontal: 8, textAlign: 'center' }, dragDisabled: { opacity: 0.35 }, placeholder: { borderStyle: 'dashed', borderWidth: 1, borderRadius: 10, gap: 7, marginTop: 10, padding: 12 }, placeholderDate: { borderRadius: 4, height: 10, opacity: 0.45, width: '28%' }, placeholderTitle: { borderRadius: 5, height: 16, opacity: 0.55, width: '62%' }, placeholderMetadata: { borderRadius: 4, height: 12, opacity: 0.35, width: '48%' }, dragging: { opacity: 0.94 }, actions: { gap: 8, marginTop: 12 }, routinePicker: { gap: 8, marginTop: 14 }, pickerTitle: { fontSize: 15, fontWeight: '800' }, search: { borderWidth: 1, borderRadius: 12, paddingHorizontal: 12, paddingVertical: 10 }, option: { borderWidth: 1, borderRadius: 14, padding: 12, flexDirection: 'row', alignItems: 'center', gap: 12 }, optionTitle: { fontSize: 15, fontWeight: '800' }, optionMeta: { fontSize: 12, marginTop: 3 }, occurrenceBadge: { minWidth: 22, height: 22, borderRadius: 11, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 6 }, occurrenceText: { fontSize: 12, fontWeight: '900' },
 });

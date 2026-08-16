@@ -1,8 +1,8 @@
-import { Mesocycle, MesocycleEntry, PlannedSession, PlannedSessionRef, Routine, WorkoutAttempt, WorkoutLineage } from '../types';
+import { Mesocycle, MesocycleEntry, PlannedSession, PlannedSessionPlanningState, PlannedSessionRef, Routine, WorkoutAttempt, WorkoutLineage } from '../types';
 import { generateId } from './ids';
 import { isValidPerformance } from './workoutAttempts';
 
-export type PlannedSessionAdherenceStatus = 'not-started' | 'partial' | 'completed';
+export type PlannedSessionAdherenceStatus = 'not-started' | 'partial' | 'completed' | 'skipped' | 'rescheduled' | 'cancelled';
 export interface PlannedSessionAdherence {
   plannedSessionId: string;
   status: PlannedSessionAdherenceStatus;
@@ -33,6 +33,20 @@ export type MesocycleDayGuidance =
   | null;
 
 const isRoutine = (entry: MesocycleEntry): entry is PlannedSession => !('kind' in entry && entry.kind === 'rest');
+
+export function plannedSessionPlanningState(entry: PlannedSession): PlannedSessionPlanningState {
+  return entry.planningState ?? 'pending';
+}
+
+export function isExecutablePlannedSession(entry: PlannedSession): boolean {
+  const state = plannedSessionPlanningState(entry);
+  return state === 'pending' || state === 'in_progress';
+}
+
+export function transitionPlannedSession(entry: PlannedSession, to: PlannedSessionPlanningState, at: string, reason?: string): PlannedSession {
+  const from = plannedSessionPlanningState(entry);
+  return { ...entry, planningState: to, planningTransition: { from, to, at, reason } };
+}
 
 export function snapshotPlannedRoutine(routine: Routine): Routine {
   return {
@@ -73,7 +87,7 @@ export interface ScheduleDateLabel { weekday: string; date: string; }
 export interface RoutineScheduleMetadata { available: boolean; muscleGroups: string[]; exerciseCount: number; }
 export type ScheduleState = 'upcoming' | 'today' | 'past';
 export type MesocycleScheduleProjectionEntry =
-  | { kind: 'routine'; entryId: string; weekNumber: number; dayOffset: number; dateLabel: ScheduleDateLabel | null; scheduleState: ScheduleState | null; routine: RoutineScheduleMetadata; progress: PlannedSessionAdherence }
+  | { kind: 'routine'; entryId: string; weekNumber: number; dayOffset: number; dateLabel: ScheduleDateLabel | null; scheduleState: ScheduleState | null; planningState: PlannedSessionPlanningState; planningTransition?: PlannedSession['planningTransition']; recoveryForPlannedSessionId?: string; recoveredByPlannedSessionId?: string; isExtraordinary: boolean; routine: RoutineScheduleMetadata; progress: PlannedSessionAdherence }
   | { kind: 'rest'; entryId: string; weekNumber: number; dayOffset: number; dateLabel: ScheduleDateLabel | null; scheduleState: ScheduleState | null; progress: { status: 'rest'; displayPercent: null } };
 export function deriveScheduleDateLabel(
   startDate: string | undefined,
@@ -139,7 +153,9 @@ export function deriveMesocycleDayGuidance(mesocycle: Mesocycle, today = new Dat
   const currentEntry = entries.find((entry) => entry.dayOffset === offset);
   if (!currentEntry) return offset < mesocycle.durationWeeks * 7 ? { state: 'unplanned' } : { state: 'completed' };
   return isRoutine(currentEntry.entry)
-    ? { state: 'routine', entryId: currentEntry.entry.id, weekNumber: currentEntry.weekNumber, ref: currentEntry.entry.ref }
+    ? isExecutablePlannedSession(currentEntry.entry)
+      ? { state: 'routine', entryId: currentEntry.entry.id, weekNumber: currentEntry.weekNumber, ref: currentEntry.entry.ref }
+      : { state: 'unplanned' }
     : { state: 'rest', entryId: currentEntry.entry.id, weekNumber: currentEntry.weekNumber };
 }
 
@@ -207,7 +223,7 @@ export function deriveMesocycleTrainingProgress(mesocycle: Mesocycle, attempts: 
   };
 
   for (const { weekNumber, entry } of flattenMesocycleEntries(mesocycle)) {
-    if (!isRoutine(entry)) continue;
+    if (!isRoutine(entry) || !isExecutablePlannedSession(entry)) continue;
     const routine = entry.routineSnapshot ?? routinesById.get(entry.ref.routineId);
     if (routine) for (const exercise of routine.exercises) {
       const effective = (exercise.sets ?? []).filter((set) => set.tipo !== 'C').length;
@@ -251,9 +267,12 @@ export function deriveMesocycleAdherence(mesocycle: Mesocycle, attempts: readonl
   const weeks = mesocycle.weeks.map((week) => {
     const sessionStates = week.entries.filter(isRoutine).map((entry) => {
       const attempt = latest.get(lineageKey(mesocycle.id, week.weekNumber, entry.id));
-      return attempt ? progressFromAttempt(entry.id, attempt) : notStartedProgress(entry.id);
+      if (attempt) return progressFromAttempt(entry.id, attempt);
+      if (isExecutablePlannedSession(entry)) return notStartedProgress(entry.id);
+      return { ...notStartedProgress(entry.id), status: plannedSessionPlanningState(entry) as Extract<PlannedSessionAdherenceStatus, 'skipped' | 'rescheduled' | 'cancelled'> };
     });
-    return { weekNumber: week.weekNumber, plannedSessions: sessionStates.length, completedSessions: sessionStates.filter((item) => item.status === 'completed').length, sessionStates };
+    const executableStates = sessionStates.filter((item) => item.status === 'not-started' || item.status === 'partial' || item.status === 'completed');
+    return { weekNumber: week.weekNumber, plannedSessions: executableStates.length, completedSessions: executableStates.filter((item) => item.status === 'completed').length, sessionStates };
   });
   return { plannedSessions: weeks.reduce((n, week) => n + week.plannedSessions, 0), completedSessions: weeks.reduce((n, week) => n + week.completedSessions, 0), weeks };
 }
@@ -272,7 +291,7 @@ export function mesocycleCompletionBlockReason(mesocycle: Mesocycle, attempts: r
   const hasFinalizedSession = attempts.some((attempt) => validLineage(attempt) && attempt.lineage.mesocycleId === mesocycle.id);
   if (!hasFinalizedSession) return 'Completá al menos un entrenamiento del mesociclo antes de cerrarlo.';
   const hasFutureRoutine = flattenMesocycleEntries(mesocycle).some(({ dayOffset, entry }) => (
-    isRoutine(entry) && deriveScheduleState(mesocycle.startDate, dayOffset, today) === 'upcoming'
+    isRoutine(entry) && isExecutablePlannedSession(entry) && deriveScheduleState(mesocycle.startDate, dayOffset, today) === 'upcoming'
   ));
   return hasFutureRoutine ? 'No podés cerrar el mesociclo mientras haya entrenamientos programados para fechas futuras.' : null;
 }
@@ -303,6 +322,11 @@ export function deriveMesocycleScheduleProjection(
       dayOffset,
       dateLabel,
       scheduleState,
+      planningState: plannedSessionPlanningState(entry),
+      planningTransition: entry.planningTransition,
+      recoveryForPlannedSessionId: entry.recoveryForPlannedSessionId,
+      recoveredByPlannedSessionId: entry.recoveredByPlannedSessionId,
+      isExtraordinary: entry.isExtraordinary === true,
       routine: routine
         ? { available: true, muscleGroups: [...routine.muscleGroups], exerciseCount: routine.exercises.length }
         : { available: false, muscleGroups: [], exerciseCount: 0 },
@@ -315,5 +339,9 @@ export function buildMesocycleDraft(mesocycle: Mesocycle): Mesocycle {
   const byNumber = new Map(mesocycle.weeks.map((week) => [week.weekNumber, week]));
   return { ...mesocycle, weeks: Array.from({ length: Math.max(mesocycle.durationWeeks, 1) }, (_, index) => byNumber.get(index + 1) ?? { id: generateId(), weekNumber: index + 1, entries: [] }) };
 }
-export function countPlannedSessions(mesocycle: Mesocycle): number { return flattenMesocycleEntries(mesocycle).filter(({ entry }) => isRoutine(entry)).length; }
-export function clonePlannedWeekEntries(entries: readonly MesocycleEntry[]): MesocycleEntry[] { return entries.map((entry, index) => isRoutine(entry) ? { ...entry, id: generateId(), order: index + 1, ref: { ...entry.ref }, ...(entry.routineSnapshot ? { routineSnapshot: snapshotPlannedRoutine(entry.routineSnapshot) } : {}) } : { ...entry, id: generateId() }); }
+export function countPlannedSessions(mesocycle: Mesocycle): number { return flattenMesocycleEntries(mesocycle).filter(({ entry }) => isRoutine(entry) && isExecutablePlannedSession(entry)).length; }
+export function clonePlannedWeekEntries(entries: readonly MesocycleEntry[]): MesocycleEntry[] { return entries.map((entry, index) => {
+  if (!isRoutine(entry)) return { ...entry, id: generateId() };
+  const { planningTransition: _planningTransition, recoveryForPlannedSessionId: _recoveryFor, recoveredByPlannedSessionId: _recoveredBy, ...clone } = entry;
+  return { ...clone, id: generateId(), order: index + 1, ref: { ...entry.ref }, planningState: 'pending', ...(entry.routineSnapshot ? { routineSnapshot: snapshotPlannedRoutine(entry.routineSnapshot) } : {}) };
+}); }

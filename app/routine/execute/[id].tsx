@@ -956,6 +956,8 @@ export default function ExecuteRoutineScreen() {
       ? 'La fecha programada para esta sesión ya pasó.'
       : lineageValidation.reason === 'inactive-mesocycle'
       ? 'Este mesociclo ya no está activo. Actualizá o reabrí el mesociclo antes de entrenar esta sesión.'
+      : lineageValidation.reason === 'non-executable-planned-session'
+      ? 'Esta sesión está omitida, reprogramada o cancelada y no se puede ejecutar.'
       : 'La sesión programada ya no está disponible. Actualizá o reabrí el mesociclo antes de entrenar.';
     return <ThemeBackground><SafeAreaView style={[styles.safe, styles.center]}><GlassCard style={styles.doneCard}><Text style={[styles.doneTitle, { color: theme.text }]}>Sesión desactualizada</Text><Text style={[styles.doneMeta, { color: theme.textMuted }]}>{message}</Text><View style={styles.spacer} /><GlassButton title={lineageValidation.mesocycleId ? 'Volver al mesociclo' : 'Volver a rutinas'} onPress={() => lineageValidation.mesocycleId ? router.replace(`/mesocycle/summary/${lineageValidation.mesocycleId}`) : router.replace('/(tabs)/routines')} /></GlassCard></SafeAreaView></ThemeBackground>;
   }
