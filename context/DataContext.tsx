@@ -13,6 +13,7 @@ import { hasActiveWorkoutReentryIntegrity, matchesActiveWorkout, WorkoutLaunchTa
 import { applySessionEdits, attemptToSession } from '../utils/workoutAttempts';
 import { deleteCustomDefinition, planRecipientImport } from '../utils/catalogLibrary';
 import { AsyncTimeoutError, withTimeout } from '../utils/withTimeout';
+import { nextContentVersion } from '../utils/contentVersioning';
 import { finalizeTrainingAttempt, importLegacyCustomDefinitions, loadTrainingState, saveTrainingState, TrainingState } from '../services/trainingState';
 import { loadExperienceProgress } from '../services/experience';
 import { useAuth } from './AuthContext';
@@ -519,6 +520,7 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
   const addRoutine = async (name: string, muscleGroups: MuscleGroup[]): Promise<Routine> => {
     const routine: Routine = {
       id: generateId(),
+      version: 1,
       name,
       muscleGroups,
       exercises: [],
@@ -529,7 +531,13 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
   };
 
   const updateRoutine = async (routine: Routine): Promise<void> => {
-    await persistRoutines(localRoutines.map((r) => (r.id === routine.id ? routine : r)));
+    const current = localRoutines.find((item) => item.id === routine.id);
+    if (!current) throw new Error('La rutina ya no existe.');
+    const used = attempts.some((attempt) => attempt.routineId === routine.id);
+    const next = used
+      ? [...localRoutines, nextContentVersion(current, routine, generateId())]
+      : localRoutines.map((item) => item.id === routine.id ? routine : item);
+    await persistRoutines(next);
   };
 
   const deleteRoutine = async (id: string): Promise<void> => {
@@ -554,6 +562,7 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
     const created: Mesocycle = {
       ...mesocycle,
       id: generateId(),
+      version: 1,
       createdAt: new Date().toISOString(),
     };
 
@@ -569,8 +578,9 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
         throw new Error('Mesocycle not found.');
       }
 
+      const used = attempts.some((attempt) => attempt.lineage?.mesocycleId === mesocycle.id);
       return {
-        next: current.map((item) => item.id === mesocycle.id ? mesocycle : item),
+        next: used ? [...current, nextContentVersion(current.find((item) => item.id === mesocycle.id)!, mesocycle, generateId())] : current.map((item) => item.id === mesocycle.id ? mesocycle : item),
         result: undefined,
       };
     });

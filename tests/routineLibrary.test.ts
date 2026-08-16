@@ -25,4 +25,13 @@ describe('routine library grouping', () => {
       ['shared', ['shared-new', 'shared-old']],
     ]);
   });
+
+  test('hides superseded versions from the active library', () => {
+    const groups = groupRoutinesForLibrary([
+      routine('upper-v1', '2026-08-01T10:00:00Z'),
+      { ...routine('upper-v2', '2026-08-02T10:00:00Z'), version: 2, versionOf: 'upper-v1', previousVersionId: 'upper-v1' },
+    ]);
+
+    expect(groups[0].items.map(({ id }) => id)).toEqual(['upper-v2']);
+  });
 });

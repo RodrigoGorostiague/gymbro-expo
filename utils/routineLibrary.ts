@@ -1,4 +1,5 @@
 import { Routine } from '../types';
+import { isCurrentContentVersion } from './contentVersioning';
 
 export type RoutineLibrarySection = 'owned' | 'shared';
 
@@ -13,9 +14,10 @@ function compareDatesDescending(left: string, right: string): number {
 
 /** Groups owned and accepted shared routine copies for the routine library. */
 export function groupRoutinesForLibrary(routines: readonly Routine[]): RoutineLibraryGroup[] {
-  const owned = routines.filter((routine) => !routine.sharedFrom)
+  const current = routines.filter((routine) => isCurrentContentVersion(routine, routines));
+  const owned = current.filter((routine) => !routine.sharedFrom)
     .sort((left, right) => compareDatesDescending(left.createdAt, right.createdAt));
-  const shared = routines.filter((routine) => !!routine.sharedFrom)
+  const shared = current.filter((routine) => !!routine.sharedFrom)
     .sort((left, right) => compareDatesDescending(
       left.sharedFrom?.acceptedAt ?? left.createdAt,
       right.sharedFrom?.acceptedAt ?? right.createdAt,

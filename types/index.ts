@@ -126,6 +126,10 @@ export interface RoutineExercise {
 
 export interface Routine {
   id: string;
+  /** Immutable content lineage. Absent on records created before versioning. */
+  version?: number;
+  versionOf?: string;
+  previousVersionId?: string;
   name: string;
   muscleGroups: MuscleGroup[];
   exercises: RoutineExercise[];
@@ -179,6 +183,10 @@ export interface MesocycleWeek {
 
 export interface Mesocycle {
   id: string;
+  /** Immutable content lineage. Absent on records created before versioning. */
+  version?: number;
+  versionOf?: string;
+  previousVersionId?: string;
   name: string;
   goal: string;
   status: MesocycleStatus;
