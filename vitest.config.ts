@@ -6,11 +6,15 @@ const rootDir = fileURLToPath(new URL('.', import.meta.url));
 
 export default defineConfig({
   assetsInclude: ['**/*.wav', '**/*.png', '**/*.jpeg'],
+  define: {
+    __DEV__: true,
+  },
   resolve: {
     alias: {
        'expo-router': resolve(rootDir, 'tests/helpers/expoRouterStub.ts'),
        'expo-image': resolve(rootDir, 'tests/helpers/expoImageStub.tsx'),
-      'expo-blur': resolve(rootDir, 'tests/helpers/expoBlurStub.ts'),
+       'expo-sensors': resolve(rootDir, 'tests/helpers/expoSensorsStub.ts'),
+       'expo-blur': resolve(rootDir, 'tests/helpers/expoBlurStub.ts'),
       'expo-haptics': resolve(rootDir, 'tests/helpers/expoHapticsStub.ts'),
       'expo-linear-gradient': resolve(rootDir, 'tests/helpers/expoLinearGradientStub.ts'),
        'expo-secure-store': resolve(rootDir, 'tests/helpers/secureStoreStub.ts'),

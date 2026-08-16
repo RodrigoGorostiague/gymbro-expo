@@ -302,8 +302,8 @@ describe('Community feed', () => {
     await act(async () => { tree = TestRenderer.create(React.createElement(ProfileScreen)); });
 
     const switches = tree!.root.findAll((node) => String(node.type) === 'Switch');
-    expect(switches).toHaveLength(10);
-    expect(switches.map((node) => node.props.value)).toEqual(Array(10).fill(true));
+    expect(switches).toHaveLength(11);
+    expect(switches.map((node) => node.props.value)).toEqual(Array(11).fill(true));
   });
 
   test('normalizes malformed profile fields while preserving valid false switch values', async () => {
@@ -318,7 +318,7 @@ describe('Community feed', () => {
     await act(async () => { tree = TestRenderer.create(React.createElement(ProfileScreen)); });
 
     const switches = tree!.root.findAll((node) => String(node.type) === 'Switch');
-    expect(switches.map((node) => node.props.value)).toEqual([false, true, true, true, false, true, true, true, true, true]);
+    expect(switches.map((node) => node.props.value)).toEqual([false, true, true, true, false, true, true, true, true, true, true]);
   });
 
   test('renders loading and malformed profiles with valid Switch props when focus refresh throws synchronously', async () => {
@@ -328,7 +328,7 @@ describe('Community feed', () => {
 
     await act(async () => { tree = TestRenderer.create(React.createElement(ProfileScreen)); });
 
-    expect(tree!.root.findAll((node) => String(node.type) === 'Switch')).toHaveLength(10);
+    expect(tree!.root.findAll((node) => String(node.type) === 'Switch')).toHaveLength(11);
     expect(tree!.root.find((node) => String(node.type) === 'GlassButton' && node.props.title === 'Crear perfil')).toBeDefined();
     expect(alert).toHaveBeenCalledWith('Perfil no disponible', 'Offline');
 
@@ -356,7 +356,7 @@ describe('Community feed', () => {
 
     await act(async () => { tree = TestRenderer.create(React.createElement(ProfileScreen)); });
 
-    expect(tree!.root.findAll((node) => String(node.type) === 'Switch')).toHaveLength(10);
+    expect(tree!.root.findAll((node) => String(node.type) === 'Switch')).toHaveLength(11);
     expect(alert).toHaveBeenCalledWith('Perfil no disponible', 'Async offline');
   });
 

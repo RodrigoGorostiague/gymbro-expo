@@ -5,7 +5,7 @@ vi.mock('../services/supabase', () => ({ supabase: { rpc }, supabaseConfiguratio
 
 import { acknowledgeReleaseUpdates, claimPendingReleaseGemRewards, claimPendingReleaseUpdates, claimWelcomeGemReward, loadRewardWallet, purchaseRewardFrame, purchaseRewardTheme, receiptTotal, updateRewardWalletPreferences } from '../services/rewardWallet';
 
-const wallet = { balance: 25, purchasedThemeIds: ['white'], purchasedFrameIds: [], purchasedTitleIds: [], equippedThemeId: 'white', combineWithPartner: false };
+const wallet = { balance: 25, purchasedThemeIds: ['white'], purchasedFrameIds: [], purchasedTitleIds: [], purchasedBackgroundIds: [], equippedThemeId: 'white', equippedBackgroundId: null, combineWithPartner: false };
 
 describe('remote reward wallet boundary', () => {
   beforeEach(() => vi.clearAllMocks());
