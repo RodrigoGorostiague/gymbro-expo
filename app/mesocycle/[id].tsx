@@ -18,7 +18,10 @@ import {
   mesocycleCompletionBlockReason,
   deriveFirstEntryStartDate,
   deriveMesocycleScheduleProjection,
+  eligibleRecoveryDestinations,
   MesocycleScheduleProjectionEntry,
+  RecoveryDestination,
+  reschedulePlannedSessionWithRecovery,
   snapshotPlannedRoutine,
   transitionPlannedSession,
 } from '../../utils/mesocycles';
@@ -46,7 +49,6 @@ const PLANNING_STATE_OPTIONS: { value: PlannedSessionPlanningState; label: strin
   { value: 'pending', label: 'Pendiente' },
   { value: 'in_progress', label: 'En curso' },
   { value: 'skipped', label: 'Omitida' },
-  { value: 'rescheduled', label: 'Reprogramada' },
   { value: 'cancelled', label: 'Cancelada' },
 ];
 
@@ -58,6 +60,7 @@ export default function MesocycleDetailScreen() {
   const [draft, setDraft] = useState<Mesocycle | null>(mesocycle ? buildMesocycleDraft(mesocycle) : null);
   const [openWeek, setOpenWeek] = useState<number | null>(null);
   const [startDate, setStartDate] = useState(mesocycle?.startDate ?? '');
+  const [recoverySource, setRecoverySource] = useState<{ weekNumber: number; entryId: string } | null>(null);
 
   useEffect(() => setDraft(mesocycle ? buildMesocycleDraft(mesocycle) : null), [mesocycle]);
 
@@ -109,6 +112,16 @@ export default function MesocycleDetailScreen() {
         : entry),
     }),
   }));
+  const recoveryDestinations = recoverySource ? eligibleRecoveryDestinations(draft) : [];
+  const createRecovery = (destination: RecoveryDestination) => {
+    if (!recoverySource) return;
+    try {
+      change((value) => reschedulePlannedSessionWithRecovery(value, recoverySource, destination, attempts, new Date().toISOString()));
+      setRecoverySource(null);
+    } catch (error) {
+      Alert.alert('No se puede reprogramar', error instanceof Error ? error.message : 'No encontramos un destino válido para la recuperación.');
+    }
+  };
 
   const derivedStartDate = deriveFirstEntryStartDate([...draft.weeks].sort((a, b) => a.weekNumber - b.weekNumber).flatMap((week) => week.entries));
   const effectiveStartDate = startDate || derivedStartDate;
@@ -153,10 +166,21 @@ export default function MesocycleDetailScreen() {
       onAddRest={addRest}
       onRemove={(entryId) => removeEntry(week.weekNumber, entryId)}
        onMove={(from, to) => moveEntry(week.weekNumber, from, to)}
-      onPlanningStateChange={(entryId, state) => changePlanningState(week.weekNumber, entryId, state)}
-      lockedEntryIds={new Set(week.entries.filter((entry) => !isRest(entry) && hasPlannedSessionAttempt(attempts, draft.id, week.weekNumber, entry.id)).map((entry) => entry.id))}
-       onCopy={() => copyPrevious(week.weekNumber)}
+       onPlanningStateChange={(entryId, state) => changePlanningState(week.weekNumber, entryId, state)}
+       onRecoveryStart={(entryId) => setRecoverySource({ weekNumber: week.weekNumber, entryId })}
+       lockedEntryIds={new Set(week.entries.filter((entry) => !isRest(entry) && hasPlannedSessionAttempt(attempts, draft.id, week.weekNumber, entry.id)).map((entry) => entry.id))}
+        onCopy={() => copyPrevious(week.weekNumber)}
     />)}
+    {recoverySource ? <GlassCard style={styles.card}>
+      <Text style={[styles.heading, { color: theme.text }]}>Reprogramar sesión</Text>
+      <Text style={[styles.statusGuidance, { color: theme.textMuted }]}>Elegí un descanso o el próximo día vacío para crear una única sesión de recuperación.</Text>
+      {recoveryDestinations.length === 0 ? <Text style={[styles.statusGuidance, { color: theme.textMuted }]}>No hay días de descanso o vacíos dentro de este mesociclo.</Text> : recoveryDestinations.map((destination) => {
+        const date = destination.entryId ? scheduleByEntry.get(destination.entryId)?.dateLabel : undefined;
+        const label = date ? `${date.weekday} · ${date.date}` : destination.entryId ? `Semana ${destination.weekNumber} · día de descanso` : `Semana ${destination.weekNumber} · próximo día vacío`;
+        return <GlassButton key={`${destination.weekNumber}:${destination.entryId ?? 'empty'}`} title={label} variant="secondary" onPress={() => createRecovery(destination)} />;
+      })}
+      <GlassButton title="Cancelar" variant="secondary" onPress={() => setRecoverySource(null)} />
+    </GlassCard> : null}
     <GlassButton title="Guardar planificación" onPress={() => {
       const candidate = { ...draft, startDate: effectiveStartDate };
       const conflict = findOverlappingMesocycle(candidate, mesocycles ?? []);
@@ -173,7 +197,7 @@ export default function MesocycleDetailScreen() {
   </ScrollView></SafeAreaView></ThemeBackground>;
 }
 
-function WeekCard({ week, progress, scheduleByEntry, theme, open, routines, catalogMuscleGroups, onOpen, onAddRoutine, onAddRest, onRemove, onMove, onPlanningStateChange, lockedEntryIds, onCopy }: {
+function WeekCard({ week, progress, scheduleByEntry, theme, open, routines, catalogMuscleGroups, onOpen, onAddRoutine, onAddRest, onRemove, onMove, onPlanningStateChange, onRecoveryStart, lockedEntryIds, onCopy }: {
   week: Mesocycle['weeks'][number];
   progress: ReturnType<typeof deriveMesocycleAdherence>['weeks'][number];
   scheduleByEntry: Map<string, MesocycleScheduleProjectionEntry>;
@@ -187,6 +211,7 @@ function WeekCard({ week, progress, scheduleByEntry, theme, open, routines, cata
   onRemove: (entryId: string) => void;
   onMove: (fromIndex: number, toIndex: number) => void;
   onPlanningStateChange: (entryId: string, state: PlannedSessionPlanningState) => void;
+  onRecoveryStart: (entryId: string) => void;
   lockedEntryIds: ReadonlySet<string>;
   onCopy: () => void;
 }) {
@@ -208,7 +233,7 @@ function WeekCard({ week, progress, scheduleByEntry, theme, open, routines, cata
           {!isRest(entry) && projection?.kind === 'routine' ? <><View style={styles.planningStates}>{PLANNING_STATE_OPTIONS.map((option) => {
             const selected = projection.planningState === option.value;
             return <HapticPressable key={option.value} accessibilityRole="button" accessibilityLabel={`Marcar ${entry.ref.routineName} como ${option.label}`} accessibilityState={{ selected }} onPress={() => onPlanningStateChange(entry.id, option.value)} style={[styles.planningState, { borderColor: selected ? theme.primary : theme.glassBorder, backgroundColor: selected ? theme.primary : 'transparent' }]}><Text style={{ color: selected ? theme.onPrimary : theme.textMuted }}>{option.label}</Text></HapticPressable>;
-          })}</View>{projection.isExtraordinary ? <Text style={{ color: theme.textMuted }}>Sesión extraordinaria</Text> : null}</> : null}
+           })}</View>{projection.planningState === 'pending' && !projection.recoveredByPlannedSessionId && !locked ? <HapticPressable accessibilityRole="button" accessibilityLabel={`Reprogramar ${entry.ref.routineName}`} onPress={() => onRecoveryStart(entry.id)} style={[styles.planningState, { borderColor: theme.primary }]}><Text style={{ color: theme.primary, fontWeight: '700' }}>Reprogramar con recuperación</Text></HapticPressable> : null}{projection.isExtraordinary ? <Text style={{ color: theme.textMuted }}>Sesión extraordinaria</Text> : null}</> : null}
         </View>
         <View><HapticPressable disabled={locked} style={styles.removeAction} accessibilityRole="button" accessibilityLabel={`Quitar ${isRest(entry) ? 'día de descanso' : entry.ref.routineName} del plan`} accessibilityHint={locked ? 'Esta sesión tiene intentos y conserva su historial.' : 'Elimina esta entrada sin cambiar el orden de las demás.'} onPress={() => onRemove(entry.id)}><Ionicons name="trash-outline" size={18} color={theme.textMuted} /></HapticPressable><Text accessibilityRole="adjustable" accessibilityLabel={`Reordenar ${isRest(entry) ? 'día de descanso' : entry.ref.routineName}`} onLongPress={locked ? undefined : drag} style={[styles.dragHandle, { color: theme.textMuted }, locked && styles.dragDisabled]}>☰</Text></View>
       </View>;

@@ -48,6 +48,75 @@ export function transitionPlannedSession(entry: PlannedSession, to: PlannedSessi
   return { ...entry, planningState: to, planningTransition: { from, to, at, reason } };
 }
 
+export interface RecoveryDestination {
+  weekNumber: number;
+  /** Omit to use the next unplanned day in a week with fewer than seven entries. */
+  entryId?: string;
+}
+
+export function eligibleRecoveryDestinations(mesocycle: Mesocycle): RecoveryDestination[] {
+  return mesocycle.weeks
+    .filter((week) => week.weekNumber > 0 && week.weekNumber <= mesocycle.durationWeeks)
+    .sort((left, right) => left.weekNumber - right.weekNumber)
+    .flatMap((week) => [
+      ...week.entries.flatMap((entry) => !isRoutine(entry) ? [{ weekNumber: week.weekNumber, entryId: entry.id }] : []),
+      ...(week.entries.length < 7 ? [{ weekNumber: week.weekNumber }] : []),
+    ]);
+}
+
+/** Replaces one empty/rest day with a recovery copy without mutating attempts or either input plan. */
+export function reschedulePlannedSessionWithRecovery(
+  mesocycle: Mesocycle,
+  source: { weekNumber: number; entryId: string },
+  destination: RecoveryDestination,
+  attempts: readonly WorkoutAttempt[],
+  at: string,
+  recoveryId = generateId(),
+): Mesocycle {
+  const sourceWeek = mesocycle.weeks.find((week) => week.weekNumber === source.weekNumber && week.weekNumber > 0 && week.weekNumber <= mesocycle.durationWeeks);
+  const sourceEntry = sourceWeek?.entries.find((entry) => entry.id === source.entryId);
+  if (!sourceWeek || !sourceEntry || !isRoutine(sourceEntry) || plannedSessionPlanningState(sourceEntry) !== 'pending') {
+    throw new Error('Recovery source must be a pending planned session within the mesocycle duration.');
+  }
+  if (attempts.some((attempt) => attempt.lineage?.mesocycleId === mesocycle.id && attempt.lineage.weekNumber === source.weekNumber && attempt.lineage.plannedSessionId === source.entryId)) {
+    throw new Error('Recovery source already has a historical attempt.');
+  }
+  if (sourceEntry.recoveredByPlannedSessionId) throw new Error('Recovery source already has a linked recovery slot.');
+
+  const destinationWeek = mesocycle.weeks.find((week) => week.weekNumber === destination.weekNumber && week.weekNumber > 0 && week.weekNumber <= mesocycle.durationWeeks);
+  const destinationIndex = destination.entryId === undefined ? -1 : destinationWeek?.entries.findIndex((entry) => entry.id === destination.entryId) ?? -1;
+  const destinationEntry = destinationIndex >= 0 ? destinationWeek?.entries[destinationIndex] : undefined;
+  if (!destinationWeek || (destination.entryId === undefined ? destinationWeek.entries.length >= 7 : !destinationEntry || isRoutine(destinationEntry))) {
+    throw new Error('Recovery destination is not an eligible empty or rest slot within the mesocycle duration.');
+  }
+  if (flattenMesocycleEntries(mesocycle).some(({ entry }) => entry.id === recoveryId)) throw new Error('Recovery slot id already exists in this mesocycle.');
+
+  const recovery: PlannedSession = {
+    id: recoveryId,
+    ref: { ...sourceEntry.ref },
+    ...(sourceEntry.routineSnapshot ? { routineSnapshot: snapshotPlannedRoutine(sourceEntry.routineSnapshot) } : {}),
+    order: destinationIndex >= 0 ? destinationIndex + 1 : destinationWeek.entries.length + 1,
+    ...(sourceEntry.progressionNote ? { progressionNote: sourceEntry.progressionNote } : {}),
+    ...(sourceEntry.note ? { note: sourceEntry.note } : {}),
+    planningState: 'pending',
+    recoveryForPlannedSessionId: sourceEntry.id,
+    isExtraordinary: true,
+  };
+  const rescheduled = { ...transitionPlannedSession(sourceEntry, 'rescheduled', at), recoveredByPlannedSessionId: recoveryId };
+
+  return {
+    ...mesocycle,
+    weeks: mesocycle.weeks.map((week) => {
+      if (week.weekNumber === source.weekNumber && week.weekNumber === destination.weekNumber) {
+        return { ...week, entries: week.entries.map((entry, index) => entry.id === source.entryId ? rescheduled : index === destinationIndex ? recovery : entry).concat(destinationIndex < 0 ? [recovery] : []) };
+      }
+      if (week.weekNumber === source.weekNumber) return { ...week, entries: week.entries.map((entry) => entry.id === source.entryId ? rescheduled : entry) };
+      if (week.weekNumber === destination.weekNumber) return { ...week, entries: destinationIndex < 0 ? [...week.entries, recovery] : week.entries.map((entry, index) => index === destinationIndex ? recovery : entry) };
+      return week;
+    }),
+  };
+}
+
 export function snapshotPlannedRoutine(routine: Routine): Routine {
   return {
     ...routine,

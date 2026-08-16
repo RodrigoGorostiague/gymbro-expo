@@ -13,7 +13,7 @@ const storage = vi.hoisted(() => {
 vi.mock('@react-native-async-storage/async-storage', () => ({ default: storage }));
 
 import { loadMesocycles } from '../utils/storage';
-import { clonePlannedWeekEntries, deriveMesocycleAdherence, deriveMesocycleScheduleProjection, transitionPlannedSession } from '../utils/mesocycles';
+import { clonePlannedWeekEntries, deriveMesocycleAdherence, deriveMesocycleScheduleProjection, eligibleRecoveryDestinations, reschedulePlannedSessionWithRecovery, transitionPlannedSession } from '../utils/mesocycles';
 import { validateMesocycleExecutionLineage } from '../utils/mesocycleExecutionLineage';
 
 const plan = (): Mesocycle => ({
@@ -77,5 +77,62 @@ describe('planned session lifecycle', () => {
     expect(clone).not.toHaveProperty('planningTransition');
     expect(clone).not.toHaveProperty('recoveryForPlannedSessionId');
     expect(clone).not.toHaveProperty('recoveredByPlannedSessionId');
+  });
+
+  test('atomically replaces a rest destination with one linked recovery slot', () => {
+    const mesocycle = {
+      ...plan(),
+      weeks: [{
+        ...plan().weeks[0],
+        entries: [
+          { id: 'source', ref: { routineId: 'routine-1', routineName: 'Upper', source: 'local' as const }, routineSnapshot: { id: 'snapshot', name: 'Upper', muscleGroups: ['chest'], exercises: [], createdAt: '' }, order: 1 },
+          { id: 'rest-day', kind: 'rest' as const },
+        ],
+      }],
+    };
+
+    const result = reschedulePlannedSessionWithRecovery(mesocycle, { weekNumber: 1, entryId: 'source' }, { weekNumber: 1, entryId: 'rest-day' }, [], '2026-08-16T10:00:00.000Z', 'recovery-slot');
+    const entries = result.weeks[0].entries;
+    const source = entries[0];
+    const recovery = entries[1];
+
+    expect(source).toMatchObject({ id: 'source', planningState: 'rescheduled', recoveredByPlannedSessionId: 'recovery-slot', planningTransition: { from: 'pending', to: 'rescheduled', at: '2026-08-16T10:00:00.000Z' } });
+    expect(recovery).toMatchObject({ id: 'recovery-slot', recoveryForPlannedSessionId: 'source', isExtraordinary: true, planningState: 'pending', ref: { routineId: 'routine-1' }, routineSnapshot: { id: 'snapshot' } });
+    expect(recovery).not.toBe(source);
+    if ('kind' in recovery || 'kind' in source) throw new Error('Expected planned sessions');
+    expect(recovery.ref).not.toBe(source.ref);
+    expect(recovery.routineSnapshot).not.toBe(source.routineSnapshot);
+  });
+
+  test('offers rest and next empty slots, and leaves the plan unchanged when recovery is invalid', () => {
+    const mesocycle = {
+      ...plan(),
+      durationWeeks: 2,
+      weeks: [
+        { ...plan().weeks[0], entries: [{ id: 'source', ref: { routineId: 'routine-1', routineName: 'Upper', source: 'local' as const }, order: 1 }, { id: 'rest-day', kind: 'rest' as const }] },
+        { id: 'week-2', weekNumber: 2, entries: [] },
+        { id: 'outside-duration', weekNumber: 3, entries: [{ id: 'outside-rest', kind: 'rest' as const }] },
+      ],
+    };
+    const destinations = eligibleRecoveryDestinations(mesocycle);
+
+    expect(destinations).toEqual([
+      { weekNumber: 1, entryId: 'rest-day' },
+      { weekNumber: 1 },
+      { weekNumber: 2 },
+    ]);
+    const recoveredIntoEmptyDay = reschedulePlannedSessionWithRecovery(mesocycle, { weekNumber: 1, entryId: 'source' }, { weekNumber: 2 }, [], '2026-08-16T10:00:00.000Z', 'recovery-slot');
+    expect(recoveredIntoEmptyDay.weeks[1].entries).toMatchObject([{ id: 'recovery-slot', recoveryForPlannedSessionId: 'source', isExtraordinary: true }]);
+    expect(() => reschedulePlannedSessionWithRecovery(
+      mesocycle,
+      { weekNumber: 1, entryId: 'source' },
+      { weekNumber: 2 },
+      [{ id: 'attempt', completedAt: '', exercises: [], completion: { status: 'partial', displayPercent: 10 }, lineage: { mesocycleId: mesocycle.id, weekNumber: 1, plannedSessionId: 'source' } } as any],
+      '2026-08-16T10:00:00.000Z',
+      'recovery-slot',
+    )).toThrow('already has a historical attempt');
+    expect(mesocycle.weeks[0].entries[0]).not.toHaveProperty('planningState');
+    expect(() => reschedulePlannedSessionWithRecovery(mesocycle, { weekNumber: 1, entryId: 'source' }, { weekNumber: 3, entryId: 'outside-rest' }, [], '2026-08-16T10:00:00.000Z', 'recovery-slot')).toThrow('not an eligible empty or rest slot');
+    expect(mesocycle.weeks[0].entries).toHaveLength(2);
   });
 });
