@@ -1,11 +1,15 @@
 begin;
-select plan(36);
+select plan(37);
 
 insert into auth.users (id, instance_id, aud, role, email, encrypted_password, email_confirmed_at, raw_app_meta_data, raw_user_meta_data, created_at, updated_at)
 select format('00000000-0000-0000-0000-%s', lpad(value::text, 12, '0'))::uuid, '00000000-0000-0000-0000-000000000000', 'authenticated', 'authenticated', format('member%s@example.com', value), '', now(), '{}', '{}', now(), now()
 from generate_series(11, 14) as value;
-insert into public.profiles (id, alias)
-select format('00000000-0000-0000-0000-%s', lpad(value::text, 12, '0'))::uuid, format('Member %s', value) from generate_series(11, 14) as value;
+insert into public.profiles (id, alias, sex)
+select
+  format('00000000-0000-0000-0000-%s', lpad(value::text, 12, '0'))::uuid,
+  format('Member %s', value),
+  case when value in (11, 14) then 'male' else 'female' end
+from generate_series(11, 14) as value;
 
 set local role authenticated;
 select set_config('request.jwt.claim.sub', '00000000-0000-0000-0000-000000000011', true);
@@ -48,6 +52,10 @@ select set_config('request.jwt.claim.sub', '00000000-0000-0000-0000-000000000013
 select results_eq($$select public.graph_summary('00000000-0000-0000-0000-000000000011') ->> 'relationshipKind'$$, $$values ('partner')$$, 'the trusted summary reports the remaining canonical relationship');
 
 select set_config('request.jwt.claim.sub', '00000000-0000-0000-0000-000000000012', true);
+select throws_like($$select public.graph_send_request('00000000-0000-0000-0000-000000000013', 'partner')$$, 'GymCrush requires users with different declared sexes', 'same-sex GymCrush requests are rejected');
+set local role postgres;
+update public.profiles set sex = 'male' where id = '00000000-0000-0000-0000-000000000012';
+set local role authenticated;
 select lives_ok($$select public.graph_send_request('00000000-0000-0000-0000-000000000013', 'partner')$$, 'the first competing Partner request is created');
 select set_config('request.jwt.claim.sub', '00000000-0000-0000-0000-000000000013', true);
 select lives_ok($$select public.graph_respond_request('00000000-0000-0000-0000-000000000012', true)$$, 'the first competing Partner transition commits');

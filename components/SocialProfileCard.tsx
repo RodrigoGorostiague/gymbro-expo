@@ -11,7 +11,7 @@ import { ProfileTitleBadge } from './ProfileTitleBadge';
 
 export function SocialProfileCard({ profile, insights, onPress }: { profile: PublicProfile; insights?: SocialProfileInsights; onPress: () => void }) {
   const { theme } = useTheme();
-  const relationship = profile.relationshipStatus === 'partner' ? 'Partner' : profile.relationshipStatus === 'bro' ? 'Bro' : null;
+  const relationship = profile.relationshipStatus === 'partner' ? 'GymCrush' : profile.relationshipStatus === 'bro' ? 'Bro' : null;
   const categories = Object.entries(profile.categories).filter(([key, value]) => key !== 'trainingStyle' && Boolean(value)).map(([, value]) => value).join(' · ');
   const profileTheme = relationship ? getShopTheme(profile.presentationThemeId ?? '') : undefined;
   const connected = Boolean(relationship && profileTheme);

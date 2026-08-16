@@ -55,7 +55,7 @@ describe('plan share recipients', () => {
 
     expect(tree!.root.find((node) => String(node.type) === 'LinearGradient').props.colors).toEqual(['#9FA8DA', '#C5CAE9', '#5C6BC0']);
     expect(tree!.root.find((node) => String(node.type) === 'ProfileAvatar').props.avatarId).toBe('capigirl');
-    expect(tree!.root.findAll((node) => String(node.type) === 'Text').map((node) => node.children.join(''))).toEqual(expect.arrayContaining(['Theme athlete', 'Partner', 'Strength', 'Hypertrophy']));
+    expect(tree!.root.findAll((node) => String(node.type) === 'Text').map((node) => node.children.join(''))).toEqual(expect.arrayContaining(['Theme athlete', 'GymCrush', 'Strength', 'Hypertrophy']));
     expect(tree!.root.find((node) => String(node.type) === 'GlassButton' && node.props.title === 'Enviar a 0 personas').props.disabled).toBe(true);
   });
 

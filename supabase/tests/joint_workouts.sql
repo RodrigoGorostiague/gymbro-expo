@@ -32,7 +32,7 @@ select lives_ok($$select public.respond_joint_workout_invite(current_setting('te
 select set_config('request.jwt.claim.sub', '40000000-0000-0000-0000-000000000003', true);
 select lives_ok($$select public.respond_joint_workout_invite(current_setting('test.joint_id')::uuid, true)$$, 'Partner accepts before action testing');
 select set_config('request.jwt.claim.sub', '40000000-0000-0000-0000-000000000001', true);
-select throws_like($$select public.graph_send_request('40000000-0000-0000-0000-000000000004', 'partner')$$, 'each account can have only one Partner', 'server rejects a second Partner request for an already partnered account');
+select throws_like($$select public.graph_send_request('40000000-0000-0000-0000-000000000004', 'partner')$$, 'GymCrush requires users with different declared sexes', 'server rejects a GymCrush request without compatible declared sexes');
 select is((select count(*)::integer from pg_proc where proname in ('send_joint_workout_action', 'list_joint_workout_actions')), 0, 'joint canned action functions are removed');
 select lives_ok($$select public.update_joint_workout_live_progress(current_setting('test.joint_id')::uuid, 'resting'::public.joint_workout_live_state, 1, 2, 3, 6, 90)$$, 'active participant publishes bounded aggregate live progress');
 select is((select participant.value ->> 'live_state' from jsonb_array_elements(public.list_joint_workouts() -> 0 -> 'participants') participant(value) where participant.value ->> 'id' = '40000000-0000-0000-0000-000000000001'), 'resting', 'live projection includes the participant state without workout detail');

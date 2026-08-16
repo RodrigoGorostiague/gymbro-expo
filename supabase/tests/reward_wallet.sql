@@ -80,8 +80,8 @@ select ok((public.load_reward_wallet() -> 'purchasedThemeIds') ? 'arena', 'new t
 select throws_ok($$select public.purchase_reward_background('unknown')$$, 'unknown background', 'server rejects forged background catalog entries');
 update public.reward_wallets set balance = 0 where owner_id = public.require_actor();
 select throws_ok($$select public.purchase_reward_background('banzai')$$, 'insufficient reward balance', 'background purchase is atomically rejected when unaffordable');
-insert into public.reward_ledger_entries(owner_id, idempotency_key, amount, kind) values (public.require_actor(), 'background-test-credit', 2, 'test');
-update public.reward_wallets set balance = balance + 2 where owner_id = public.require_actor();
+insert into public.reward_ledger_entries(owner_id, idempotency_key, amount, kind) values (public.require_actor(), 'background-test-credit', 250, 'test');
+update public.reward_wallets set balance = balance + 250 where owner_id = public.require_actor();
 select lives_ok($$select public.purchase_reward_background('banzai')$$, 'owned background can be purchased and equipped');
 select is(public.load_reward_wallet() ->> 'equippedBackgroundId', 'banzai', 'background auto-equips independently');
 select throws_ok($$select public.update_reward_background_preferences('sakura')$$, 'background is not owned', 'cannot equip an unowned background');

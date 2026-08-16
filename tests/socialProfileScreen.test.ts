@@ -61,8 +61,8 @@ describe('relationship transition actions', () => {
     social.getSummary.mockResolvedValue({ targetId: 'member-2' });
     let tree: TestRenderer.ReactTestRenderer;
     await act(async () => { tree = TestRenderer.create(React.createElement(PublicProfileScreen)); });
-    expect(buttons(tree!).map((button) => button.props.title)).toEqual(expect.arrayContaining(['Invitar como Bro', 'Invitar como Partner']));
-    await act(async () => { buttons(tree!).find((button) => button.props.title === 'Invitar como Partner')!.props.onPress(); });
+    expect(buttons(tree!).map((button) => button.props.title)).toEqual(expect.arrayContaining(['Invitar como Bro', 'Invitar como GymCrush']));
+    await act(async () => { buttons(tree!).find((button) => button.props.title === 'Invitar como GymCrush')!.props.onPress(); });
     expect(social.command).toHaveBeenCalledWith({ command: 'sendRequest', targetId: 'member-2', relationshipKind: 'partner' });
   });
 
@@ -70,16 +70,16 @@ describe('relationship transition actions', () => {
     social.getSummary.mockResolvedValue({ targetId: 'member-2', incomingRequest: true, requestKind: 'partner' });
     let tree: TestRenderer.ReactTestRenderer;
     await act(async () => { tree = TestRenderer.create(React.createElement(PublicProfileScreen)); });
-    expect(tree!.root.findAll((node) => String(node.type) === 'Text').map((node) => node.children.join(''))).toContain('Solicitud para ser Partner');
-    await act(async () => { buttons(tree!).find((button) => button.props.title === 'Aceptar solicitud de Partner')!.props.onPress(); });
+    expect(tree!.root.findAll((node) => String(node.type) === 'Text').map((node) => node.children.join(''))).toContain('Solicitud para ser GymCrush');
+    await act(async () => { buttons(tree!).find((button) => button.props.title === 'Aceptar solicitud de GymCrush')!.props.onPress(); });
     expect(social.command).toHaveBeenCalledWith({ command: 'respondRequest', targetId: 'member-2', accepted: true });
   });
 
-  test('offers Bro upgrade and confirmed Partner downgrade actions', async () => {
+  test('offers GymCrush upgrade and confirmed downgrade actions', async () => {
     social.getSummary.mockResolvedValueOnce({ targetId: 'member-2', relationshipKind: 'bro' }).mockResolvedValueOnce({ targetId: 'member-2', relationshipKind: 'partner' });
     let tree: TestRenderer.ReactTestRenderer;
     await act(async () => { tree = TestRenderer.create(React.createElement(PublicProfileScreen)); });
-    await act(async () => { buttons(tree!).find((button) => button.props.title === 'Solicitar upgrade a Partner')!.props.onPress(); });
+    await act(async () => { buttons(tree!).find((button) => button.props.title === 'Solicitar GymCrush')!.props.onPress(); });
     expect(social.command).toHaveBeenCalledWith({ command: 'sendRequest', targetId: 'member-2', relationshipKind: 'partner' });
 
     await act(async () => { tree!.unmount(); });
@@ -91,13 +91,13 @@ describe('relationship transition actions', () => {
     expect(social.command).toHaveBeenLastCalledWith({ command: 'downgradePartner', targetId: 'member-2' });
   });
 
-  test('shows the safe Partner transition failure returned by the graph boundary', async () => {
+  test('shows the safe GymCrush transition failure returned by the graph boundary', async () => {
     social.getSummary.mockResolvedValue({ targetId: 'member-2', relationshipKind: 'bro' });
     social.command.mockRejectedValue(new Error('Esta transición de relación no está disponible.'));
     let tree: TestRenderer.ReactTestRenderer;
 
     await act(async () => { tree = TestRenderer.create(React.createElement(PublicProfileScreen)); });
-    await act(async () => { buttons(tree!).find((button) => button.props.title === 'Solicitar upgrade a Partner')!.props.onPress(); });
+    await act(async () => { buttons(tree!).find((button) => button.props.title === 'Solicitar GymCrush')!.props.onPress(); });
 
     expect(alert).toHaveBeenCalledWith('Acción no disponible', 'Esta transición de relación no está disponible.');
   });
@@ -134,7 +134,7 @@ describe('relationship transition actions', () => {
     expect(tree!.root.findAll((node) => String(node.type) === 'GlassCard')).toEqual(expect.arrayContaining([
       expect.objectContaining({ props: expect.objectContaining({ theme: expect.objectContaining({ id: 'sakura' }) }) }),
     ]));
-    expect(buttons(tree!).find((button) => button.props.title === 'Solicitar upgrade a Partner')!.props.theme.id).toBe('sakura');
+    expect(buttons(tree!).find((button) => button.props.title === 'Solicitar GymCrush')!.props.theme.id).toBe('sakura');
   });
 
   test('stretches the hero profile card to the container width', async () => {

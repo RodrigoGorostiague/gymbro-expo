@@ -20,7 +20,7 @@ describe('SocialProfileCard', () => {
     await act(async () => { tree = TestRenderer.create(React.createElement(SocialProfileCard, { profile: { uid: 'member-2', alias: 'Alex', avatarId: 'capigirl', frameId: 'principiante', titleId: 'principiante', categories: { trainingStyle: 'Fuerza' }, presentationThemeId: null, relationshipStatus: 'partner' }, onPress })); });
     const card = tree!.root.find((node) => String(node.type) === 'HapticPressable');
     expect(card.props.accessibilityLabel).toBe('Ver perfil de Alex');
-    expect(tree!.root.findAll((node) => String(node.type) === 'Text').map((node) => node.children.join(''))).toEqual(expect.arrayContaining(['Alex', 'Partner']));
+    expect(tree!.root.findAll((node) => String(node.type) === 'Text').map((node) => node.children.join(''))).toEqual(expect.arrayContaining(['Alex', 'GymCrush']));
     expect(tree!.root.find((node) => node.props.accessibilityLabel === 'Título Forjando Base')).toBeDefined();
     await act(async () => { card.props.onPress(); });
     expect(onPress).toHaveBeenCalledOnce();

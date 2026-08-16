@@ -22,8 +22,8 @@ select is(
   array['Principiante', 'Intermedio', 'Avanzado', 'GymBro', 'GymRat', 'G-Boom', 'Alfa', 'Sigma'],
   'rank labels use all requested level boundaries'
 );
-select is(public.profile_frame_unlock_level('alfa-user'), 70, 'Alfa User frame remains locked until level 70');
-select is(public.profile_title_unlock_level('alfa-user'), 70, 'Alfa User title remains locked until level 70');
+select is(public.profile_frame_unlock_level('alfa-user'), 1, 'Alfa User frame is globally unlocked during alpha');
+select is(public.profile_title_unlock_level('alfa-user'), 1, 'Alfa User title is globally unlocked during alpha');
 
 set local role authenticated;
 select set_config('request.jwt.claim.sub', '50000000-0000-0000-0000-000000000001', true);
