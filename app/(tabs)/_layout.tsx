@@ -1,11 +1,12 @@
 import React, { useEffect, useState } from 'react';
-import { Tabs, Redirect, router } from 'expo-router';
+import { Tabs, Redirect, router, useSegments } from 'expo-router';
 import { Alert, Platform, Pressable, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { BlurView } from 'expo-blur';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import Svg, { Circle } from 'react-native-svg';
+import Animated, { Easing, interpolate, useAnimatedStyle, useSharedValue, withRepeat, withTiming } from 'react-native-reanimated';
 import { ThemePreviewBar } from '../../components/ThemePreviewBar';
 import { useAuth } from '../../context/AuthContext';
 import { useTheme } from '../../context/ThemeContext';
@@ -13,6 +14,7 @@ import { useSocial } from '../../context/SocialContext';
 import { getCommunityBadgeCounts } from '../../services/communityBadge';
 import { useData } from '../../context/DataContext';
 import { hasActiveWorkoutReentryIntegrity } from '../../utils/activeWorkoutReentry';
+import { deriveMesocycleDayGuidance } from '../../utils/mesocycles';
 
 type TabIconName = keyof typeof Ionicons.glyphMap;
 
@@ -67,20 +69,61 @@ function TabBarBackground() {
 function ActiveWorkoutTabButton() {
   const { theme } = useTheme();
   const { activeWorkoutDraft, routines, mesocycles, cancelActiveWorkout } = useData();
+  const segments = useSegments();
   const resumableDraft = hasActiveWorkoutReentryIntegrity(activeWorkoutDraft, routines, mesocycles);
+  const activeMesocycle = mesocycles.find((mesocycle) => mesocycle.status === 'active');
+  const dayGuidance = activeMesocycle ? deriveMesocycleDayGuidance(activeMesocycle) : null;
+  const plannedRoutine = dayGuidance?.state === 'routine' && routines.some((routine) => routine.id === dayGuidance.ref.routineId)
+    ? dayGuidance
+    : null;
+  const onTrainTab = segments.at(-1) === 'train';
+  const dailyRoutinePulse = useSharedValue(0);
+
+  useEffect(() => {
+    dailyRoutinePulse.value = plannedRoutine && !resumableDraft
+      ? withRepeat(withTiming(1, { duration: 900, easing: Easing.inOut(Easing.sin) }), -1, true)
+      : withTiming(0, { duration: 180 });
+  }, [dailyRoutinePulse, plannedRoutine, resumableDraft]);
+
+  const dailyRoutinePulseStyle = useAnimatedStyle(() => ({
+    opacity: interpolate(dailyRoutinePulse.value, [0, 1], [0.4, 1]),
+    transform: [{ scale: interpolate(dailyRoutinePulse.value, [0, 1], [1, 1.14]) }],
+  }));
+
   const continueActiveWorkout = () => {
-    if (!resumableDraft) {
+    if (resumableDraft) {
+      const params: Record<string, string> = { id: activeWorkoutDraft!.routineId };
+      if (activeWorkoutDraft!.jointWorkoutId) params.jointWorkoutId = activeWorkoutDraft!.jointWorkoutId;
+      if (activeWorkoutDraft!.lineage) {
+        params.mesocycleId = activeWorkoutDraft!.lineage.mesocycleId;
+        params.weekNumber = String(activeWorkoutDraft!.lineage.weekNumber);
+        params.plannedSessionId = activeWorkoutDraft!.lineage.plannedSessionId;
+      }
+      router.navigate({ pathname: '/routine/execute/[id]', params });
+      return;
+    }
+
+    if (!onTrainTab) {
       router.navigate('/train');
       return;
     }
-    const params: Record<string, string> = { id: activeWorkoutDraft!.routineId };
-    if (activeWorkoutDraft!.jointWorkoutId) params.jointWorkoutId = activeWorkoutDraft!.jointWorkoutId;
-    if (activeWorkoutDraft!.lineage) {
-      params.mesocycleId = activeWorkoutDraft!.lineage.mesocycleId;
-      params.weekNumber = String(activeWorkoutDraft!.lineage.weekNumber);
-      params.plannedSessionId = activeWorkoutDraft!.lineage.plannedSessionId;
+
+    if (plannedRoutine && activeMesocycle) {
+      router.navigate({
+        pathname: '/routine/execute/[id]',
+        params: {
+          id: plannedRoutine.ref.routineId,
+          mesocycleId: activeMesocycle.id,
+          weekNumber: String(plannedRoutine.weekNumber),
+          plannedSessionId: plannedRoutine.entryId,
+        },
+      });
+      return;
     }
-    router.navigate({ pathname: '/routine/execute/[id]', params });
+
+    if (dayGuidance?.state === 'rest') {
+      Alert.alert('Día de descanso', 'Hoy toca descanso. Recuperá energía para tu próxima sesión.');
+    }
   };
   const openMenu = () => {
     if (!resumableDraft || !activeWorkoutDraft) return;
@@ -111,11 +154,12 @@ function ActiveWorkoutTabButton() {
   return (
     <Pressable
       accessibilityRole="button"
-      accessibilityLabel={active ? `Entrenamiento activo: ${activeWorkoutDraft?.routineSnapshot?.name ?? 'sesión en curso'}, ${completedSets} de ${sets.length} series completadas. Tocá para continuar.` : 'Entrenar'}
+      accessibilityLabel={active ? `Entrenamiento activo: ${activeWorkoutDraft?.routineSnapshot?.name ?? 'sesión en curso'}, ${completedSets} de ${sets.length} series completadas. Tocá para continuar.` : plannedRoutine ? `Rutina de hoy: ${plannedRoutine.ref.routineName}. Tocá para entrenar.` : 'Entrenar'}
       onPress={continueActiveWorkout}
       onLongPress={openMenu}
       style={({ pressed }) => [styles.workoutTabButton, { opacity: pressed ? 0.82 : 1 }]}
     >
+      {!active && plannedRoutine ? <Animated.View pointerEvents="none" style={[styles.dailyRoutinePulse, { borderColor: theme.onPrimary }, dailyRoutinePulseStyle]} /> : null}
       <LinearGradient colors={active ? [theme.accent, theme.primary] : [theme.primary, theme.accent]} style={styles.workoutTabGradient}>
         {active ? <Svg pointerEvents="none" width={ringSize} height={ringSize} style={styles.workoutActivityRing}>
           <Circle
@@ -140,9 +184,10 @@ function ActiveWorkoutTabButton() {
             strokeWidth={ringStroke}
           />
         </Svg> : null}
-        <Ionicons name={active ? 'play' : 'barbell'} size={25} color={theme.onPrimary} />
+        <Ionicons name={active || plannedRoutine ? 'play' : 'barbell'} size={25} color={theme.onPrimary} />
       </LinearGradient>
-      <Text style={[styles.workoutTabLabel, { color: active ? theme.accent : theme.textMuted }]}>{active ? `${completedSets}/${sets.length}` : 'Entrenar'}</Text>
+      <Text style={[styles.workoutTabLabel, { color: active || plannedRoutine ? theme.accent : theme.textMuted }]}>{active ? `${completedSets}/${sets.length}` : plannedRoutine ? 'HOY' : 'Entrenar'}</Text>
+      {plannedRoutine && !active ? <Text numberOfLines={1} style={[styles.workoutRoutineName, { color: theme.textMuted }]}>{plannedRoutine.ref.routineName}</Text> : null}
     </Pressable>
   );
 }
@@ -275,7 +320,8 @@ const styles = StyleSheet.create({
   workoutTabButton: {
     alignItems: 'center',
     justifyContent: 'flex-start',
-    marginTop: -26,
+    marginTop: -30,
+    position: 'relative',
     width: 76,
   },
   workoutTabGradient: {
@@ -291,10 +337,24 @@ const styles = StyleSheet.create({
   workoutActivityRing: {
     position: 'absolute',
   },
+  dailyRoutinePulse: {
+    borderRadius: 35,
+    borderWidth: 2,
+    height: 70,
+    position: 'absolute',
+    top: -4,
+    width: 70,
+  },
   workoutTabLabel: {
     fontSize: 10,
     fontWeight: '900',
     letterSpacing: 0.2,
     marginTop: 3,
+  },
+  workoutRoutineName: {
+    fontSize: 9,
+    fontWeight: '700',
+    marginTop: 1,
+    maxWidth: 76,
   },
 });

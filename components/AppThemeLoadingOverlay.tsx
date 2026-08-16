@@ -2,6 +2,7 @@ import React, { useEffect } from 'react';
 import { Image, StyleSheet, View } from 'react-native';
 import Animated, { Easing, useAnimatedStyle, useSharedValue, withRepeat, withTiming } from 'react-native-reanimated';
 import { useAuth } from '../context/AuthContext';
+import { useData } from '../context/DataContext';
 import { useShop } from '../context/ShopContext';
 import { useTheme } from '../context/ThemeContext';
 
@@ -9,7 +10,8 @@ const gymbroIcon = process.env.NODE_ENV === 'test' ? 0 : require('../assets/gymb
 
 export function AppThemeLoadingOverlay() {
   const { user } = useAuth();
-  const { isInitialLoading } = useShop();
+  const { hydratedUserId: dataHydratedUserId } = useData();
+  const { hydratedUserId: shopHydratedUserId } = useShop();
   const { theme } = useTheme();
   const rotation = useSharedValue(0);
 
@@ -21,7 +23,7 @@ export function AppThemeLoadingOverlay() {
     transform: [{ perspective: 900 }, { rotateY: `${rotation.value}deg` }],
   }));
 
-  if (!user || !isInitialLoading) return null;
+  if (!user || (dataHydratedUserId === user && shopHydratedUserId === user)) return null;
 
   return (
     <View

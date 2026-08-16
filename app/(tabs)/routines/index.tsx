@@ -1,4 +1,4 @@
-import React, { useEffect } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   Alert,
   FlatList,
@@ -8,6 +8,7 @@ import {
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { router } from 'expo-router';
+import Ionicons from '@expo/vector-icons/Ionicons';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { AppScreenHeader } from '../../../components/AppScreenHeader';
 import { GlassCard, ThemeBackground } from '../../../components/GlassCard';
@@ -19,11 +20,19 @@ import { useData } from '../../../context/DataContext';
 import { useTheme } from '../../../context/ThemeContext';
 import { matchesActiveWorkout } from '../../../utils/activeWorkoutReentry';
 import { muscleGroupLabel } from '../../../utils/catalogMuscleGroups';
+import { groupRoutinesForLibrary, RoutineLibrarySection } from '../../../utils/routineLibrary';
+
+const sectionCopy: Record<RoutineLibrarySection, string> = {
+  owned: 'Mis rutinas',
+  shared: 'Compartidas conmigo',
+};
 
 export default function RoutinesScreen({ navigation }: { navigation?: React.ReactNode }) {
   const { theme } = useTheme();
   const { user, welcomeMessage, setWelcomeMessage } = useAuth();
   const { routines, deleteRoutine, activeWorkoutDraft, catalogMuscleGroups = [] } = useData();
+  const [sharedExpanded, setSharedExpanded] = useState(false);
+  const sections = groupRoutinesForLibrary(routines).filter((section) => section.items.length > 0);
 
   useEffect(() => {
     if (user === 'brisas' && welcomeMessage) {
@@ -49,6 +58,50 @@ export default function RoutinesScreen({ navigation }: { navigation?: React.Reac
       },
     ]);
   };
+
+  const renderRoutine = (item: typeof routines[number]) => (
+    <GlassCard key={item.id} style={styles.card}>
+      <HapticPressable
+        accessibilityLabel={`Ver rutina ${item.name}`}
+        accessibilityRole="button"
+        onPress={() => router.push(`/routine/${item.id}`)}
+      >
+        <View style={styles.cardHeader}>
+          <View style={[styles.folderIcon, { backgroundColor: theme.primary }]}>
+            <Text style={styles.folderEmoji}>📁</Text>
+          </View>
+          <View style={styles.cardInfo}>
+            <Text style={[styles.cardTitle, { color: theme.text }]} numberOfLines={1}>
+              {item.name}
+            </Text>
+            <Text style={[styles.cardMeta, { color: theme.textMuted }]}>
+              {item.exercises.length} ejercicio
+              {item.exercises.length !== 1 ? 's' : ''}
+            </Text>
+            {item.muscleGroups.length > 0 ? (
+              <View style={styles.muscleGroupRow}>
+                {item.muscleGroups.map((group) => (
+                  <View key={`${item.id}-${group}`} style={[styles.muscleGroupChip, { backgroundColor: theme.glass, borderColor: theme.glassBorder }]}>
+                    <Text style={[styles.muscleGroupChipText, { color: theme.text }]}>{muscleGroupLabel(catalogMuscleGroups, group)}</Text>
+                  </View>
+                ))}
+              </View>
+            ) : null}
+          </View>
+        </View>
+      </HapticPressable>
+      <View style={styles.cardActions}>
+        <HapticPressable accessibilityLabel={`${matchesActiveWorkout(activeWorkoutDraft, { owner: user, routineId: item.id }) ? 'Continuar' : 'Entrenar'} ${item.name}`} onPress={() => router.push(`/routine/execute/${item.id}`)} style={styles.actionWrap}>
+          <LinearGradient colors={[theme.primary, theme.accent]} start={{ x: 0, y: 0.5 }} end={{ x: 1, y: 0.5 }} style={styles.actionBtn}>
+            <Text style={styles.actionText}>▶ {matchesActiveWorkout(activeWorkoutDraft, { owner: user, routineId: item.id }) ? 'Continuar' : 'Entrenar'}</Text>
+          </LinearGradient>
+        </HapticPressable>
+        <HapticPressable accessibilityLabel={`Eliminar ${item.name}`} style={[styles.actionBtnOutline, { borderColor: theme.glassBorder }]} onPress={() => handleDelete(item.id, item.name)}>
+          <Text style={{ color: theme.textMuted }}>🗑</Text>
+        </HapticPressable>
+      </View>
+    </GlassCard>
+  );
 
   return (
     <ThemeBackground>
@@ -76,71 +129,16 @@ export default function RoutinesScreen({ navigation }: { navigation?: React.Reac
           </GlassCard>
         ) : (
           <FlatList
-            data={routines}
-            keyExtractor={(item) => item.id}
+            data={sections}
+            keyExtractor={(section) => section.key}
             contentContainerStyle={styles.list}
-            renderItem={({ item }) => (
-              <HapticPressable onPress={() => router.push(`/routine/${item.id}`)}>
-                <GlassCard style={styles.card}>
-                  <View style={styles.cardHeader}>
-                    <View style={[styles.folderIcon, { backgroundColor: theme.primary }]}>
-                      <Text style={styles.folderEmoji}>📁</Text>
-                    </View>
-                    <View style={styles.cardInfo}>
-                      <Text style={[styles.cardTitle, { color: theme.text }]} numberOfLines={1}>
-                        {item.name}
-                      </Text>
-                      <Text style={[styles.cardMeta, { color: theme.textMuted }]}> 
-                        {item.exercises.length} ejercicio
-                        {item.exercises.length !== 1 ? 's' : ''}
-                      </Text>
-                      {item.muscleGroups.length > 0 ? (
-                        <View style={styles.muscleGroupRow}>
-                          {item.muscleGroups.map((group) => (
-                            <View
-                              key={`${item.id}-${group}`}
-                              style={[
-                                styles.muscleGroupChip,
-                                {
-                                  backgroundColor: theme.glass,
-                                  borderColor: theme.glassBorder,
-                                },
-                              ]}
-                            >
-                              <Text style={[styles.muscleGroupChipText, { color: theme.text }]}> 
-                                 {muscleGroupLabel(catalogMuscleGroups, group)}
-                              </Text>
-                            </View>
-                          ))}
-                        </View>
-                      ) : null}
-                    </View>
-                  </View>
-                  <View style={styles.cardActions}>
-                    <HapticPressable
-                      accessibilityLabel={`${matchesActiveWorkout(activeWorkoutDraft, { owner: user, routineId: item.id }) ? 'Continuar' : 'Entrenar'} ${item.name}`}
-                      onPress={() => router.push(`/routine/execute/${item.id}`)}
-                      style={styles.actionWrap}
-                    >
-                      <LinearGradient
-                        colors={[theme.primary, theme.accent]}
-                        start={{ x: 0, y: 0.5 }}
-                        end={{ x: 1, y: 0.5 }}
-                        style={styles.actionBtn}
-                      >
-                        <Text style={styles.actionText}>▶ {matchesActiveWorkout(activeWorkoutDraft, { owner: user, routineId: item.id }) ? 'Continuar' : 'Entrenar'}</Text>
-                      </LinearGradient>
-                    </HapticPressable>
-                    <HapticPressable
-                      style={[styles.actionBtnOutline, { borderColor: theme.glassBorder }]}
-                      onPress={() => handleDelete(item.id, item.name)}
-                    >
-                      <Text style={{ color: theme.textMuted }}>🗑</Text>
-                    </HapticPressable>
-                  </View>
-                </GlassCard>
-              </HapticPressable>
-            )}
+            renderItem={({ item: section }) => {
+              const expanded = section.key === 'owned' || sharedExpanded;
+              return <View style={styles.section}>
+                {section.key === 'shared' ? <HapticPressable accessibilityRole="button" accessibilityState={{ expanded }} accessibilityLabel={`${expanded ? 'Ocultar' : 'Mostrar'} ${sectionCopy.shared}`} onPress={() => setSharedExpanded((current) => !current)} style={[styles.sectionHeader, { borderColor: theme.glassBorder }]}><View><Text style={[styles.sectionTitle, { color: theme.text }]}>{sectionCopy.shared}</Text><Text style={[styles.sectionCount, { color: theme.textMuted }]}>{section.items.length} {section.items.length === 1 ? 'rutina' : 'rutinas'}</Text></View><Ionicons name={expanded ? 'chevron-up' : 'chevron-down'} size={21} color={theme.primary} /></HapticPressable> : <View style={[styles.sectionHeader, { borderColor: theme.glassBorder }]}><View><Text style={[styles.sectionTitle, { color: theme.text }]}>{sectionCopy.owned}</Text><Text style={[styles.sectionCount, { color: theme.textMuted }]}>{section.items.length} {section.items.length === 1 ? 'rutina' : 'rutinas'}</Text></View></View>}
+                {expanded ? <View style={styles.sectionItems}>{section.items.map(renderRoutine)}</View> : null}
+              </View>;
+            }}
           />
         )}
       </SafeAreaView>
@@ -156,6 +154,28 @@ const styles = StyleSheet.create({
   },
   list: {
     paddingBottom: 24,
+    gap: 16,
+  },
+  section: {
+    gap: 12,
+  },
+  sectionHeader: {
+    alignItems: 'center',
+    borderBottomWidth: 1,
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    paddingBottom: 10,
+  },
+  sectionTitle: {
+    fontSize: 16,
+    fontWeight: '900',
+  },
+  sectionCount: {
+    fontSize: 12,
+    fontWeight: '700',
+    marginTop: 2,
+  },
+  sectionItems: {
     gap: 12,
   },
   card: {

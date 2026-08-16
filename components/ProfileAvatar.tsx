@@ -1,9 +1,12 @@
 import React from 'react';
-import { Image, StyleSheet, View } from 'react-native';
+import { StyleSheet, View } from 'react-native';
+import { Image } from 'expo-image';
 import { AVATARS, AvatarId, avatarIdOrDefault } from '../constants/avatars';
 import { ProfileFrameId, profileFrameIdOrDefault } from '../constants/profileFrames';
-import { AVATAR_ASSETS } from './avatarAssets';
 import { ProfileFrameOverlay } from './ProfileFrameOverlay';
+import { useCosmeticAsset } from '../services/cosmetics';
+
+const fallbackAvatar = require('../assets/capybara-athlete.png');
 
 interface ProfileAvatarProps {
   avatarId?: AvatarId | string | null;
@@ -16,6 +19,7 @@ interface ProfileAvatarProps {
 
 export function ProfileAvatar({ avatarId, size = 44, borderColor = 'rgba(255,255,255,0.28)', frameId, level, frameLocked = false }: ProfileAvatarProps) {
   const resolvedAvatarId = avatarIdOrDefault(avatarId);
+  const source = useCosmeticAsset('avatars', resolvedAvatarId) ?? fallbackAvatar;
 
   return (
     <View
@@ -23,7 +27,7 @@ export function ProfileAvatar({ avatarId, size = 44, borderColor = 'rgba(255,255
       style={[styles.container, { width: size, height: size }]}
     >
       <View style={[styles.wrap, { borderRadius: size / 2, borderColor }]}>
-        <Image source={AVATAR_ASSETS[resolvedAvatarId]} resizeMode="cover" style={styles.image} />
+        <Image cachePolicy="disk" contentFit="cover" source={source} style={styles.image} />
       </View>
       {frameId ? <ProfileFrameOverlay frameId={profileFrameIdOrDefault(frameId)} level={level} size={size} locked={frameLocked} /> : null}
     </View>

@@ -1,1 +1,1 @@
-export const CURRENT_RELEASE = { version: '0.6.0', sequence: 8 } as const;
+export const CURRENT_RELEASE = { version: '0.7.0', sequence: 9 } as const;

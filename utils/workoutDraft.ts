@@ -68,6 +68,31 @@ export function moveWorkoutExercise(routine: Routine, from: number, to: number):
   return { ...routine, exercises };
 }
 
+/** Accepts current completion keys plus older snapshots that stored completion on the set. */
+export function hasCompletedSessionExerciseSet(exercise: RoutineExercise, completedSets: Readonly<Record<string, boolean>>): boolean {
+  return exercise.sets.some((set) => completedSets[`${exercise.id}-${set.id}`] === true
+    || completedSets[`${exercise.id}:${set.id}`] === true
+    || set.completed === true);
+}
+
+export function removeSessionExercise(routine: Routine, exerciseId: string): Routine {
+  if (!routine.exercises.some((exercise) => exercise.id === exerciseId)) return routine;
+  return { ...routine, exercises: routine.exercises.filter((exercise) => exercise.id !== exerciseId) };
+}
+
+/** Rebuilds completion state from the session prescription to discard removed-set keys. */
+export function reconcileSessionCompletedSets(routine: Routine, current: Readonly<Record<string, boolean>>): Record<string, boolean> {
+  const completed: Record<string, boolean> = {};
+  for (const exercise of routine.exercises) {
+    for (const set of exercise.sets) {
+      const key = `${exercise.id}-${set.id}`;
+      if (hasCompletedSessionExerciseSet({ ...exercise, sets: [set] }, current)) completed[key] = true;
+      else if (current[key] === false || current[`${exercise.id}:${set.id}`] === false) completed[key] = false;
+    }
+  }
+  return completed;
+}
+
 export function createSessionExercise(exercise: Exercise, definitions: readonly ExerciseDefinition[], nextId: IdFactory): RoutineExercise {
   const definition = definitions.find((candidate) => candidate.id === exercise.id);
   const sourceSets = exercise.defaultSets.length ? exercise.defaultSets : [{ id: 'default', tipo: 1 as const, weight: 0, reps: 8 }];

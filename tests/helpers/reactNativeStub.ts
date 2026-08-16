@@ -29,6 +29,7 @@ export const Easing = { linear: (value: number) => value };
 const appStateListeners = new Set<(state: string) => void>();
 const hardwareBackListeners = new Set<() => boolean>();
 export const AppState = {
+  currentState: 'active',
   addEventListener: vi.fn((_event: 'change', listener: (state: string) => void) => {
     appStateListeners.add(listener);
     return { remove: () => appStateListeners.delete(listener) };

@@ -23,6 +23,18 @@ export interface MesocycleAnalyticsInput {
   durationWeeks: number;
 }
 
+export type MesocycleListSection = 'active' | 'shared' | 'draft' | 'completed' | 'archived';
+
+export interface MesocycleListInput extends MesocycleAnalyticsInput {
+  createdAt: string;
+  sharedFrom?: { acceptedAt?: string };
+}
+
+export interface MesocycleListGroup<T> {
+  key: MesocycleListSection;
+  items: T[];
+}
+
 const TERMINAL_STATUSES: readonly SupportedMesocycleStatus[] = ['completed', 'cancelled', 'archived'];
 
 const STATUS_COPY: Readonly<Record<SupportedMesocycleStatus, MesocycleStatusCopy>> = {
@@ -140,6 +152,41 @@ export function sortMesocyclesActiveFirst<T extends Pick<MesocycleAnalyticsInput
       return priority || left.index - right.index;
     })
     .map(({ mesocycle }) => mesocycle);
+}
+
+function compareDatesDescending(left: string | undefined, right: string | undefined): number {
+  return (right ?? '').localeCompare(left ?? '');
+}
+
+function dateForHistoricalSort(mesocycle: MesocycleListInput): string {
+  return deriveMesocycleDateRange(mesocycle)?.endDate ?? mesocycle.startDate ?? mesocycle.createdAt;
+}
+
+function activeTemporalPriority(mesocycle: MesocycleListInput): number {
+  const temporal = deriveMesocycleTemporalLabel(mesocycle);
+  return temporal === 'in-progress' ? 0 : temporal === 'upcoming' ? 1 : temporal === 'undated' ? 2 : 3;
+}
+
+/** Groups the library in the order presented by the mesocycle screen. */
+export function groupMesocyclesForList<T extends MesocycleListInput>(mesocycles: readonly T[]): MesocycleListGroup<T>[] {
+  const active = mesocycles.filter((mesocycle) => mesocycle.status === 'active' && !mesocycle.sharedFrom)
+    .sort((left, right) => activeTemporalPriority(left) - activeTemporalPriority(right)
+      || (left.startDate ?? '').localeCompare(right.startDate ?? '')
+      || compareDatesDescending(left.createdAt, right.createdAt));
+  const shared = mesocycles.filter((mesocycle) => !!mesocycle.sharedFrom)
+    .sort((left, right) => compareDatesDescending(left.sharedFrom?.acceptedAt ?? left.createdAt, right.sharedFrom?.acceptedAt ?? right.createdAt));
+  const historical = (status: MesocycleStatus) => mesocycles
+    .filter((mesocycle) => mesocycle.status === status && !mesocycle.sharedFrom)
+    .sort((left, right) => compareDatesDescending(dateForHistoricalSort(left), dateForHistoricalSort(right))
+      || compareDatesDescending(left.createdAt, right.createdAt));
+
+  return [
+    { key: 'active', items: active },
+    { key: 'shared', items: shared },
+    { key: 'draft', items: historical('draft').sort((left, right) => compareDatesDescending(left.createdAt, right.createdAt)) },
+    { key: 'completed', items: historical('completed') },
+    { key: 'archived', items: historical('archived') },
+  ];
 }
 
 export function getMesocycleStatusCopy(status: SupportedMesocycleStatus): MesocycleStatusCopy {

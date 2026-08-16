@@ -2,6 +2,7 @@ import React, { createContext, useContext, useEffect, useMemo, useRef, useState 
 import { ActiveWorkoutDraft, CatalogImportPlan, CatalogImportResult, ExperienceProgress, Exercise, ExerciseDefinition, ExerciseVariant, Mesocycle, MuscleGroup, PlannedSessionRef, Routine, UserProfile, WorkoutAttempt, WorkoutSession } from '../types';
 import { CatalogMuscleGroup, CatalogParticipationMode, filterCatalogExercises, loadCatalogExercises, loadCatalogMuscleGroups } from '../services/catalog';
 import { loadTrainingLibrary, saveTrainingLibrary, saveTrainingMesocycles, saveTrainingRoutines } from '../services/trainingLibrary';
+import { completeMesocycleWhenAllSessionsComplete } from '../utils/mesocycles';
 import {
   generateId,
   readLegacyCustomDefinitions,
@@ -19,6 +20,18 @@ import { useAuth } from './AuthContext';
 type PersistedWorkoutSession = WorkoutSession & { owner: UserProfile };
 
 const ACTIVE_WORKOUT_SAVE_TIMEOUT_MS = 12_000;
+const ACTIVE_WORKOUT_SAVE_DEBOUNCE_MS = 750;
+
+type ActiveWorkoutSaveOptions = {
+  defer?: boolean;
+};
+
+type DeferredActiveWorkoutSave = {
+  draft: ActiveWorkoutDraft;
+  version: number;
+  timer: ReturnType<typeof setTimeout>;
+  waiters: Array<{ resolve: () => void; reject: (reason: unknown) => void }>;
+};
 
 interface DataContextValue {
   exercises: Exercise[];
@@ -32,6 +45,7 @@ interface DataContextValue {
   attempts: WorkoutAttempt[];
   quarantinedSessionCount: number;
   isLoading: boolean;
+  hydratedUserId: string | null;
   dataState: 'loading' | 'ready' | 'error';
   dataError: string | null;
   retryData: () => void;
@@ -64,7 +78,7 @@ interface DataContextValue {
   activeWorkoutDraft: ActiveWorkoutDraft | null;
   cancelActiveWorkout: () => Promise<void>;
   startActiveWorkout: (draft: ActiveWorkoutDraft) => Promise<void>;
-  updateActiveWorkout: (draft: ActiveWorkoutDraft) => Promise<void>;
+  updateActiveWorkout: (draft: ActiveWorkoutDraft, options?: ActiveWorkoutSaveOptions) => Promise<void>;
   clearActiveWorkoutIfMatches: (target: WorkoutLaunchTarget) => Promise<void>;
   refreshActiveWorkoutTiming: () => Promise<void>;
 }
@@ -104,6 +118,7 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
   activeWorkoutDraftRef.current = activeWorkoutDraft;
   const activeWorkoutMutationQueueRef = useRef<Promise<void>>(Promise.resolve());
   const activeWorkoutMutationVersionRef = useRef(0);
+  const deferredActiveWorkoutSaveRef = useRef<DeferredActiveWorkoutSave | null>(null);
   const [quarantinedSessionCount, setQuarantinedSessionCount] = useState(0);
   const mesocyclesRef = useRef<Mesocycle[]>([]);
   const sessionsRef = useRef<PersistedWorkoutSession[]>([]);
@@ -116,6 +131,7 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
   const sessionMutationQueueRef = useRef<Promise<void>>(Promise.resolve());
   const trainingLibraryMutationQueueRef = useRef<Promise<void>>(Promise.resolve());
   const [isLoading, setIsLoading] = useState(true);
+  const [hydratedUserId, setHydratedUserId] = useState<string | null>(null);
   const [dataState, setDataState] = useState<'loading' | 'ready' | 'error'>('loading');
   const [dataError, setDataError] = useState<string | null>(null);
   const [reloadToken, setReloadToken] = useState(0);
@@ -137,6 +153,7 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
       setActiveWorkoutDraft(null);
       setQuarantinedSessionCount(0);
       setIsLoading(false);
+      setHydratedUserId(null);
       setDataState('ready');
       setDataError(null);
       return;
@@ -159,8 +176,8 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
           loadCatalogMuscleGroups(),
           loadExperienceProgress(),
         ]);
-      const training = trainingLibrary;
       if (!active) return;
+      const training = trainingLibrary;
       const activeDraft = hasActiveWorkoutReentryIntegrity(state.activeWorkoutDraft, training.routines, training.mesocycles)
         ? state.activeWorkoutDraft
         : null;
@@ -192,12 +209,14 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
       }
       setQuarantinedSessionCount(0);
       setIsLoading(false);
+      setHydratedUserId(user);
       setDataState('ready');
       setDataError(null);
     });
     operation.catch((error) => {
       if (!active) return;
       setIsLoading(false);
+      setHydratedUserId(user);
       setDataState('error');
       setDataError(error instanceof Error ? error.message : 'No se pudieron cargar los datos de entrenamiento.');
     });
@@ -237,21 +256,81 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
     activeWorkoutMutationQueueRef.current = operation.then(() => undefined, () => undefined);
     return operation;
   };
-  const updateActiveWorkout = async (draft: ActiveWorkoutDraft) => {
+  const settleDeferredActiveWorkoutSave = (
+    waiters: DeferredActiveWorkoutSave['waiters'],
+    operation: Promise<void>,
+  ) => {
+    void operation.then(
+      () => waiters.forEach(({ resolve }) => resolve()),
+      (error) => waiters.forEach(({ reject }) => reject(error)),
+    );
+    return operation;
+  };
+  const flushDeferredActiveWorkoutSave = () => {
+    const pending = deferredActiveWorkoutSaveRef.current;
+    if (!pending) return null;
+    clearTimeout(pending.timer);
+    deferredActiveWorkoutSaveRef.current = null;
+    return settleDeferredActiveWorkoutSave(
+      pending.waiters,
+      enqueueActiveWorkoutSave(pending.draft, pending.version),
+    );
+  };
+  const discardDeferredActiveWorkoutSave = () => {
+    const pending = deferredActiveWorkoutSaveRef.current;
+    if (!pending) return;
+    clearTimeout(pending.timer);
+    deferredActiveWorkoutSaveRef.current = null;
+    pending.waiters.forEach(({ resolve }) => resolve());
+  };
+  const scheduleActiveWorkoutSave = (draft: ActiveWorkoutDraft, version: number) => new Promise<void>((resolve, reject) => {
+    const pending = deferredActiveWorkoutSaveRef.current;
+    if (pending) {
+      clearTimeout(pending.timer);
+      pending.draft = draft;
+      pending.version = version;
+      pending.waiters.push({ resolve, reject });
+      pending.timer = setTimeout(() => {
+        void flushDeferredActiveWorkoutSave();
+      }, ACTIVE_WORKOUT_SAVE_DEBOUNCE_MS);
+      return;
+    }
+    const next: DeferredActiveWorkoutSave = {
+      draft,
+      version,
+      waiters: [{ resolve, reject }],
+      timer: setTimeout(() => {
+        void flushDeferredActiveWorkoutSave();
+      }, ACTIVE_WORKOUT_SAVE_DEBOUNCE_MS),
+    };
+    deferredActiveWorkoutSaveRef.current = next;
+  });
+  const updateActiveWorkout = async (draft: ActiveWorkoutDraft, options: ActiveWorkoutSaveOptions = {}) => {
     const current = activeWorkoutDraftRef.current;
     if (!current || draft.owner !== current.owner || draft.attemptId !== current.attemptId) throw new Error('El borrador activo no coincide.');
-    // Publish immediately so rapid set completions compose from the latest rest end,
-    // then persist drafts in the same order to prevent an older timer from winning.
+    // Publish immediately so the execution UI never waits for a remote draft write.
     activeWorkoutDraftRef.current = draft;
     setActiveWorkoutDraft(draft);
-    await enqueueActiveWorkoutSave(draft, ++activeWorkoutMutationVersionRef.current);
+    const version = ++activeWorkoutMutationVersionRef.current;
+    if (options.defer) return scheduleActiveWorkoutSave(draft, version);
+    const pending = deferredActiveWorkoutSaveRef.current;
+    if (pending) {
+      clearTimeout(pending.timer);
+      deferredActiveWorkoutSaveRef.current = null;
+      return settleDeferredActiveWorkoutSave(
+        pending.waiters,
+        enqueueActiveWorkoutSave(draft, version),
+      );
+    }
+    await enqueueActiveWorkoutSave(draft, version);
   };
-  const cancelActiveWorkout = async () => { const owner = activeUserRef.current; if (!owner) throw new Error('Se requiere autenticación.'); await saveTrainingState({ activeWorkoutDraft: null }); if (activeUserRef.current === owner) { activeWorkoutDraftRef.current = null; setActiveWorkoutDraft(null); } };
+  const cancelActiveWorkout = async () => { const owner = activeUserRef.current; if (!owner) throw new Error('Se requiere autenticación.'); discardDeferredActiveWorkoutSave(); await saveTrainingState({ activeWorkoutDraft: null }); if (activeUserRef.current === owner) { activeWorkoutDraftRef.current = null; setActiveWorkoutDraft(null); } };
   const clearActiveWorkoutIfMatches = async (target: WorkoutLaunchTarget) => {
     const draft = activeWorkoutDraftRef.current;
     if (!matchesActiveWorkout(draft, target)) return;
     const owner = target.owner;
     if (!owner || activeUserRef.current !== owner) return;
+    discardDeferredActiveWorkoutSave();
     activeWorkoutDraftRef.current = null;
     setActiveWorkoutDraft(null);
     try {
@@ -666,10 +745,20 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
     if (existing && JSON.stringify(existing) !== JSON.stringify(attempt)) throw new Error('La identidad del intento ya pertenece a otros datos capturados.');
     const finalized = await finalizeTrainingAttempt(attempt);
     const next = existing ? attempts : [finalized.attempt, ...attempts];
+    const lineage = finalized.attempt.lineage;
+    if (lineage) {
+      await enqueueMesocycleMutation((current) => ({
+        next: current.map((mesocycle) => mesocycle.id === lineage.mesocycleId
+          ? completeMesocycleWhenAllSessionsComplete(mesocycle, next)
+          : mesocycle),
+        result: undefined,
+      }));
+    }
     if (activeUserRef.current === owner) {
       // A timed-out draft save may settle after finalization. Invalidate it and
       // ensure its late reconciliation can only persist the cleared draft.
       activeWorkoutMutationVersionRef.current += 1;
+      discardDeferredActiveWorkoutSave();
       activeWorkoutDraftRef.current = null;
       setAttempts(next);
       setActiveWorkoutDraft(null);
@@ -733,6 +822,7 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
         experienceProgress,
         quarantinedSessionCount,
         isLoading,
+        hydratedUserId,
         dataState,
         dataError,
         retryData,

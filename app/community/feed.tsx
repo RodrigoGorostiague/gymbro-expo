@@ -36,7 +36,7 @@ function badgeLabel(count: number): string | null {
   return count > 99 ? '99+' : count > 0 ? String(count) : null;
 }
 
-type JointPost = { id: string; createdAt: string; participants: Array<{ id: string; alias: string; avatarId: string; status: 'invited' | 'active' | 'completed' | 'declined' }> };
+type JointPost = { id: string; createdAt: string; updatedAt: string; participants: Array<{ id: string; alias: string; avatarId: string; status: 'invited' | 'active' | 'completed' | 'declined' }> };
 type FeedItem =
   | { kind: 'recap'; id: string; publishedAt: string; recap: WorkoutRecap }
   | { kind: 'joint'; id: string; publishedAt: string; post: JointPost }
@@ -122,7 +122,7 @@ export default function CommunityFeedScreen() {
 
   const feed: FeedItem[] = [
     ...recaps.map((recap) => ({ kind: 'recap' as const, id: recap.id, publishedAt: recap.createdAt, recap })),
-    ...jointPosts.map((post) => ({ kind: 'joint' as const, id: post.id, publishedAt: post.createdAt, post })),
+    ...jointPosts.map((post) => ({ kind: 'joint' as const, id: post.id, publishedAt: post.updatedAt, post })),
     ...activities.map((activity) => ({ kind: 'milestone' as const, id: activity.id, publishedAt: activity.createdAt, activity })),
     ...startActivities.map((activity) => ({ kind: 'start' as const, id: activity.id, publishedAt: activity.startedAt, activity })),
   ].sort((left, right) => timestamp(right.publishedAt) - timestamp(left.publishedAt) || right.id.localeCompare(left.id));

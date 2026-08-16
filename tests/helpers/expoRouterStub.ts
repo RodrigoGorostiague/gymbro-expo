@@ -3,6 +3,7 @@ import { vi } from 'vitest';
 
 let currentParams: Record<string, unknown> = {};
 let focusCleanups: Array<() => void> = [];
+let currentSegments: string[] = [];
 
 const staticRouteModules = {
   '/mesocycles': 'mesocycles/index',
@@ -35,12 +36,20 @@ export function __setParams(params: Record<string, unknown>) {
   currentParams = params;
 }
 
+export function __setSegments(segments: string[]) {
+  currentSegments = segments;
+}
+
 export function __resolveHref(href: string) {
   return staticRouteModules[href as keyof typeof staticRouteModules] ?? null;
 }
 
 export function useLocalSearchParams() {
   return currentParams;
+}
+
+export function useSegments() {
+  return currentSegments;
 }
 
 export function useFocusEffect(effect: () => void | (() => void)) {

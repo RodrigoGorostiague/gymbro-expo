@@ -258,6 +258,25 @@ export function deriveMesocycleAdherence(mesocycle: Mesocycle, attempts: readonl
   return { plannedSessions: weeks.reduce((n, week) => n + week.plannedSessions, 0), completedSessions: weeks.reduce((n, week) => n + week.completedSessions, 0), weeks };
 }
 
+/** A mesocycle closes only after every planned session reaches the reward-eligible completion threshold. */
+export function completeMesocycleWhenAllSessionsComplete(mesocycle: Mesocycle, attempts: readonly WorkoutAttempt[] = []): Mesocycle {
+  if (mesocycle.status !== 'active') return mesocycle;
+  const { plannedSessions, completedSessions } = deriveMesocycleAdherence(mesocycle, attempts);
+  return plannedSessions > 0 && completedSessions >= plannedSessions
+    ? { ...mesocycle, status: 'completed' }
+    : mesocycle;
+}
+
+/** Explains why a user cannot manually close a plan yet. Server validation remains authoritative. */
+export function mesocycleCompletionBlockReason(mesocycle: Mesocycle, attempts: readonly WorkoutAttempt[] = [], today = new Date()): string | null {
+  const hasFinalizedSession = attempts.some((attempt) => validLineage(attempt) && attempt.lineage.mesocycleId === mesocycle.id);
+  if (!hasFinalizedSession) return 'Completá al menos un entrenamiento del mesociclo antes de cerrarlo.';
+  const hasFutureRoutine = flattenMesocycleEntries(mesocycle).some(({ dayOffset, entry }) => (
+    isRoutine(entry) && deriveScheduleState(mesocycle.startDate, dayOffset, today) === 'upcoming'
+  ));
+  return hasFutureRoutine ? 'No podés cerrar el mesociclo mientras haya entrenamientos programados para fechas futuras.' : null;
+}
+
 export function deriveMesocycleScheduleProjection(
   mesocycle: Mesocycle,
   routines: readonly Routine[] = [],

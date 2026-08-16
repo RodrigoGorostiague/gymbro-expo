@@ -16,6 +16,7 @@ interface ThemeContextValue {
   isCombined: boolean;
   isShopTheme: boolean;
   isPreview: boolean;
+  backgroundId: string | null;
 }
 
 const ThemeContext = createContext<ThemeContextValue | null>(null);
@@ -25,6 +26,8 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
   const {
     equippedThemeId,
     previewThemeId,
+    equippedBackgroundId,
+    previewBackgroundId,
     combineWithPartner,
     partnerEquippedThemeId,
     selfEquippedThemeId,
@@ -58,7 +61,7 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
 
   return (
     <ThemeContext.Provider
-      value={{ theme, dualThemes, isCombined, isShopTheme, isPreview: !!previewThemeId }}
+      value={{ theme, dualThemes, isCombined, isShopTheme, isPreview: !!previewThemeId, backgroundId: previewBackgroundId ?? equippedBackgroundId }}
     >
       {children}
     </ThemeContext.Provider>

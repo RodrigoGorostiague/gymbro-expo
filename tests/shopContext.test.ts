@@ -5,7 +5,7 @@ import { beforeEach, describe, expect, test, vi } from 'vitest';
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
 
 const data = vi.hoisted(() => ({ attempts: [] as any[] }));
-const wallet = vi.hoisted(() => ({ acknowledge: vi.fn(), claim: vi.fn(), claimUpdates: vi.fn(), load: vi.fn(), purchaseFrame: vi.fn() }));
+const wallet = vi.hoisted(() => ({ acknowledge: vi.fn(), claim: vi.fn(), claimUpdates: vi.fn(), load: vi.fn(), purchaseFrame: vi.fn(), purchaseBackground: vi.fn(), updateBackground: vi.fn() }));
 const themeSync = vi.hoisted(() => ({ subscribe: vi.fn(() => () => undefined), sync: vi.fn() }));
 const presentation = vi.hoisted(() => ({ sync: vi.fn(async () => undefined) }));
 
@@ -18,7 +18,9 @@ vi.mock('../services/rewardWallet', () => ({
   loadRewardWallet: wallet.load,
   purchaseRewardTheme: vi.fn(),
   purchaseRewardFrame: wallet.purchaseFrame,
+  purchaseRewardBackground: wallet.purchaseBackground,
   updateRewardWalletPreferences: vi.fn(),
+  updateRewardBackgroundPreferences: wallet.updateBackground,
 }));
 vi.mock('../services/themeSync', () => ({
   subscribeToEquippedThemes: themeSync.subscribe,
@@ -28,7 +30,7 @@ vi.mock('../services/socialGraph', () => ({ syncOwnPresentationTheme: presentati
 
 import { ShopProvider, useShop } from '../context/ShopContext';
 
-const emptyWallet = { balance: 0, purchasedThemeIds: [], purchasedFrameIds: [], purchasedTitleIds: [], equippedThemeId: null, combineWithPartner: false };
+const emptyWallet = { balance: 0, purchasedThemeIds: [], purchasedFrameIds: [], purchasedTitleIds: [], purchasedBackgroundIds: [], equippedThemeId: null, equippedBackgroundId: null, combineWithPartner: false };
 const deferred = <T,>() => {
   let resolve!: (value: T) => void;
   const promise = new Promise<T>((done) => { resolve = done; });
@@ -52,9 +54,9 @@ describe('ShopProvider reward wallet refresh', () => {
 
     await act(async () => { renderer = TestRenderer.create(render()); });
     expect(wallet.claim).toHaveBeenCalledOnce();
-    expect(wallet.claimUpdates).toHaveBeenCalledWith(8);
+    expect(wallet.claimUpdates).toHaveBeenCalledWith(9);
     expect(wallet.load).not.toHaveBeenCalled();
-    expect(current?.isInitialLoading).toBe(false);
+    expect(current?.hydratedUserId).toBe('uid-1');
 
     await act(async () => { renderer.update(render()); });
     expect(wallet.claim).toHaveBeenCalledOnce();
@@ -70,7 +72,7 @@ describe('ShopProvider reward wallet refresh', () => {
     expect(wallet.claimUpdates).toHaveBeenCalledTimes(2);
     expect(wallet.load).not.toHaveBeenCalled();
     expect(current?.gems).toBe(9);
-    expect(current?.isInitialLoading).toBe(false);
+    expect(current?.hydratedUserId).toBe('uid-1');
   });
 
   test('ignores an older wallet response after an attempt-triggered refresh', async () => {
@@ -131,5 +133,19 @@ describe('ShopProvider reward wallet refresh', () => {
 
     expect(wallet.acknowledge).toHaveBeenCalledWith(['0.5.0']);
     expect(current?.releaseUpdates).toEqual([release]);
+  });
+
+  test('purchases and equips backgrounds independently from the selected theme', async () => {
+    wallet.claimUpdates.mockResolvedValueOnce({ claimed: false, wallet: { ...emptyWallet, balance: 3 }, releases: [] });
+    wallet.purchaseBackground.mockResolvedValueOnce({ ...emptyWallet, balance: 2, purchasedBackgroundIds: ['banzai'], equippedBackgroundId: 'banzai' });
+    let current: ReturnType<typeof useShop> | undefined;
+    const Probe = () => { current = useShop(); return null; };
+
+    await act(async () => { TestRenderer.create(React.createElement(ShopProvider, null, React.createElement(Probe))); });
+    await act(async () => { await current?.purchaseBackground('banzai'); });
+
+    expect(wallet.purchaseBackground).toHaveBeenCalledWith('banzai');
+    expect(current?.equippedBackgroundId).toBe('banzai');
+    expect(current?.equippedThemeId).toBeNull();
   });
 });

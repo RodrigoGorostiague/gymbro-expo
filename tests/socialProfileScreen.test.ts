@@ -17,7 +17,7 @@ const alert = vi.hoisted(() => vi.fn());
 vi.mock('react-native', async () => {
   const ReactModule = await import('react');
   const host = (name: string) => ({ children, ...props }: { children?: React.ReactNode } & Record<string, unknown>) => ReactModule.createElement(name, props, children);
-  return { Alert: { alert }, ScrollView: host('ScrollView'), StyleSheet: { create: <T,>(styles: T) => styles }, Text: host('Text'), View: host('View') };
+  return { Alert: { alert }, Platform: { OS: 'ios' }, ScrollView: host('ScrollView'), StyleSheet: { create: <T,>(styles: T) => styles }, Text: host('Text'), View: host('View') };
 });
 vi.mock('expo-router', () => ({ router: { back: vi.fn() }, useFocusEffect: (callback: () => void) => { React.useEffect(callback, [callback]); }, useLocalSearchParams: () => ({ uid: 'member-2' }) }));
 vi.mock('react-native-safe-area-context', async () => {

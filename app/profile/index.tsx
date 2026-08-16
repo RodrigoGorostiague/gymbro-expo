@@ -9,6 +9,7 @@ import { GlassButton, GlassInput } from '../../components/UI';
 import { useSocial } from '../../context/SocialContext';
 import { useShop } from '../../context/ShopContext';
 import { useTheme } from '../../context/ThemeContext';
+import { useBackgroundParallaxPreference } from '../../context/BackgroundParallaxContext';
 import { AVATARS, AvatarId, AvatarSex, avatarIdOrDefault, avatarsForSex, DEFAULT_AVATAR_ID } from '../../constants/avatars';
 import { DEFAULT_PROFILE_FRAME_ID, DEFAULT_PROFILE_TITLE_ID, isProfileFrameUnlocked, isProfileTitleUnlocked, orderProfileFrameIds, orderProfileTitleIds, PROFILE_FRAMES, PROFILE_TITLES, ProfileFrameId, ProfileTitleId, profileFrameForId, profileFrameIdOrDefault, profileTitleForId, profileTitleIdOrDefault, visibleBrawlFrames } from '../../constants/profileFrames';
 import { getOwnOnboarding } from '../../services/onboarding';
@@ -94,6 +95,7 @@ export default function ProfileScreen() {
   const [saving, setSaving] = useState(false);
   const profile = isRecord(ownProfile) ? ownProfile : null;
   const { purchasedFrameIds } = useShop();
+  const { enabled: backgroundParallaxEnabled, setEnabled: setBackgroundParallaxEnabled } = useBackgroundParallaxPreference();
   const muscleDistribution = useMemo(() => ownMuscleDistribution(attempts ?? [], catalogMuscleGroups), [attempts, catalogMuscleGroups]);
   const muscleBalanceTarget = useMemo(() => muscleBalanceTargetEntries(catalogMuscleGroups, muscleBalanceTargetId), [catalogMuscleGroups, muscleBalanceTargetId]);
   const displayedFrameId = previewFrameId ?? frameId;
@@ -276,6 +278,11 @@ export default function ProfileScreen() {
             <ProfileSetting label="Incluir plantilla de mesociclo vinculada" value={shareMesocycle} onValueChange={setShareMesocycle} primaryColor={theme.primary} />
             <ProfileSetting label="Incluir detalle de series realizadas" value={shareSets} onValueChange={setShareSets} primaryColor={theme.primary} />
             <Text style={{ color: theme.textMuted }}>Estos controles aplican solo a publicaciones futuras. Las publicaciones existentes conservan su privacidad original.</Text>
+          </GlassCard>
+          <GlassCard>
+            <Text accessibilityRole="header" style={[styles.title, { color: theme.text }]}>Fondos</Text>
+            <ProfileSetting label="Parallax de fondos" value={backgroundParallaxEnabled} onValueChange={setBackgroundParallaxEnabled} primaryColor={theme.primary} />
+            <Text style={{ color: theme.textMuted }}>Usa el movimiento del dispositivo cuando haya un fondo equipado.</Text>
           </GlassCard>
           <GlassCard>
             <Text accessibilityRole="header" style={[styles.title, { color: theme.text }]}>Perfil en tu círculo</Text>

@@ -85,7 +85,7 @@ describe('mesocycle creation', () => {
 });
 
 describe('mesocycle overview', () => {
-  test('prioritizes active blocks and keeps detailed progress collapsed until requested', () => {
+  test('keeps active blocks visible and detailed progress collapsed until requested', () => {
     const completed = { ...subject, id: 'completed', status: 'completed' as const };
     setMockData({ mesocycles: [completed, subject], attempts: [] });
     const screen = render(React.createElement(MesocyclesScreen));
@@ -95,7 +95,7 @@ describe('mesocycle overview', () => {
     press(screen.root.findAll((node) => node.props.accessibilityLabel === 'Desplegar estadísticas del mesociclo')[0]);
     expect(screen.root.findAll((node) => node.props.accessibilityLabel === 'Progreso por semana: 0%').length).toBeGreaterThan(0);
     const source = readFileSync(new URL('../app/(tabs)/mesocycles/index.tsx', import.meta.url), 'utf8');
-    expect(source).toContain('sortMesocyclesActiveFirst(mesocycles)');
+    expect(source).toContain('groupMesocyclesForList(mesocycles)');
   });
 });
 
@@ -123,11 +123,11 @@ describe('mesocycle edit schedule selection', () => {
     expect(updateMesocycle).not.toHaveBeenCalled();
     expect(findText(screen.root, 'Habilita las sesiones vinculadas y las recompensas.')).toBeTruthy();
     expect(screen.root.find((node) => node.props.accessibilityLabel === 'Estado: Activo').props.accessibilityState).toEqual({ selected: true });
-    ['Borrador', 'Activo', 'Completado', 'Archivado'].forEach((label) => {
+    ['Borrador', 'Activo', 'Archivado'].forEach((label) => {
       expect(screen.root.find((node) => node.props.accessibilityLabel === `Estado: ${label}`)).toBeTruthy();
     });
-    press(screen.root.find((node) => node.props.accessibilityLabel === 'Estado: Completado'));
-    expect(findText(screen.root, 'Se conserva el historial, pero no se pueden iniciar sesiones planificadas.')).toBeTruthy();
+    expect(screen.root.findAll((node) => node.props.accessibilityLabel === 'Estado: Completado')).toHaveLength(0);
+    expect(findText(screen.root, 'Completá al menos un entrenamiento del mesociclo antes de cerrarlo.')).toBeTruthy();
     press(screen.root.find((node) => node.props.accessibilityLabel === 'Estado: Archivado'));
     expect(findText(screen.root, 'Se conserva el historial, pero no se pueden iniciar sesiones planificadas.')).toBeTruthy();
     press(screen.root.find((node) => node.props.accessibilityLabel === 'Estado: Activo'));
@@ -173,6 +173,14 @@ describe('mesocycle edit schedule selection', () => {
 });
 
 describe('mesocycle schedule presentation', () => {
+  test('warns that a completed mesocycle cannot grant its XP reward again after editing', () => {
+    const completed = { ...subject, status: 'completed' as const };
+    setMockData({ getMesocycle: vi.fn(() => completed), routines: [routine], attempts: [], updateMesocycle: vi.fn() });
+    const screen = render(React.createElement(MesocycleDetailScreen));
+
+    expect(findText(screen.root, 'La recompensa de XP se acreditó una única vez. Los cambios posteriores no generan una nueva recompensa.')).toBeTruthy();
+  });
+
   test('shows dated routine context and an accessible compact remove action in the editor', () => {
     const updateMesocycle = vi.fn();
     setMockData({ getMesocycle: vi.fn(() => subject), routines: [routine], attempts: [], updateMesocycle, resolvePlannedRoutine: vi.fn(() => routine) });
@@ -234,6 +242,16 @@ describe('mesocycle schedule presentation', () => {
 
     expect(findText(screen.root, 'Rutina no disponible')).toBeTruthy();
     expect(screen.root.findAll((node) => node.props.accessibilityLabel === 'Ejecutar Upper')).toHaveLength(0);
+  });
+
+  test('hides execution for a routine whose planned date has passed', () => {
+    const past = { ...subject, startDate: '2026-07-25' };
+    setMockData({ getMesocycle: vi.fn(() => past), routines: [routine], attempts: [], resolvePlannedRoutine: vi.fn(() => routine) });
+
+    const screen = render(React.createElement(MesocycleSummaryScreen));
+
+    expect(screen.root.findAll((node) => node.props.accessibilityLabel === 'Ejecutar Upper')).toHaveLength(0);
+    expect(findText(screen.root, 'La fecha programada para esta sesión ya pasó.')).toBeTruthy();
   });
 
   test('renders dated temporal recovery guidance without routine actions on rest entries', () => {

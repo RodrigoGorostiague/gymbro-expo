@@ -6,7 +6,9 @@ export type RewardWallet = {
   purchasedThemeIds: string[];
   purchasedFrameIds: string[];
   purchasedTitleIds: string[];
+  purchasedBackgroundIds: string[];
   equippedThemeId: string | null;
+  equippedBackgroundId: string | null;
   combineWithPartner: boolean;
 };
 
@@ -27,7 +29,9 @@ function isWallet(value: unknown): value is RewardWallet {
     && Array.isArray(wallet.purchasedThemeIds) && wallet.purchasedThemeIds.every((id) => typeof id === 'string')
     && Array.isArray(wallet.purchasedFrameIds) && wallet.purchasedFrameIds.every((id) => typeof id === 'string')
     && Array.isArray(wallet.purchasedTitleIds) && wallet.purchasedTitleIds.every((id) => typeof id === 'string')
+    && Array.isArray(wallet.purchasedBackgroundIds) && wallet.purchasedBackgroundIds.every((id) => typeof id === 'string')
     && (wallet.equippedThemeId === null || typeof wallet.equippedThemeId === 'string')
+    && (wallet.equippedBackgroundId === null || typeof wallet.equippedBackgroundId === 'string')
     && typeof wallet.combineWithPartner === 'boolean';
 }
 
@@ -68,8 +72,12 @@ async function walletRpc(name: string, args: Record<string, unknown> = {}): Prom
 export const loadRewardWallet = () => walletRpc('load_reward_wallet');
 export const purchaseRewardTheme = (themeId: string) => walletRpc('purchase_reward_theme', { theme_id_input: themeId });
 export const purchaseRewardFrame = (frameId: string) => walletRpc('purchase_reward_profile_frame', { frame_id_input: frameId });
+export const purchaseRewardBackground = (backgroundId: string) => walletRpc('purchase_reward_background', { background_id_input: backgroundId });
 export const updateRewardWalletPreferences = (equippedThemeId: string | null, combineWithPartner: boolean) => (
   walletRpc('update_reward_wallet_preferences', { equipped_theme_id_input: equippedThemeId, combine_with_partner_input: combineWithPartner })
+);
+export const updateRewardBackgroundPreferences = (equippedBackgroundId: string | null) => (
+  walletRpc('update_reward_background_preferences', { equipped_background_id_input: equippedBackgroundId })
 );
 
 export async function claimWelcomeGemReward(): Promise<WelcomeGemReward> {

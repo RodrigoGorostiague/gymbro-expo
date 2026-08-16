@@ -8,7 +8,8 @@ export default defineConfig({
   assetsInclude: ['**/*.wav', '**/*.png', '**/*.jpeg'],
   resolve: {
     alias: {
-      'expo-router': resolve(rootDir, 'tests/helpers/expoRouterStub.ts'),
+       'expo-router': resolve(rootDir, 'tests/helpers/expoRouterStub.ts'),
+       'expo-image': resolve(rootDir, 'tests/helpers/expoImageStub.tsx'),
       'expo-blur': resolve(rootDir, 'tests/helpers/expoBlurStub.ts'),
       'expo-haptics': resolve(rootDir, 'tests/helpers/expoHapticsStub.ts'),
       'expo-linear-gradient': resolve(rootDir, 'tests/helpers/expoLinearGradientStub.ts'),

@@ -1,5 +1,5 @@
-import React, { useState } from 'react';
-import { Alert, ScrollView, StyleSheet, Text, View } from 'react-native';
+import React, { useEffect, useState, useTransition } from 'react';
+import { ActivityIndicator, Alert, FlatList, StyleSheet, Text, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -10,6 +10,7 @@ import { GlassCard, ThemeBackground } from '../../components/GlassCard';
 import { LogoutButton } from '../../components/LogoutButton';
 import { SelectablePulse } from '../../components/SelectablePulse';
 import { ThemeDecorations } from '../../components/ThemeDecorations';
+import { BackgroundEngine } from '../../components/BackgroundEngine';
 import { GlassButton } from '../../components/UI';
 import { ProfileAvatar } from '../../components/ProfileAvatar';
 import { DEFAULT_AVATAR_ID } from '../../constants/avatars';
@@ -22,6 +23,7 @@ import {
   SHOP_RARITIES,
   ShopTheme,
 } from '../../constants/shopThemes';
+import { SHOP_BACKGROUNDS, ShopBackground } from '../../constants/backgrounds';
 import { useAuth } from '../../context/AuthContext';
 import { useShop } from '../../context/ShopContext';
 import { useTheme } from '../../context/ThemeContext';
@@ -32,6 +34,45 @@ const RARITY_COLORS: Record<ShopThemeRarity, string> = {
   rare: '#8B7CFF',
   exclusive: '#F6C453',
 };
+
+type ShopTab = 'themes' | 'frames' | 'backgrounds' | 'titles';
+type ShopFrame = Extract<(typeof PROFILE_FRAMES)[number], { kind: 'shop' }>;
+type ShopCatalogItem =
+  | { id: string; type: 'theme-section'; title: string; subtitle?: string; rarityColor?: string }
+  | { id: string; type: 'theme'; item: ShopTheme }
+  | { id: string; type: 'frame'; item: ShopFrame }
+  | { id: string; type: 'background'; item: ShopBackground }
+  | { id: string; type: 'titles' };
+
+function getCatalogItems(tab: ShopTab): ShopCatalogItem[] {
+  if (tab === 'frames') {
+    return PROFILE_FRAMES
+      .filter((frame): frame is ShopFrame => frame.kind === 'shop')
+      .map((item) => ({ id: item.id, type: 'frame', item }));
+  }
+
+  if (tab === 'backgrounds') {
+    return SHOP_BACKGROUNDS.map((item) => ({ id: item.id, type: 'background', item }));
+  }
+
+  if (tab === 'titles') return [{ id: 'titles-coming-soon', type: 'titles' }];
+
+  const items: ShopCatalogItem[] = [{ id: 'profile-themes', type: 'theme-section', title: 'Temas de perfil' }];
+  items.push(...PROFILE_THEMES.map((item) => ({ id: item.id, type: 'theme' as const, item })));
+  for (const rarity of SHOP_RARITIES) {
+    const themes = getThemesByRarity(rarity.key);
+    if (!themes.length) continue;
+    items.push({
+      id: `rarity-${rarity.key}`,
+      type: 'theme-section',
+      title: rarity.label,
+      subtitle: rarity.description,
+      rarityColor: RARITY_COLORS[rarity.key],
+    });
+    items.push(...themes.map((item) => ({ id: item.id, type: 'theme' as const, item })));
+  }
+  return items;
+}
 
 function isThemeEquipped(
   itemId: string,
@@ -192,6 +233,33 @@ function FrameCard({ item, onBuy }: { item: Extract<(typeof PROFILE_FRAMES)[numb
   </GlassCard>;
 }
 
+function BackgroundCard({ item, previewing, onPreview, onAction }: { item: ShopBackground; previewing: boolean; onPreview: () => void; onAction: () => void }) {
+  const { theme } = useTheme();
+  const { gems, purchasedBackgroundIds, equippedBackgroundId } = useShop();
+  const owned = purchasedBackgroundIds.includes(item.id);
+  const equipped = equippedBackgroundId === item.id;
+  const canAfford = gems >= item.price;
+  return <SelectablePulse selected={previewing || equipped} theme={theme} style={styles.themeCard}>
+    <GlassCard style={styles.themeCardInner}>
+      <HapticPressable onPress={onPreview}>
+        <View style={styles.themeRow}>
+          <View style={styles.preview}><BackgroundEngine backgroundId={item.id} parallax={false} /></View>
+          <View style={styles.themeInfo}>
+            <View style={styles.themeTitleRow}><Text style={[styles.themeName, { color: theme.text }]}>{item.name}</Text><View style={[styles.rarityBadge, { backgroundColor: `${RARITY_COLORS[item.rarity]}30`, borderColor: RARITY_COLORS[item.rarity] }]}><Text style={[styles.rarityLabel, { color: RARITY_COLORS[item.rarity] }]}>{item.rarity}</Text></View></View>
+            <Text style={[styles.themeDesc, { color: theme.textMuted }]}>{item.description}</Text>
+            <Text style={[styles.themePrice, { color: theme.textMuted }]}>{owned ? 'Desbloqueado' : `${item.price} gema`}</Text>
+            {previewing ? <Text style={[styles.equippedTag, { color: theme.primary }]}>Previsualizando</Text> : null}
+            {equipped && !previewing ? <Text style={[styles.equippedTag, { color: theme.success }]}>Activo</Text> : null}
+          </View>
+        </View>
+      </HapticPressable>
+      <HapticPressable onPress={onAction}>
+        <View style={[styles.actionBtn, { backgroundColor: owned && equipped || !owned && !canAfford ? theme.glass : theme.primary }]}><Text style={{ color: owned && equipped || !owned && !canAfford ? theme.textMuted : theme.onPrimary, fontWeight: '700' }}>{owned ? equipped ? 'Quitar fondo' : 'Equipar' : canAfford ? 'Comprar' : 'Sin gemas'}</Text></View>
+      </HapticPressable>
+    </GlassCard>
+  </SelectablePulse>;
+}
+
 export default function ShopScreen() {
   const { theme } = useTheme();
   const { user } = useAuth();
@@ -202,11 +270,20 @@ export default function ShopScreen() {
     previewThemeId,
     purchaseTheme,
     purchaseFrame,
+    purchasedBackgroundIds,
+    equippedBackgroundId,
+    previewBackgroundId,
+    purchaseBackground,
+    equipBackground,
+    unequipBackground,
+    startBackgroundPreview,
     equipTheme,
     unequipTheme,
     startPreview,
   } = useShop();
-  const [activeTab, setActiveTab] = useState<'themes' | 'frames' | 'titles'>('themes');
+  const [activeTab, setActiveTab] = useState<ShopTab>('themes');
+  const [requestedTab, setRequestedTab] = useState<ShopTab | null>(null);
+  const [isTabTransitionPending, startTabTransition] = useTransition();
 
   if (!user) return null;
 
@@ -250,6 +327,56 @@ export default function ShopScreen() {
   const hasCustomTheme =
     equippedThemeId !== null && !isProfileThemeId(equippedThemeId);
 
+  const handleBuyOrEquipBackground = (background: ShopBackground) => {
+    const owned = purchasedBackgroundIds.includes(background.id);
+    if (owned) {
+      if (equippedBackgroundId === background.id) {
+        Alert.alert('Fondo activo', '¿Volver al fondo del tema?', [{ text: 'Cancelar', style: 'cancel' }, { text: 'Quitar fondo', onPress: unequipBackground }]);
+      } else equipBackground(background.id);
+      return;
+    }
+    Alert.alert('Comprar fondo', `¿Comprar "${background.name}" por ${background.price} gema?`, [{ text: 'Cancelar', style: 'cancel' }, { text: 'Comprar', onPress: () => { void purchaseBackground(background.id); } }]);
+  };
+
+  useEffect(() => {
+    if (!requestedTab || requestedTab === activeTab) {
+      if (requestedTab === activeTab) setRequestedTab(null);
+      return;
+    }
+
+    const frame = requestAnimationFrame(() => {
+      startTabTransition(() => setActiveTab(requestedTab));
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [activeTab, requestedTab, startTabTransition]);
+
+  const catalogItems = getCatalogItems(activeTab);
+  const isSwitchingTab = requestedTab !== null && requestedTab !== activeTab;
+  const tabLabels: Readonly<Record<ShopTab, string>> = {
+    themes: 'Temas',
+    frames: 'Marcos',
+    backgrounds: 'Fondos',
+    titles: 'Títulos',
+  };
+
+  const selectTab = (tab: ShopTab) => {
+    if (tab !== activeTab) setRequestedTab(tab);
+  };
+
+  const catalogHeader = (
+    <>
+      <CombineWithPartnerCard />
+      {activeTab === 'frames' ? <View style={styles.sectionHeaderOnly}>
+        <Text style={[styles.sectionTitle, { color: theme.text }]}>Marcos de perfil</Text>
+        <Text style={[styles.sectionSubtitle, { color: theme.textMuted }]}>Compralos con gemas y elegilos después desde tu perfil.</Text>
+      </View> : null}
+      {activeTab === 'backgrounds' ? <View style={styles.sectionHeaderOnly}>
+        <Text style={[styles.sectionTitle, { color: theme.text }]}>Fondos animados</Text>
+        <Text style={[styles.sectionSubtitle, { color: theme.textMuted }]}>Se equipan por separado de los temas.</Text>
+      </View> : null}
+    </>
+  );
+
   return (
     <ThemeBackground>
       <SafeAreaView style={styles.safe}>
@@ -260,72 +387,55 @@ export default function ShopScreen() {
             <HapticPressable onPress={showGemsHelp} style={({ pressed }) => [styles.helpBtn, { borderColor: theme.glassBorder, backgroundColor: theme.glass, opacity: pressed ? 0.75 : 1 }]}><Ionicons name="help-circle-outline" size={16} color={theme.primary} /><Text style={[styles.helpBtnText, { color: theme.primary }]}>Ayuda</Text></HapticPressable>
           </View>
           <View accessibilityRole="tablist" style={styles.tabs}>
-            {([['themes', 'Temas'], ['frames', 'Marcos'], ['titles', 'Títulos']] as const).map(([id, label]) => <HapticPressable key={id} accessibilityRole="tab" accessibilityState={{ selected: activeTab === id }} onPress={() => setActiveTab(id)} style={[styles.tab, { borderColor: activeTab === id ? theme.primary : theme.glassBorder, backgroundColor: activeTab === id ? theme.glass : 'transparent' }]}><Text style={{ color: activeTab === id ? theme.primary : theme.textMuted, fontWeight: '800' }}>{label}</Text></HapticPressable>)}
+            {(Object.entries(tabLabels) as [ShopTab, string][]).map(([id, label]) => {
+              const pending = isSwitchingTab && requestedTab === id;
+              const selected = activeTab === id;
+              return <HapticPressable
+                key={id}
+                testID={`shop-tab-${id}`}
+                accessibilityRole="tab"
+                accessibilityLabel={pending ? `Cargando ${label}` : label}
+                accessibilityState={{ selected, busy: pending }}
+                onPress={() => selectTab(id)}
+                style={[styles.tab, { borderColor: selected || pending ? theme.primary : theme.glassBorder, backgroundColor: selected ? theme.glass : 'transparent' }]}
+              >
+                {pending ? <ActivityIndicator color={theme.primary} size="small" /> : null}
+                <Text style={{ color: selected || pending ? theme.primary : theme.textMuted, fontWeight: '800' }}>{label}</Text>
+              </HapticPressable>;
+            })}
           </View>
         </View>
-        <ScrollView
+        <FlatList
+          data={catalogItems}
+          extraData={{ previewThemeId, previewBackgroundId, purchasedThemeIds, purchasedBackgroundIds, equippedThemeId, equippedBackgroundId, gems }}
+          key={activeTab}
+          keyExtractor={(item) => item.id}
+          initialNumToRender={6}
+          maxToRenderPerBatch={6}
+          windowSize={5}
+          ListHeaderComponent={catalogHeader}
+          ListFooterComponent={activeTab === 'themes' && hasCustomTheme ? <GlassButton title="Usar tema de perfil" onPress={unequipTheme} variant="secondary" /> : null}
           contentContainerStyle={[
             styles.scroll,
             previewThemeId ? styles.scrollWithPreview : null,
           ]}
           showsVerticalScrollIndicator={false}
-        >
-          <CombineWithPartnerCard />
-
-          {activeTab === 'themes' && <><View style={styles.section}>
-            <Text style={[styles.sectionTitle, { color: theme.text }]}>Temas de perfil</Text>
-            {PROFILE_THEMES.map((item) => (
-              <ThemeCard
-                key={item.id}
-                item={item}
-                user={user}
-                previewing={previewThemeId === item.id}
-                onPreview={() => startPreview(item.id)}
-                onAction={() => handleBuyOrEquip(item.id)}
-              />
-            ))}
-          </View>
-
-          {SHOP_RARITIES.map((rarity) => {
-            const items = getThemesByRarity(rarity.key);
-            if (items.length === 0) return null;
-
-            return (
-              <View key={rarity.key} style={styles.section}>
-                <View style={styles.sectionHeader}>
-                  <View style={[styles.rarityMarker, { backgroundColor: RARITY_COLORS[rarity.key] }]} />
-                  <View style={styles.sectionHeaderCopy}>
-                    <Text style={[styles.sectionTitle, { color: theme.text }]}>{rarity.label}</Text>
-                    <Text style={[styles.sectionSubtitle, { color: theme.textMuted }]}>{rarity.description}</Text>
-                  </View>
+          renderItem={({ item }) => {
+            if (item.type === 'theme-section') {
+              return <View style={item.rarityColor ? styles.sectionHeader : styles.sectionHeaderOnly}>
+                {item.rarityColor ? <View style={[styles.rarityMarker, { backgroundColor: item.rarityColor }]} /> : null}
+                <View style={item.rarityColor ? styles.sectionHeaderCopy : undefined}>
+                  <Text style={[styles.sectionTitle, { color: theme.text }]}>{item.title}</Text>
+                  {item.subtitle ? <Text style={[styles.sectionSubtitle, { color: theme.textMuted }]}>{item.subtitle}</Text> : null}
                 </View>
-                {items.map((item) => (
-                  <ThemeCard
-                    key={item.id}
-                    item={item}
-                    user={user}
-                    previewing={previewThemeId === item.id}
-                    onPreview={() => startPreview(item.id)}
-                    onAction={() => handleBuyOrEquip(item.id)}
-                  />
-                ))}
-              </View>
-            );
-          })}
-
-          {hasCustomTheme && (
-            <GlassButton title="Usar tema de perfil" onPress={unequipTheme} variant="secondary" />
-          )}
-          </>}
-
-          {activeTab === 'frames' && <View style={styles.section}>
-            <Text style={[styles.sectionTitle, { color: theme.text }]}>Marcos de perfil</Text>
-            <Text style={[styles.sectionSubtitle, { color: theme.textMuted }]}>Compralos con gemas y elegilos después desde tu perfil.</Text>
-            {PROFILE_FRAMES.filter((frame): frame is Extract<(typeof PROFILE_FRAMES)[number], { kind: 'shop' }> => frame.kind === 'shop').map((item) => <FrameCard key={item.id} item={item} onBuy={() => Alert.alert('Comprar marco', `¿Comprar "${item.label}" por ${item.price} gemas?`, [{ text: 'Cancelar', style: 'cancel' }, { text: 'Comprar', onPress: () => { void purchaseFrame(item.id); } }])} />)}
-          </View>}
-
-          {activeTab === 'titles' && <GlassCard style={styles.comingSoon}><Text style={[styles.sectionTitle, { color: theme.text }]}>Títulos próximamente</Text><Text style={[styles.sectionSubtitle, { color: theme.textMuted }]}>La tienda de títulos llegará en una próxima actualización.</Text></GlassCard>}
-        </ScrollView>
+              </View>;
+            }
+            if (item.type === 'theme') return <ThemeCard item={item.item} user={user} previewing={previewThemeId === item.item.id} onPreview={() => startPreview(item.item.id)} onAction={() => handleBuyOrEquip(item.item.id)} />;
+            if (item.type === 'frame') return <FrameCard item={item.item} onBuy={() => Alert.alert('Comprar marco', `¿Comprar "${item.item.label}" por ${item.item.price} gemas?`, [{ text: 'Cancelar', style: 'cancel' }, { text: 'Comprar', onPress: () => { void purchaseFrame(item.item.id); } }])} />;
+            if (item.type === 'background') return <BackgroundCard item={item.item} previewing={previewBackgroundId === item.item.id} onPreview={() => startBackgroundPreview(item.item.id)} onAction={() => handleBuyOrEquipBackground(item.item)} />;
+            return <GlassCard style={styles.comingSoon}><Text style={[styles.sectionTitle, { color: theme.text }]}>Títulos próximamente</Text><Text style={[styles.sectionSubtitle, { color: theme.textMuted }]}>La tienda de títulos llegará en una próxima actualización.</Text></GlassCard>;
+          }}
+        />
       </SafeAreaView>
     </ThemeBackground>
   );
@@ -336,7 +446,7 @@ const styles = StyleSheet.create({
   header: { paddingHorizontal: 20, paddingTop: 12 },
   commerceBar: { borderBottomWidth: StyleSheet.hairlineWidth, gap: 10, paddingHorizontal: 20, paddingBottom: 12, paddingTop: 8, zIndex: 2, elevation: 2 },
   tabs: { flexDirection: 'row', gap: 8 },
-  tab: { alignItems: 'center', borderRadius: 999, borderWidth: 1, flex: 1, paddingVertical: 10 },
+  tab: { alignItems: 'center', borderRadius: 999, borderWidth: 1, flex: 1, flexDirection: 'row', gap: 5, justifyContent: 'center', paddingVertical: 10 },
   frameCard: { gap: 12 },
   frameRow: { alignItems: 'center', flexDirection: 'row', gap: 12 },
   frameArt: { alignItems: 'center', height: 72, justifyContent: 'center', width: 72 },
@@ -368,6 +478,7 @@ const styles = StyleSheet.create({
   balanceValue: { fontSize: 20, fontWeight: '900' },
   section: { marginBottom: 8 },
   sectionHeader: { flexDirection: 'row', alignItems: 'center', gap: 9, marginTop: 12, marginBottom: 10 },
+  sectionHeaderOnly: { marginTop: 12, marginBottom: 10 },
   sectionHeaderCopy: { flex: 1 },
   rarityMarker: { width: 4, alignSelf: 'stretch', borderRadius: 4 },
   sectionTitle: {

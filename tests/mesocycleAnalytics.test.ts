@@ -4,12 +4,13 @@ import {
   deriveMesocycleTemporalLabel,
   findOverlappingMesocycle,
   getMesocycleStatusCopy,
+  groupMesocyclesForList,
   isCurrentMesocycleStatus,
   isTerminalMesocycleStatus,
   sortMesocyclesActiveFirst,
 } from '../utils/mesocycleAnalytics';
 
-const plan = (overrides: Partial<{ id: string; status: 'draft' | 'scheduled' | 'active' | 'completed' | 'paused' | 'cancelled'; startDate: string; durationWeeks: number }> = {}) => ({
+const plan = (overrides: Partial<{ id: string; status: 'draft' | 'scheduled' | 'active' | 'completed' | 'paused' | 'cancelled' | 'archived'; startDate: string; durationWeeks: number }> = {}) => ({
   id: 'candidate',
   status: 'scheduled' as const,
   startDate: '2026-02-01',
@@ -65,6 +66,27 @@ describe('mesocycle analytics domain utilities', () => {
     const source = [plan({ id: 'draft', status: 'draft' }), plan({ id: 'active-a', status: 'active' }), plan({ id: 'paused', status: 'paused' }), plan({ id: 'active-b', status: 'active' })];
     expect(sortMesocyclesActiveFirst(source).map(({ id }) => id)).toEqual(['active-a', 'active-b', 'draft', 'paused']);
     expect(source.map(({ id }) => id)).toEqual(['draft', 'active-a', 'paused', 'active-b']);
+  });
+
+  test('groups mesocycles with active plans visible first and other sections separated', () => {
+    const source = [
+      { ...plan({ id: 'draft-old', status: 'draft' }), createdAt: '2026-02-01T10:00:00Z' },
+      { ...plan({ id: 'completed', status: 'completed', startDate: '2026-02-01' }), createdAt: '2026-02-02T10:00:00Z' },
+      { ...plan({ id: 'active-upcoming', status: 'active', startDate: '2026-02-20' }), createdAt: '2026-02-03T10:00:00Z' },
+      { ...plan({ id: 'active-current', status: 'active', startDate: '2026-02-14' }), createdAt: '2026-02-04T10:00:00Z' },
+      { ...plan({ id: 'shared', status: 'draft' }), createdAt: '2026-02-05T10:00:00Z', sharedFrom: { requestId: 'request', senderId: 'sender', acceptedAt: '2026-02-05T10:00:00Z' } },
+      { ...plan({ id: 'draft-new', status: 'draft' }), createdAt: '2026-02-06T10:00:00Z' },
+      { ...plan({ id: 'archived', status: 'archived' }), createdAt: '2026-02-07T10:00:00Z' },
+    ];
+
+    const groups = groupMesocyclesForList(source);
+    expect(groups.map(({ key, items }) => [key, items.map(({ id }) => id)])).toEqual([
+      ['active', ['active-current', 'active-upcoming']],
+      ['shared', ['shared']],
+      ['draft', ['draft-new', 'draft-old']],
+      ['completed', ['completed']],
+      ['archived', ['archived']],
+    ]);
   });
 
   test('provides non-empty UI-safe copy for every lifecycle status', () => {

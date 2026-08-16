@@ -15,6 +15,7 @@ import {
   buildMesocycleDraft,
   clonePlannedWeekEntries,
   deriveMesocycleAdherence,
+  mesocycleCompletionBlockReason,
   deriveFirstEntryStartDate,
   deriveMesocycleScheduleProjection,
   MesocycleScheduleProjectionEntry,
@@ -97,6 +98,7 @@ export default function MesocycleDetailScreen() {
   const schedule = deriveMesocycleScheduleProjection({ ...draft, startDate: effectiveStartDate }, routines, attempts);
   const scheduleByEntry = new Map(schedule.map((entry) => [entry.entryId, entry]));
   const adherence = deriveMesocycleAdherence(draft, attempts);
+  const completionBlockReason = mesocycleCompletionBlockReason(draft, attempts);
 
   return <ThemeBackground><SafeAreaView style={styles.safe}><AppNavBar onBack={() => router.back()} trailing={<HapticPressable accessibilityLabel={`Compartir ${draft.name}`} onPress={() => router.push({ pathname: '/community/share-plan', params: { kind: 'mesocycle', id: draft.id, name: draft.name } })}><Text style={{ color: theme.primary, fontWeight: '800' }}>Compartir</Text></HapticPressable>} /><ScrollView contentContainerStyle={styles.scroll}>
     <Text style={[styles.title, { color: theme.text }]}>{draft.name}</Text>
@@ -105,7 +107,7 @@ export default function MesocycleDetailScreen() {
     <GlassCard style={styles.card}>
       <Text style={[styles.heading, { color: theme.text }]}>Estado del ciclo</Text>
       <View style={styles.statusOptions}>
-        {STATUS_OPTIONS.map((option) => {
+         {STATUS_OPTIONS.filter((option) => option.value !== 'completed' || draft.status === 'completed' || !completionBlockReason).map((option) => {
           const selected = option.value === draft.status;
           return <HapticPressable
             key={option.value}
@@ -116,8 +118,9 @@ export default function MesocycleDetailScreen() {
             style={[styles.optionChip, { borderColor: theme.glassBorder, backgroundColor: selected ? theme.primary : theme.glass }]}
           ><Text style={{ color: selected ? theme.onPrimary : theme.text, fontWeight: '700' }}>{option.label}</Text></HapticPressable>;
         })}
-      </View>
-      <Text style={[styles.statusGuidance, { color: theme.textMuted }]}>{STATUS_OPTIONS.find((option) => option.value === draft.status)!.guidance}</Text>
+       </View>
+       <Text style={[styles.statusGuidance, { color: theme.textMuted }]}>{STATUS_OPTIONS.find((option) => option.value === draft.status)!.guidance}</Text>
+       {draft.status === 'completed' ? <Text style={[styles.statusGuidance, { color: theme.textMuted }]}>La recompensa de XP se acreditó una única vez. Los cambios posteriores no generan una nueva recompensa.</Text> : completionBlockReason ? <Text style={[styles.statusGuidance, { color: theme.textMuted }]}>{completionBlockReason}</Text> : null}
     </GlassCard>
     {draft.weeks.map((week) => <WeekCard
       key={week.id}

@@ -7,10 +7,11 @@ import {
   SHOP_CATEGORIES,
   SHOP_THEMES,
 } from '../constants/shopThemes';
+import { getShopBackground } from '../constants/backgrounds';
 import { PARTNER_PROFILE } from '../constants/kiss';
 import { subscribeToEquippedThemes, syncEquippedTheme } from '../services/themeSync';
 import { UserProfile } from '../types';
-import { acknowledgeReleaseUpdates, claimPendingReleaseUpdates, claimWelcomeGemReward, loadRewardWallet, purchaseRewardFrame, purchaseRewardTheme, ReleaseUpdate, RewardWallet, updateRewardWalletPreferences } from '../services/rewardWallet';
+import { acknowledgeReleaseUpdates, claimPendingReleaseUpdates, claimWelcomeGemReward, loadRewardWallet, purchaseRewardBackground, purchaseRewardFrame, purchaseRewardTheme, ReleaseUpdate, RewardWallet, updateRewardBackgroundPreferences, updateRewardWalletPreferences } from '../services/rewardWallet';
 import { useAuth } from './AuthContext';
 import { useData } from './DataContext';
 import { syncOwnPresentationTheme } from '../services/socialGraph';
@@ -22,7 +23,9 @@ const DEFAULT_SHOP: RewardWallet = {
   purchasedThemeIds: [],
   purchasedFrameIds: [],
   purchasedTitleIds: [],
+  purchasedBackgroundIds: [],
   equippedThemeId: null,
+  equippedBackgroundId: null,
   combineWithPartner: false,
 };
 
@@ -30,20 +33,28 @@ interface ShopContextValue {
   gems: number;
   purchasedThemeIds: string[];
   purchasedFrameIds: string[];
+  purchasedBackgroundIds: string[];
   equippedThemeId: string | null;
+  equippedBackgroundId: string | null;
   selfEquippedThemeId: string | null;
   partnerEquippedThemeId: string | null;
   combineWithPartner: boolean;
   previewThemeId: string | null;
+  previewBackgroundId: string | null;
   isLoading: boolean;
-  isInitialLoading: boolean;
+  hydratedUserId: string | null;
   purchaseTheme: (themeId: string) => Promise<boolean>;
   purchaseFrame: (frameId: string) => Promise<boolean>;
+  purchaseBackground: (backgroundId: string) => Promise<boolean>;
   equipTheme: (themeId: string) => void;
   unequipTheme: () => void;
   setCombineWithPartner: (value: boolean) => void;
   startPreview: (themeId: string) => void;
   stopPreview: () => void;
+  equipBackground: (backgroundId: string) => void;
+  unequipBackground: () => void;
+  startBackgroundPreview: (backgroundId: string) => void;
+  stopBackgroundPreview: () => void;
   welcomeGemReward: number | null;
   dismissWelcomeGemReward: () => void;
   releaseUpdates: ReleaseUpdate[];
@@ -60,11 +71,13 @@ export function ShopProvider({ children }: { children: React.ReactNode }) {
   const [shop, setShop] = useState<RewardWallet>(DEFAULT_SHOP);
   const [partnerEquippedThemeId, setPartnerEquippedThemeId] = useState<string | null>(null);
   const [previewThemeId, setPreviewThemeId] = useState<string | null>(null);
+  const [previewBackgroundId, setPreviewBackgroundId] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
-  const [isInitialLoading, setIsInitialLoading] = useState(true);
+  const [hydratedUserId, setHydratedUserId] = useState<string | null>(null);
   const [welcomeGemReward, setWelcomeGemReward] = useState<number | null>(null);
   const [releaseUpdates, setReleaseUpdates] = useState<ReleaseUpdate[]>([]);
   const previewTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const backgroundPreviewTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const walletRequestRef = useRef(0);
 
   const partner: UserProfile | null = user ? PARTNER_PROFILE[user] : null;
@@ -73,6 +86,12 @@ export function ShopProvider({ children }: { children: React.ReactNode }) {
     if (previewTimerRef.current) {
       clearTimeout(previewTimerRef.current);
       previewTimerRef.current = null;
+    }
+  }, []);
+  const clearBackgroundPreviewTimer = useCallback(() => {
+    if (backgroundPreviewTimerRef.current) {
+      clearTimeout(backgroundPreviewTimerRef.current);
+      backgroundPreviewTimerRef.current = null;
     }
   }, []);
 
@@ -87,7 +106,7 @@ export function ShopProvider({ children }: { children: React.ReactNode }) {
     [clearPreviewTimer],
   );
 
-  useEffect(() => () => clearPreviewTimer(), [clearPreviewTimer]);
+  useEffect(() => () => { clearPreviewTimer(); clearBackgroundPreviewTimer(); }, [clearBackgroundPreviewTimer, clearPreviewTimer]);
 
   useEffect(() => {
     if (!user) {
@@ -97,14 +116,14 @@ export function ShopProvider({ children }: { children: React.ReactNode }) {
       setReleaseUpdates([]);
       setPartnerEquippedThemeId(null);
       setIsLoading(false);
-      setIsInitialLoading(false);
+      setHydratedUserId(null);
       return;
     }
 
     const request = walletRequestRef.current + 1;
     walletRequestRef.current = request;
     let active = true;
-    const isInitialLoad = isInitialLoading;
+    const isInitialLoad = hydratedUserId !== user;
     if (isInitialLoad) setIsLoading(true);
     void (async () => {
       try {
@@ -122,7 +141,7 @@ export function ShopProvider({ children }: { children: React.ReactNode }) {
       } finally {
         if (active && walletRequestRef.current === request && isInitialLoad) {
           setIsLoading(false);
-          setIsInitialLoading(false);
+          setHydratedUserId(user);
         }
       }
     })();
@@ -150,6 +169,10 @@ export function ShopProvider({ children }: { children: React.ReactNode }) {
       syncEquippedTheme(user, next.equippedThemeId);
       void syncOwnPresentationTheme(next.equippedThemeId).catch(() => undefined);
     });
+  }, [user]);
+  const persistBackgroundPreferences = useCallback((equippedBackgroundId: string | null) => {
+    if (!user) return Promise.resolve();
+    return updateRewardBackgroundPreferences(equippedBackgroundId).then(setShop);
   }, [user]);
 
   const equipTheme = useCallback(
@@ -188,6 +211,33 @@ export function ShopProvider({ children }: { children: React.ReactNode }) {
   const stopPreview = useCallback(() => {
     endPreview(false);
   }, [endPreview]);
+
+  const equipBackground = useCallback((backgroundId: string) => {
+    if (!shop.purchasedBackgroundIds.includes(backgroundId)) return;
+    clearBackgroundPreviewTimer();
+    setPreviewBackgroundId(null);
+    void persistBackgroundPreferences(backgroundId);
+  }, [clearBackgroundPreviewTimer, persistBackgroundPreferences, shop.purchasedBackgroundIds]);
+
+  const unequipBackground = useCallback(() => {
+    void persistBackgroundPreferences(null);
+  }, [persistBackgroundPreferences]);
+
+  const startBackgroundPreview = useCallback((backgroundId: string) => {
+    if (!getShopBackground(backgroundId)) return;
+    clearBackgroundPreviewTimer();
+    setPreviewBackgroundId(backgroundId);
+    backgroundPreviewTimerRef.current = setTimeout(() => {
+      backgroundPreviewTimerRef.current = null;
+      setPreviewBackgroundId(null);
+      Alert.alert('Finalizó la vista previa', 'Comprá el fondo para seguir usándolo.');
+    }, PREVIEW_DURATION_MS);
+  }, [clearBackgroundPreviewTimer]);
+
+  const stopBackgroundPreview = useCallback(() => {
+    clearBackgroundPreviewTimer();
+    setPreviewBackgroundId(null);
+  }, [clearBackgroundPreviewTimer]);
 
   const purchaseTheme = useCallback(
     async (themeId: string): Promise<boolean> => {
@@ -230,26 +280,53 @@ export function ShopProvider({ children }: { children: React.ReactNode }) {
     }
   }, [shop.purchasedFrameIds]);
 
+  const purchaseBackground = useCallback(async (backgroundId: string): Promise<boolean> => {
+    const background = getShopBackground(backgroundId);
+    if (!background) return false;
+    if (shop.purchasedBackgroundIds.includes(backgroundId)) {
+      equipBackground(backgroundId);
+      return true;
+    }
+    try {
+      const next = await purchaseRewardBackground(backgroundId);
+      setShop(next);
+      stopBackgroundPreview();
+      Alert.alert('Compra exitosa', `Desbloqueaste el fondo "${background.name}".`);
+      return true;
+    } catch (error) {
+      Alert.alert('No se pudo comprar', error instanceof Error ? error.message : 'Inténtalo nuevamente.');
+      return false;
+    }
+  }, [equipBackground, shop.purchasedBackgroundIds, stopBackgroundPreview]);
+
   return (
     <ShopContext.Provider
       value={{
         gems: shop.balance,
         purchasedThemeIds: shop.purchasedThemeIds,
         purchasedFrameIds: shop.purchasedFrameIds,
+        purchasedBackgroundIds: shop.purchasedBackgroundIds,
         equippedThemeId: shop.equippedThemeId,
+        equippedBackgroundId: shop.equippedBackgroundId,
         selfEquippedThemeId: shop.equippedThemeId,
         partnerEquippedThemeId,
         combineWithPartner: shop.combineWithPartner,
         previewThemeId,
+        previewBackgroundId,
         isLoading,
-        isInitialLoading,
+        hydratedUserId,
         purchaseTheme,
         purchaseFrame,
+        purchaseBackground,
         equipTheme,
         unequipTheme,
         setCombineWithPartner,
         startPreview,
         stopPreview,
+        equipBackground,
+        unequipBackground,
+        startBackgroundPreview,
+        stopBackgroundPreview,
         welcomeGemReward,
         dismissWelcomeGemReward: () => setWelcomeGemReward(null),
         releaseUpdates,

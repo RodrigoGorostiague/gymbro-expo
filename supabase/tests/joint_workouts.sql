@@ -1,5 +1,5 @@
 begin;
-select plan(47);
+select plan(50);
 
 insert into auth.users (id, instance_id, aud, role, email, encrypted_password, email_confirmed_at, raw_app_meta_data, raw_user_meta_data, created_at, updated_at)
 select format('40000000-0000-0000-0000-%s', lpad(value::text, 12, '0'))::uuid, '00000000-0000-0000-0000-000000000000', 'authenticated', 'authenticated', format('joint%s@example.com', value), '', now(), '{}', '{}', now(), now()
@@ -62,17 +62,23 @@ select lives_ok($$select public.finish_joint_workout(current_setting('test.joint
 set local role postgres;
 select is((select status::text from public.joint_workout_participants where joint_workout_id = current_setting('test.joint_id')::uuid and participant_id = '40000000-0000-0000-0000-000000000004'), 'declined', 'an unaccepted invitation expires when the initiator finishes');
 select is((select count(*)::integer from public.joint_workout_posts where joint_workout_id = current_setting('test.joint_id')::uuid), 1, 'first real completion creates the single live group post');
+select ok((select last_activity_at >= created_at from public.joint_workout_posts where joint_workout_id = current_setting('test.joint_id')::uuid), 'the first completion establishes post activity');
 select is((select completed_at is null from public.joint_workouts where id = current_setting('test.joint_id')::uuid), true, 'accepted active participants keep the group live after initiator completion');
 select is((select closed_at is not null from public.workout_start_activities where author_id = '40000000-0000-0000-0000-000000000001'), true, 'completion closes the initiator workout-start presence transactionally');
 insert into public.joint_workout_participants (joint_workout_id, participant_id, status, joined_at)
 values (current_setting('test.joint_id')::uuid, '40000000-0000-0000-0000-000000000005', 'active', now());
 delete from public.relationships where member_low = '40000000-0000-0000-0000-000000000001' and member_high = '40000000-0000-0000-0000-000000000005';
+update public.joint_workout_posts set last_activity_at = created_at - interval '1 hour' where joint_workout_id = current_setting('test.joint_id')::uuid;
 set local role authenticated;
 select set_config('request.jwt.claim.sub', '40000000-0000-0000-0000-000000000005', true);
 select is(jsonb_array_length(public.list_joint_workout_posts()), 1, 'a session member without a direct relationship can reopen its joint post');
 select ok(jsonb_path_exists(public.get_joint_workout_detail(current_setting('test.joint_id')::uuid), '$.participants[*] ? (@.id == "40000000-0000-0000-0000-000000000001" && @.workout.routineName == "Upper")'), 'a session member can access a completed co-participant result');
 select set_config('request.jwt.claim.sub', '40000000-0000-0000-0000-000000000002', true);
 select lives_ok($$select public.finish_joint_workout(current_setting('test.joint_id')::uuid, 'private', '{"routineName":"Lower","durationSeconds":70,"exercises":[{"name":"Squat","muscleGroupIds":["legs"],"sets":[{"weight":100,"reps":5,"completed":true}]}]}'::jsonb)$$, 'a later participant completion updates the existing group post');
+set local role postgres;
+select is((select count(*)::integer from public.joint_workout_posts where joint_workout_id = current_setting('test.joint_id')::uuid), 1, 'a later completion does not create a duplicate group post');
+select ok((select last_activity_at >= created_at from public.joint_workout_posts where joint_workout_id = current_setting('test.joint_id')::uuid), 'a later completion refreshes post activity');
+set local role authenticated;
 select set_config('request.jwt.claim.sub', '40000000-0000-0000-0000-000000000005', true);
 select ok(jsonb_path_exists(public.get_joint_workout_detail(current_setting('test.joint_id')::uuid), '$.participants[*] ? (@.id == "40000000-0000-0000-0000-000000000002" && @.workout.routineName == "Lower")'), 'a session member can access a result completed after the first finisher');
 set local role postgres;

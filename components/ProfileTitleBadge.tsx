@@ -1,13 +1,15 @@
 import React from 'react';
-import { Image, StyleSheet, Text, View } from 'react-native';
+import { StyleSheet, Text, View } from 'react-native';
+import { Image } from 'expo-image';
 import { ProfileTitleId, profileTitleForId, profileTitleIdOrDefault } from '../constants/profileFrames';
-import { profileTitleAssetForId } from './profileTitleAssets';
+import { useCosmeticAsset } from '../services/cosmetics';
 
 export function ProfileTitleBadge({ titleId, size = 56 }: { titleId?: ProfileTitleId | string | null; size?: number }) {
+  const resolvedTitleId = profileTitleIdOrDefault(titleId);
+  const title = profileTitleForId(resolvedTitleId);
+  const source = useCosmeticAsset('titles', title.id);
   if (titleId === null) return null;
-  const title = profileTitleForId(profileTitleIdOrDefault(titleId));
-  const asset = profileTitleAssetForId(titleId);
-  if (asset !== null) return <Image accessibilityLabel={`Título ${title.title}`} source={asset} resizeMode="contain" style={{ height: size, width: size * 2.25 }} />;
+  if (source) return <Image accessibilityLabel={`Título ${title.title}`} cachePolicy="disk" contentFit="contain" source={source} style={{ height: size, width: size * 2.25 }} />;
   return <View accessibilityLabel={`Título ${title.title}`} style={[styles.badge, { backgroundColor: title.titleColor }]}>
     <Text style={styles.text}>{title.title}</Text>
   </View>;

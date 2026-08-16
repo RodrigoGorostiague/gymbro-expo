@@ -15,6 +15,7 @@ const client = vi.hoisted(() => ({
 }));
 const authState = vi.hoisted(() => ({ user: 'member-1' as string | null }));
 const workoutData = vi.hoisted(() => ({ attempts: [] }));
+const flushPendingJointWorkoutPublications = vi.hoisted(() => vi.fn(async () => 0));
 
 vi.mock('../services/supabase', () => ({
   supabase: client,
@@ -26,6 +27,7 @@ vi.mock('../context/AuthContext', () => ({
 vi.mock('../context/DataContext', () => ({
   useData: () => workoutData,
 }));
+vi.mock('../services/jointWorkoutPublicationQueue', () => ({ flushPendingJointWorkoutPublications }));
 
 import {
   getCirclePage,
@@ -53,6 +55,7 @@ describe('social graph client boundary', () => {
       data: { session: { user: { id: 'member-1' }, access_token: 'access-token' } },
       error: null,
     });
+    flushPendingJointWorkoutPublications.mockResolvedValue(0);
   });
 
   test('uses server-owned projections for discovery, circle, requests, blocked users, and relationship-aware alias search', async () => {
@@ -249,5 +252,14 @@ describe('social graph client boundary', () => {
 
     await act(async () => { tree!.unmount(); });
     expect(client.removeChannel).toHaveBeenCalledWith(channel);
+  });
+
+  test('retries durable joint publications after restoring an authenticated app session', async () => {
+    flushPendingJointWorkoutPublications.mockResolvedValue(1);
+    const Probe = () => useSocial() && null;
+
+    await act(async () => { TestRenderer.create(React.createElement(SocialProvider, null, React.createElement(Probe))); });
+
+    await vi.waitFor(() => expect(flushPendingJointWorkoutPublications).toHaveBeenCalledWith('member-1'));
   });
 });

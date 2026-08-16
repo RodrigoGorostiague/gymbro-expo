@@ -22,6 +22,18 @@ describe('mesocycle execution lineage', () => {
     expect(validateMesocycleExecutionLineage([activeMesocycle], 'other-routine', lineage)).toMatchObject({ valid: false, reason: 'missing-planned-session' });
   });
 
+  test('rejects a past session unless it is resuming an active workout', () => {
+    const dated = { ...activeMesocycle, startDate: '2026-01-01' };
+    const today = new Date('2026-01-02T12:00:00');
+
+    expect(validateMesocycleExecutionLineage([dated], 'routine-1', lineage, undefined, false, today)).toEqual({
+      valid: false,
+      mesocycleId: lineage.mesocycleId,
+      reason: 'expired-planned-session',
+    });
+    expect(validateMesocycleExecutionLineage([dated], 'routine-1', lineage, undefined, true, today)).toEqual({ valid: true, lineage });
+  });
+
   test.each(['draft', 'completed', 'archived'] as const)('rejects a %s mesocycle', (status) => {
     expect(validateMesocycleExecutionLineage([{ ...activeMesocycle, status }], 'routine-1', lineage)).toEqual({ valid: false, mesocycleId: lineage.mesocycleId, reason: 'inactive-mesocycle' });
   });

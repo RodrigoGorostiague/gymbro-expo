@@ -16,6 +16,7 @@ import {
   rejectPrivatePlanShareRequest,
 } from '../services/privatePlanSharing';
 import { subscribeToJointWorkoutChanges } from '../services/jointWorkouts';
+import { flushPendingJointWorkoutPublications } from '../services/jointWorkoutPublicationQueue';
 import { subscribeToWorkoutStartActivityChanges } from '../services/workoutStartActivity';
 
 type SocialContextValue = {
@@ -103,6 +104,18 @@ export function SocialProvider({ children }: { children: React.ReactNode }) {
     }).catch(() => undefined);
     return () => { mounted = false; unsubscribeGraph(); unsubscribeRecaps(); unsubscribeActivities(); unsubscribeJointWorkouts(); unsubscribeWorkoutStarts(); };
   }, [user, refreshOwnProfile]);
+  useEffect(() => {
+    if (!user) return undefined;
+    let mounted = true;
+    const retry = () => {
+      void flushPendingJointWorkoutPublications(user).then((published) => {
+        if (mounted && published) setRealtimeRevision((revision) => revision + 1);
+      }).catch(() => undefined);
+    };
+    retry();
+    const interval = setInterval(retry, 30_000);
+    return () => { mounted = false; clearInterval(interval); };
+  }, [user]);
   useEffect(() => {
     if (!ownProfile?.autoShareCompletedWorkouts) return;
     for (const attempt of attempts) {

@@ -1,5 +1,5 @@
 begin;
-select plan(50);
+select plan(60);
 
 insert into auth.users (id, instance_id, aud, role, email, encrypted_password, email_confirmed_at, raw_app_meta_data, raw_user_meta_data, created_at, updated_at)
 values ('40000000-0000-0000-0000-000000000001', '00000000-0000-0000-0000-000000000000', 'authenticated', 'authenticated', 'wallet@example.com', '', now(), '{}', '{}', now(), now()),
@@ -38,6 +38,13 @@ select is((select count(*) from public.reward_ledger_entries where owner_id = pu
 select ok(exists(select 1 from public.reward_ledger_entries where owner_id = public.require_actor() and kind = 'mesocycle_perfect_week'), 'perfect planned week bonus is idempotently ledgered');
 select ok(exists(select 1 from public.reward_ledger_entries where owner_id = public.require_actor() and kind = 'mesocycle_complete'), 'mesocycle completion bonus requires linked planned sessions');
 select ok(exists(select 1 from public.reward_ledger_entries where owner_id = public.require_actor() and kind = 'mesocycle_perfect'), 'mesocycle perfection bonus requires all linked sessions at 100 percent');
+select is((public.finalize_training_attempt(pg_temp.test_attempt('plan-two', 10, '{"mesocycleId":"meso-1","weekNumber":1,"plannedSessionId":"plan-2"}'::jsonb)) -> 'experience_receipt' -> 'entries' -> -1 ->> 'kind'), 'mesocycle_completion', 'the final planned session adds the mesocycle XP milestone');
+select is((select count(*) from public.experience_ledger_entries where owner_id = public.require_actor() and kind = 'mesocycle_completion' and idempotency_key = 'mesocycle:meso-1:xp-completion'), 1::bigint, 'mesocycle XP completion is idempotently ledgered once');
+select is(
+  (select amount from public.experience_ledger_entries where owner_id = public.require_actor() and kind = 'mesocycle_completion'),
+  (select floor(sum(entry.amount) * .25)::integer + 150 from public.experience_ledger_entries entry join public.reward_attempts attempt on attempt.owner_id = entry.owner_id and attempt.attempt_id = entry.attempt_id where entry.owner_id = public.require_actor() and attempt.mesocycle_id = 'meso-1' and entry.kind <> 'mesocycle_completion'),
+  'mesocycle XP applies 25 percent of credited session XP plus 150'
+);
 select throws_ok($$select public.purchase_reward_theme('not-a-theme')$$, 'unknown theme', 'server rejects forged theme catalog entries');
 select throws_ok($$select public.purchase_reward_theme('red')$$, 'insufficient reward balance', 'purchase is atomically rejected when unaffordable');
 select throws_ok($$select public.finalize_training_attempt(jsonb_set(pg_temp.test_attempt('forged', 10), '{owner}', '"40000000-0000-0000-0000-000000000002"'::jsonb))$$, 'invalid training attempt input', 'forged cross-owner attempt is rejected');
@@ -61,13 +68,23 @@ select is((select count(*) from public.reward_ledger_entries where owner_id = pu
 select is((select amount from public.reward_ledger_entries where owner_id = public.require_actor() and idempotency_key = 'release:0.4.1:150-gems'), 150, '0.4.1 release gift amount is fixed');
 select is((select amount from public.reward_ledger_entries where owner_id = public.require_actor() and idempotency_key = 'release:0.5.1:50-gems'), 50, '0.5.1 release gift amount is fixed');
 select is((select amount from public.reward_ledger_entries where owner_id = public.require_actor() and idempotency_key = 'release:0.6.0:100-gems'), 100, '0.6.0 release gift amount is fixed');
-select is(jsonb_array_length(public.claim_pending_release_updates(8) -> 'releases'), 8, 'release digest returns every unseen compatible announcement');
+select is((select amount from public.reward_ledger_entries where owner_id = public.require_actor() and idempotency_key = 'release:0.7.0:75-gems'), 75, '0.7.0 release gift amount is fixed');
+select is(jsonb_array_length(public.claim_pending_release_updates(9) -> 'releases'), 9, 'release digest returns every unseen compatible announcement');
 select is((public.claim_pending_release_updates(8) -> 'releases' -> 7 ->> 'rewardGems')::integer, 100, 'release digest reports the 0.6.0 reward');
+select is((public.claim_pending_release_updates(9) -> 'releases' -> 8 ->> 'rewardGems')::integer, 75, 'release digest reports the 0.7.0 reward');
 select lives_ok($$select public.acknowledge_release_updates(array['0.4.1', '0.5.0'])$$, 'release acknowledgements are stored per user');
 select is(jsonb_array_length(public.claim_pending_release_updates(8) -> 'releases'), 6, 'acknowledged releases are not returned again');
 select throws_ok($$select public.acknowledge_release_updates(array['missing'])$$, 'invalid release acknowledgement', 'unknown releases cannot be acknowledged');
 select lives_ok($$select public.purchase_reward_theme('arena')$$, 'new catalog themes can be purchased');
 select ok((public.load_reward_wallet() -> 'purchasedThemeIds') ? 'arena', 'new theme purchase is persisted in the authoritative wallet');
+select throws_ok($$select public.purchase_reward_background('unknown')$$, 'unknown background', 'server rejects forged background catalog entries');
+update public.reward_wallets set balance = 0 where owner_id = public.require_actor();
+select throws_ok($$select public.purchase_reward_background('banzai')$$, 'insufficient reward balance', 'background purchase is atomically rejected when unaffordable');
+insert into public.reward_ledger_entries(owner_id, idempotency_key, amount, kind) values (public.require_actor(), 'background-test-credit', 2, 'test');
+update public.reward_wallets set balance = balance + 2 where owner_id = public.require_actor();
+select lives_ok($$select public.purchase_reward_background('banzai')$$, 'owned background can be purchased and equipped');
+select is(public.load_reward_wallet() ->> 'equippedBackgroundId', 'banzai', 'background auto-equips independently');
+select throws_ok($$select public.update_reward_background_preferences('sakura')$$, 'background is not owned', 'cannot equip an unowned background');
 
 select * from finish();
 rollback;

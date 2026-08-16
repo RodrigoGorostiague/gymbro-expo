@@ -14,6 +14,7 @@ import { useTheme } from '../context/ThemeContext';
 import { AnimatedOrb } from './AnimatedOrb';
 import { DualLoginBackground } from './login/DualLoginBackground';
 import { ThemeDecorations } from './ThemeDecorations';
+import { BackgroundEngine } from './BackgroundEngine';
 import type { AppTheme } from '../types';
 
 const { width: W, height: H } = Dimensions.get('window');
@@ -24,7 +25,7 @@ interface ThemeBackgroundProps {
 }
 
 function SingleThemeBackground({ children, theme: themeOverride }: ThemeBackgroundProps) {
-  const { theme: activeTheme } = useTheme();
+  const { theme: activeTheme, backgroundId } = useTheme();
   const theme = themeOverride ?? activeTheme;
   const breath = useSharedValue(0);
 
@@ -52,6 +53,8 @@ function SingleThemeBackground({ children, theme: themeOverride }: ThemeBackgrou
         />
       </Animated.View>
 
+      {!themeOverride ? <BackgroundEngine backgroundId={backgroundId} /> : null}
+
       <View style={styles.orbLayer} pointerEvents="none">
         <AnimatedOrb color={theme.primary} size={W * 0.55} left={W * 0.45} top={-H * 0.06} delay={0} />
         <AnimatedOrb color={theme.accent} size={W * 0.28} left={-W * 0.08} top={H * 0.22} delay={500} />
@@ -68,12 +71,13 @@ function SingleThemeBackground({ children, theme: themeOverride }: ThemeBackgrou
 }
 
 export function ThemeBackground({ children, theme }: ThemeBackgroundProps) {
-  const { dualThemes, isCombined } = useTheme();
+  const { dualThemes, isCombined, backgroundId } = useTheme();
 
   if (!theme && isCombined && dualThemes) {
     return (
       <View style={styles.fill}>
         <DualLoginBackground rodaja={dualThemes.rodaja} brisas={dualThemes.brisas} />
+        <BackgroundEngine backgroundId={backgroundId} />
         {children}
       </View>
     );
@@ -88,10 +92,11 @@ interface GlassCardProps {
   intensity?: number;
   noPadding?: boolean;
   fill?: boolean;
+  blur?: boolean;
   theme?: AppTheme;
 }
 
-export function GlassCard({ children, style, intensity = 50, noPadding, fill = false, theme: themeOverride }: GlassCardProps) {
+export function GlassCard({ children, style, intensity = 50, noPadding, fill = false, blur = true, theme: themeOverride }: GlassCardProps) {
   const { theme: activeTheme, dualThemes, isCombined } = useTheme();
   const theme = themeOverride ?? activeTheme;
 
@@ -108,11 +113,13 @@ export function GlassCard({ children, style, intensity = 50, noPadding, fill = f
     <View style={[styles.cardOuter, style]}>
       <LinearGradient colors={borderColors} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={[styles.cardBorder, fill && styles.fill]}>
         <View style={[styles.cardInner, fill && styles.fill]}>
-          <BlurView intensity={intensity} tint={theme.blurTint} style={[styles.cardBlur, fill && styles.fill]}>
+          {blur ? <BlurView intensity={intensity} tint={theme.blurTint} style={[styles.cardBlur, fill && styles.fill]}>
             <View style={[noPadding ? undefined : styles.cardContent, fill && styles.fill, { backgroundColor: innerGlass }]}>
               {children}
             </View>
-          </BlurView>
+          </BlurView> : <View style={[styles.cardBlur, noPadding ? undefined : styles.cardContent, fill && styles.fill, { backgroundColor: innerGlass }]}>
+            {children}
+          </View>}
         </View>
       </LinearGradient>
     </View>

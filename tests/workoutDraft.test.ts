@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'vitest';
 import { Exercise, Routine } from '../types';
 import { attemptToSession, createWorkoutAttempt } from '../utils/workoutAttempts';
-import { appendSessionExercise, moveWorkoutExercise, nextEffectiveSessionSetNumber, reconcileSessionSetValues, snapshotWorkoutRoutine, updateSessionExerciseSets, withSessionSetType } from '../utils/workoutDraft';
+import { appendSessionExercise, hasCompletedSessionExerciseSet, moveWorkoutExercise, nextEffectiveSessionSetNumber, reconcileSessionCompletedSets, reconcileSessionSetValues, removeSessionExercise, snapshotWorkoutRoutine, updateSessionExerciseSets, withSessionSetType } from '../utils/workoutDraft';
 
 const routine: Routine = {
   id: 'routine', name: 'Template', muscleGroups: ['chest'], createdAt: '', exercises: [
@@ -105,5 +105,45 @@ describe('active workout snapshot', () => {
       'first-first-set': { weight: '22.5', reps: '9' },
       'second-second-set': { weight: '30', reps: '8' },
     });
+  });
+
+  test('keeps completed-set keys and entered values valid when the session snapshot is reordered', () => {
+    const snapshot = snapshotWorkoutRoutine(routine);
+    const completedSets = { 'first-first-set': true };
+    const values = { 'first-first-set': { weight: '22.5', reps: '9' }, 'second-second-set': { weight: '32.5', reps: '10' } };
+    const moved = moveWorkoutExercise(snapshot, 0, 1);
+
+    expect(moved.exercises.map((exercise) => exercise.id)).toEqual(['second', 'first']);
+    expect(reconcileSessionSetValues(moved, values)).toEqual(values);
+    expect(completedSets).toEqual({ 'first-first-set': true });
+    expect(routine.exercises.map((exercise) => exercise.id)).toEqual(['first', 'second']);
+  });
+
+  test('removes an unstarted exercise only from the session snapshot and reconciles its runtime state', () => {
+    const snapshot = snapshotWorkoutRoutine(routine);
+    const removed = removeSessionExercise(snapshot, 'first');
+    const values = reconcileSessionSetValues(removed, {
+      'first-first-set': { weight: '22.5', reps: '9' },
+      'second-second-set': { weight: '32.5', reps: '10' },
+    });
+    const completed = reconcileSessionCompletedSets(removed, {
+      'first-first-set': true,
+      'second-second-set': false,
+      orphan: true,
+    });
+
+    expect(removed.exercises.map((exercise) => exercise.id)).toEqual(['second']);
+    expect(values).toEqual({ 'second-second-set': { weight: '32.5', reps: '10' } });
+    expect(completed).toEqual({ 'second-second-set': false });
+    expect(routine.exercises.map((exercise) => exercise.id)).toEqual(['first', 'second']);
+  });
+
+  test('locks an exercise after any completed set, including persisted completion representations', () => {
+    const exercise = snapshotWorkoutRoutine(routine).exercises[0];
+
+    expect(hasCompletedSessionExerciseSet(exercise, { 'first-first-set': true })).toBe(true);
+    expect(hasCompletedSessionExerciseSet(exercise, { 'first:first-set': true })).toBe(true);
+    expect(hasCompletedSessionExerciseSet({ ...exercise, sets: [{ ...exercise.sets[0], completed: true }] }, {})).toBe(true);
+    expect(hasCompletedSessionExerciseSet(exercise, {})).toBe(false);
   });
 });

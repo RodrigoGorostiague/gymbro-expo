@@ -2,7 +2,7 @@
   "expo": {
     "name": "GymBro",
     "slug": "GymBro",
-    "version": "0.6.0",
+    "version": "0.7.0",
     "orientation": "portrait",
     "icon": "./assets/gymbro-icon.png",
     "userInterfaceStyle": "dark",
@@ -38,7 +38,14 @@
       "expo-secure-store",
       "expo-audio",
       "expo-asset",
-      "@react-native-community/datetimepicker"
+      "@react-native-community/datetimepicker",
+      "expo-image",
+      [
+        "expo-sensors",
+        {
+          "motionPermission": "Allow $(PRODUCT_NAME) to use device motion for background parallax."
+        }
+      ]
     ],
     "extra": {
       "firebaseApiKey": "AIzaSyDx1ndii4iuEpNJi171VqNJmet-61el06M",

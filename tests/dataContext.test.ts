@@ -28,6 +28,7 @@ const trainingState = vi.hoisted(() => ({
   import: vi.fn(async () => undefined),
   experience: vi.fn(async () => ({ level: 1, rank: 'Principiante', xpIntoLevel: 0, xpForNextLevel: 100, totalXp: 0 })),
 }));
+const finalizeAttempt = vi.hoisted(() => vi.fn());
 
 vi.mock('@react-native-async-storage/async-storage', () => ({ default: storage }));
 vi.mock('../context/AuthContext', () => ({ useAuth: () => ({ user: 'rodaja' }) }));
@@ -47,7 +48,7 @@ vi.mock('../services/trainingState', () => ({
   saveTrainingState: trainingState.save,
   importLegacyCustomDefinitions: trainingState.import,
   loadExperienceProgress: trainingState.experience,
-  finalizeTrainingAttempt: vi.fn(),
+  finalizeTrainingAttempt: finalizeAttempt,
 }));
 vi.mock('../services/experience', () => ({
   loadExperienceProgress: trainingState.experience,
@@ -94,6 +95,7 @@ describe('DataProvider catalog library integration', () => {
     await act(async () => { TestRenderer.create(React.createElement(DataProvider, null, React.createElement(Probe))); });
 
     expect(current?.dataState).toBe('ready');
+    expect(current?.hydratedUserId).toBe('rodaja');
     expect(current?.definitions).toEqual([]);
     expect(current?.exercises[0]).toMatchObject({ id: 'EX-0001', muscleGroups: ['GM-101'] });
     expect(current?.catalogMuscleGroups).toHaveLength(1);
@@ -130,6 +132,33 @@ describe('DataProvider catalog library integration', () => {
     expect(current?.mesocycles).toEqual([]);
     expect(current?.dataState).toBe('ready');
     expect(current?.isLoading).toBe(false);
+  });
+
+  test('marks a mesocycle completed when its final eligible session is accredited', async () => {
+    const mesocycle = {
+      id: 'mesocycle-1', name: 'Block', goal: '', status: 'active' as const, durationWeeks: 1,
+      createdAt: '2026-08-01T00:00:00.000Z', weeks: [{ id: 'week-1', weekNumber: 1, entries: [{ id: 'entry-1', ref: { routineId: 'routine-1', routineName: 'Upper', source: 'local' as const }, order: 1 }] }],
+    };
+    const attempt = {
+      id: 'attempt-1', owner: 'rodaja', routineId: 'routine-1', recordedRoutineName: 'Upper', completedAt: '2026-08-01T00:00:00.000Z', durationSeconds: 0, restTimerSeconds: 0, version: 1 as const,
+      lineage: { mesocycleId: mesocycle.id, weekNumber: 1, plannedSessionId: 'entry-1' }, exercises: [],
+      completion: { validSets: 1, plannedSets: 1, adherence: 1, displayPercent: 100, status: 'fully-completed' as const },
+      reward: { setGems: 1, completionGems: 10, fullCompletionBonus: 6, totalGems: 17, qualifiesForCompletion: true }, rewardApplication: { id: 'receipt', state: 'applied' as const },
+    };
+    trainingLibrary.value = { routines: [library().routines[0]], mesocycles: [mesocycle] };
+    finalizeAttempt.mockResolvedValue({
+      attempt,
+      receipt: { balance: 0, entries: [], weekly: {} },
+      experienceReceipt: { attemptId: attempt.id, earnedXp: 1, entries: [], progress: await trainingState.experience() },
+    });
+    let current: ReturnType<typeof useData> | undefined;
+    const Probe = () => { current = useData(); return null; };
+
+    await act(async () => { TestRenderer.create(React.createElement(DataProvider, null, React.createElement(Probe))); });
+    await act(async () => { await current!.addAttempt(attempt); });
+
+    expect(current?.mesocycles).toMatchObject([{ id: mesocycle.id, status: 'completed' }]);
+    expect(trainingLibrary.saveMesocycles).toHaveBeenCalledWith([expect.objectContaining({ id: mesocycle.id, status: 'completed' })]);
   });
 
   test('rejects deleting a scheduled routine without changing the rendered library', async () => {
@@ -175,6 +204,7 @@ describe('DataProvider catalog library integration', () => {
     await act(async () => { TestRenderer.create(React.createElement(DataProvider, null, React.createElement(Probe))); });
 
     expect(current?.dataState).toBe('error');
+    expect(current?.hydratedUserId).toBe('rodaja');
     expect(current?.dataError).toBe('offline');
     expect(current?.attempts).toEqual([]);
     expect(current?.sessions).toEqual([]);
@@ -284,6 +314,53 @@ describe('DataProvider catalog library integration', () => {
     resolveSecondSave!(undefined);
     await second;
     expect(current!.activeWorkoutDraft).toMatchObject({ restEndsAtMs: 2_000 });
+  });
+
+  test('coalesces deferred active-workout saves to the newest draft', async () => {
+    vi.useFakeTimers();
+    const activeWorkoutDraft = {
+      version: 1 as const, owner: 'rodaja' as const, attemptId: 'attempt-1', routineId: 'routine-1',
+      startedAtMs: 1, restTimerSeconds: 90, completedSets: {}, setValues: {},
+    };
+    trainingLibrary.value = { routines: [library().routines[0]], mesocycles: [] };
+    trainingState.value = { definitions: [], attempts: [], sessions: [], activeWorkoutDraft };
+    trainingState.load.mockResolvedValue(trainingState.value);
+    let current: ReturnType<typeof useData> | undefined;
+    const Probe = () => { current = useData(); return null; };
+
+    await act(async () => { TestRenderer.create(React.createElement(DataProvider, null, React.createElement(Probe))); });
+    const first = current!.updateActiveWorkout({ ...activeWorkoutDraft, restEndsAtMs: 1_000 }, { defer: true });
+    const second = current!.updateActiveWorkout({ ...activeWorkoutDraft, restEndsAtMs: 2_000 }, { defer: true });
+
+    expect(trainingState.save).not.toHaveBeenCalled();
+    await act(async () => { await vi.advanceTimersByTimeAsync(750); });
+    await Promise.all([first, second]);
+    expect(trainingState.save).toHaveBeenCalledTimes(1);
+    expect(trainingState.save).toHaveBeenLastCalledWith({ activeWorkoutDraft: expect.objectContaining({ restEndsAtMs: 2_000 }) });
+    expect(current!.activeWorkoutDraft).toMatchObject({ restEndsAtMs: 2_000 });
+    vi.useRealTimers();
+  });
+
+  test('does not restore a deferred draft after cancelling the workout', async () => {
+    vi.useFakeTimers();
+    const activeWorkoutDraft = {
+      version: 1 as const, owner: 'rodaja' as const, attemptId: 'attempt-1', routineId: 'routine-1',
+      startedAtMs: 1, restTimerSeconds: 90, completedSets: {}, setValues: {},
+    };
+    trainingLibrary.value = { routines: [library().routines[0]], mesocycles: [] };
+    trainingState.value = { definitions: [], attempts: [], sessions: [], activeWorkoutDraft };
+    trainingState.load.mockResolvedValue(trainingState.value);
+    let current: ReturnType<typeof useData> | undefined;
+    const Probe = () => { current = useData(); return null; };
+
+    await act(async () => { TestRenderer.create(React.createElement(DataProvider, null, React.createElement(Probe))); });
+    const pendingSave = current!.updateActiveWorkout({ ...activeWorkoutDraft, restEndsAtMs: 1_000 }, { defer: true });
+    await act(async () => { await current!.cancelActiveWorkout(); await vi.advanceTimersByTimeAsync(750); });
+    await pendingSave;
+
+    expect(trainingState.save).toHaveBeenCalledTimes(1);
+    expect(trainingState.save).toHaveBeenLastCalledWith({ activeWorkoutDraft: null });
+    vi.useRealTimers();
   });
 
   test('recovers the active-workout queue after a save times out without remounting', async () => {

@@ -10,6 +10,7 @@ import { AuthProvider } from '../context/AuthContext';
 import { DataProvider } from '../context/DataContext';
 import { ShopProvider } from '../context/ShopContext';
 import { ThemeProvider, useTheme } from '../context/ThemeContext';
+import { BackgroundParallaxProvider } from '../context/BackgroundParallaxContext';
 import { SocialProvider } from '../context/SocialContext';
 import { NotificationRuntime } from '../components/NotificationRuntime';
 import { AppNoticeModal } from '../components/AppNoticeModal';
@@ -73,6 +74,7 @@ export default function RootLayout() {
         <DataProvider>
           <ShopProvider>
             <SocialProvider>
+              <BackgroundParallaxProvider>
               <ThemeProvider>
                 <RootStatusBar />
                 <AppThemeLoadingOverlay />
@@ -129,6 +131,7 @@ export default function RootLayout() {
                 />
                 </Stack>
               </ThemeProvider>
+              </BackgroundParallaxProvider>
             </SocialProvider>
           </ShopProvider>
         </DataProvider>

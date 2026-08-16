@@ -17,6 +17,8 @@ export const interpolate = (value: number, _input: number[], output: number[]) =
 export const useAnimatedStyle = (factory: () => Record<string, unknown>) => factory();
 export const useAnimatedProps = (factory: () => Record<string, unknown>) => factory();
 export const useSharedValue = (value: number) => ({ value });
+export const useReducedMotion = () => false;
+export const ReduceMotion = { System: 'system' };
 export const cancelAnimation = () => undefined;
 export const withDelay = (_delay: number, value: any) => value;
 export const withRepeat = (value: any) => value;

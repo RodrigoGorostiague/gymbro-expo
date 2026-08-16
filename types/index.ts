@@ -130,6 +130,11 @@ export interface Routine {
   muscleGroups: MuscleGroup[];
   exercises: RoutineExercise[];
   createdAt: string;
+  sharedFrom?: {
+    requestId: string;
+    senderId: string;
+    acceptedAt: string;
+  };
   isShared?: boolean;
   shareId?: string;
 }
@@ -181,6 +186,11 @@ export interface Mesocycle {
   durationWeeks: number;
   startDate?: string;
   createdAt: string;
+  sharedFrom?: {
+    requestId: string;
+    senderId: string;
+    acceptedAt: string;
+  };
 }
 
 export interface ProfilePlanLibrary {

@@ -1,5 +1,5 @@
 begin;
-select plan(12);
+select plan(14);
 
 insert into auth.users (id, instance_id, aud, role, email, encrypted_password, email_confirmed_at, raw_app_meta_data, raw_user_meta_data, created_at, updated_at)
 values
@@ -17,6 +17,20 @@ select lives_ok($$select public.save_training_library('[{"id":"routine-1","name"
 select is(public.load_training_library() -> 'routines' -> 0 ->> 'id', 'routine-1', 'saved routines persist in the owner library');
 select lives_ok($$select public.save_training_library(null, '[{"id":"mesocycle-1","name":"Block","goal":"","status":"draft","durationWeeks":1,"weeks":[],"createdAt":"2026-08-01T00:00:00.000Z"}]'::jsonb)$$, 'a planner saves mesocycles without replacing routines');
 select is(public.load_training_library() -> 'routines' -> 0 ->> 'id', 'routine-1', 'partial mesocycle save preserves routines');
+select throws_ok(
+  $$select public.save_training_library(null, '[{"id":"empty-completed","name":"Empty","goal":"","status":"completed","durationWeeks":1,"weeks":[],"createdAt":"2026-08-01T00:00:00.000Z"}]'::jsonb)$$,
+  'mesocycle cannot be completed yet',
+  'a mesocycle without a finalized training cannot be manually completed'
+);
+set local role postgres;
+insert into public.reward_attempts(owner_id, attempt_id, completed_at, week_start, adherence, valid_sets, planned_sets, mesocycle_id, mesocycle_week, planned_session_id)
+values ('20000000-0000-0000-0000-000000000001', 'future-attempt', now(), current_date, 1, 1, 1, 'future-completed', 1, 'session-1');
+set local role authenticated;
+select throws_ok(
+  $$select public.save_training_library(null, '[{"id":"future-completed","name":"Future","goal":"","status":"completed","startDate":"2999-01-01","durationWeeks":1,"weeks":[{"id":"week-1","weekNumber":1,"entries":[{"id":"session-1","ref":{"routineId":"routine-1","routineName":"Upper","source":"local"},"order":1}]}],"createdAt":"2026-08-01T00:00:00.000Z"}]'::jsonb)$$,
+  'mesocycle cannot be completed yet',
+  'a mesocycle with a future routine cannot be manually completed'
+);
 select lives_ok(
   $$select public.save_training_library(null, '[{"id":"scheduled","name":"Scheduled","goal":"","status":"draft","durationWeeks":1,"weeks":[{"id":"week-1","weekNumber":1,"entries":[{"id":"session-1","ref":{"routineId":"routine-1","routineName":"Upper","source":"local"},"order":1}]}],"createdAt":"2026-08-01T00:00:00.000Z"}]'::jsonb)$$,
   'a mesocycle can schedule an existing routine'

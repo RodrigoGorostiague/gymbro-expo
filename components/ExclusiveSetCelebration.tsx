@@ -1,4 +1,4 @@
-import { useEffect } from 'react';
+import { forwardRef, useImperativeHandle } from 'react';
 import { StyleSheet, View } from 'react-native';
 import Animated, {
   Easing,
@@ -38,7 +38,11 @@ function Particle({ color, progress, x, y, size, rotation, shape }: ParticleProp
   return <Animated.View style={[styles.particle, shape === 'circle' && styles.circle, shape === 'bar' && styles.bar, { width: size, height: size, backgroundColor: color }, style]} />;
 }
 
-export function ExclusiveSetCelebration({ active, theme }: { active: number; theme: AppTheme }) {
+export type SetCelebrationHandle = {
+  play: () => void;
+};
+
+export const ExclusiveSetCelebration = forwardRef<SetCelebrationHandle, { theme: AppTheme }>(function ExclusiveSetCelebration({ theme }, ref) {
   const progress = useSharedValue(1);
   const celebration = theme.celebration ?? DEFAULT_CELEBRATION;
   const particles = Array.from({ length: celebration.particleCount }, (_, index) => {
@@ -51,18 +55,17 @@ export function ExclusiveSetCelebration({ active, theme }: { active: number; the
     };
   });
 
-  useEffect(() => {
-    if (active === 0) return;
-    progress.value = 0;
-    progress.value = withTiming(1, { duration: celebration.duration, easing: Easing.out(Easing.cubic) });
-  }, [active, celebration.duration, progress]);
+  useImperativeHandle(ref, () => ({
+    play: () => {
+      progress.value = 0;
+      progress.value = withTiming(1, { duration: celebration.duration, easing: Easing.out(Easing.cubic) });
+    },
+  }), [celebration.duration, progress]);
 
   const flashStyle = useAnimatedStyle(() => ({
     opacity: interpolate(progress.value, [0, 0.1, 0.55, 1], [0, 0.82, 0.12, 0]),
     transform: [{ scale: interpolate(progress.value, [0, 1], [0.5, celebration.flashScale]) }],
   }));
-
-  if (active === 0) return null;
 
   return (
     <View pointerEvents="none" style={styles.layer}>
@@ -70,7 +73,7 @@ export function ExclusiveSetCelebration({ active, theme }: { active: number; the
       {particles.map((particle, index) => <Particle key={index} {...particle} progress={progress} rotation={celebration.rotation} shape={celebration.shape} />)}
     </View>
   );
-}
+});
 
 const styles = StyleSheet.create({
   layer: {
