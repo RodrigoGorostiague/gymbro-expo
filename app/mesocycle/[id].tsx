@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { Alert, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { Alert, StyleSheet, Text, TextInput, View } from 'react-native';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { router, useLocalSearchParams } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -29,7 +29,7 @@ import { generateId } from '../../utils/storage';
 import { muscleGroupLabels } from '../../utils/catalogMuscleGroups';
 import { deriveMesocycleDateRange, findOverlappingMesocycle } from '../../utils/mesocycleAnalytics';
 import { hasPlannedSessionAttempt, reorderWeekEntries } from '../../utils/mesocycleSchedule';
-import DraggableFlatList, { ScaleDecorator } from 'react-native-draggable-flatlist';
+import { NestableDraggableFlatList, NestableScrollContainer, ScaleDecorator } from 'react-native-draggable-flatlist';
 import * as Haptics from 'expo-haptics';
 
 const routineRef = (routine: Routine) => ({
@@ -130,7 +130,7 @@ export default function MesocycleDetailScreen() {
   const adherence = deriveMesocycleAdherence(draft, attempts);
   const completionBlockReason = mesocycleCompletionBlockReason(draft, attempts);
 
-  return <ThemeBackground><SafeAreaView style={styles.safe}><AppNavBar onBack={() => router.back()} trailing={<HapticPressable accessibilityLabel={`Compartir ${draft.name}`} onPress={() => router.push({ pathname: '/community/share-plan', params: { kind: 'mesocycle', id: draft.id, name: draft.name } })}><Text style={{ color: theme.primary, fontWeight: '800' }}>Compartir</Text></HapticPressable>} /><ScrollView contentContainerStyle={styles.scroll}>
+  return <ThemeBackground><SafeAreaView style={styles.safe}><AppNavBar onBack={() => router.back()} trailing={<HapticPressable accessibilityLabel={`Compartir ${draft.name}`} onPress={() => router.push({ pathname: '/community/share-plan', params: { kind: 'mesocycle', id: draft.id, name: draft.name } })}><Text style={{ color: theme.primary, fontWeight: '800' }}>Compartir</Text></HapticPressable>} /><NestableScrollContainer contentContainerStyle={styles.scroll}>
     <Text style={[styles.title, { color: theme.text }]}>{draft.name}</Text>
     <GlassInput value={draft.name} onChangeText={(name) => change((value) => ({ ...value, name }))} />
     <DateTimeField value={derivedStartDate ?? startDate} onChange={setStartDate} mode="date" testID="mesocycle-edit-start-date-picker" />
@@ -194,7 +194,7 @@ export default function MesocycleDetailScreen() {
       }
       void updateMesocycle(candidate).then(() => Alert.alert('Mesociclo actualizado', 'La planificación semanal quedó guardada.'));
     }} />
-  </ScrollView></SafeAreaView></ThemeBackground>;
+  </NestableScrollContainer></SafeAreaView></ThemeBackground>;
 }
 
 function WeekCard({ week, progress, scheduleByEntry, theme, open, routines, catalogMuscleGroups, onOpen, onAddRoutine, onAddRest, onRemove, onMove, onPlanningStateChange, onRecoveryStart, lockedEntryIds, onCopy }: {
@@ -220,7 +220,7 @@ function WeekCard({ week, progress, scheduleByEntry, theme, open, routines, cata
   return <GlassCard style={styles.card}>
     <Text style={[styles.heading, { color: theme.text }]}>Semana {week.weekNumber}</Text>
     <Text style={{ color: theme.textMuted }}>Progreso: {progress.completedSessions}/{progress.plannedSessions} sesiones completadas</Text>
-    <DraggableFlatList data={week.entries} keyExtractor={(entry) => entry.id} activationDistance={8} scrollEnabled={false} dragItemOverflow={false} onDragBegin={() => { void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); }} onDragEnd={({ from, to }) => { if (from !== to) onMove(from, to); }} renderPlaceholder={({ item: entry }) => <View pointerEvents="none" accessible accessibilityLabel={`Posición temporal de ${isRest(entry) ? 'día de descanso' : entry.ref.routineName}`} style={[styles.placeholder, { borderColor: theme.glassBorder, backgroundColor: theme.glass }]}><View style={[styles.placeholderDate, { backgroundColor: theme.primary }]} /><View style={[styles.placeholderTitle, { backgroundColor: theme.glassBorder }]} /><View style={[styles.placeholderMetadata, { backgroundColor: theme.glassBorder }]} /></View>} renderItem={({ item: entry, drag, isActive }) => <ScaleDecorator><View style={isActive ? styles.dragging : undefined}>{(() => { const index = week.entries.findIndex((candidate) => candidate.id === entry.id);
+    <NestableDraggableFlatList data={week.entries} keyExtractor={(entry) => entry.id} activationDistance={8} scrollEnabled={false} dragItemOverflow={false} onDragBegin={() => { void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); }} onDragEnd={({ from, to }) => { if (from !== to) onMove(from, to); }} renderPlaceholder={({ item: entry }) => <View pointerEvents="none" accessible accessibilityLabel={`Posición temporal de ${isRest(entry) ? 'día de descanso' : entry.ref.routineName}`} style={[styles.placeholder, { borderColor: theme.glassBorder, backgroundColor: theme.glass }]}><View style={[styles.placeholderDate, { backgroundColor: theme.primary }]} /><View style={[styles.placeholderTitle, { backgroundColor: theme.glassBorder }]} /><View style={[styles.placeholderMetadata, { backgroundColor: theme.glassBorder }]} /></View>} renderItem={({ item: entry, drag, isActive }) => <ScaleDecorator><View style={isActive ? styles.dragging : undefined}>{(() => { const index = week.entries.findIndex((candidate) => candidate.id === entry.id);
       const projection = scheduleByEntry.get(entry.id);
       const date = projection?.dateLabel;
       const unavailable = projection?.kind === 'routine' && !projection.routine.available;
