@@ -146,12 +146,15 @@ export interface Routine {
 /** Current lifecycle states introduced by the mesocycle rebuild. */
 export const MESOCYCLE_STATUSES = ['draft', 'scheduled', 'active', 'completed', 'paused', 'cancelled'] as const;
 export type CurrentMesocycleStatus = typeof MESOCYCLE_STATUSES[number];
+/** Archived plans predate the lifecycle rebuild and remain distinct historical records. */
+export type LegacyMesocycleStatus = 'archived';
+export type MesocycleStatus = CurrentMesocycleStatus | LegacyMesocycleStatus;
 
-/**
- * Legacy persisted-model status. This stays separate until the screen rebuild
- * moves all existing consumers to `CurrentMesocycleStatus`.
- */
-export type MesocycleStatus = 'draft' | 'active' | 'completed' | 'archived';
+export type MesocycleLifecycleEvent =
+  | { type: 'paused'; at: string; localDate: string }
+  | { type: 'resumed'; at: string; localDate: string; pauseStartedAt: string; pauseStartedDate: string; shiftDays: number; shiftedPlannedSessionIds: string[] }
+  | { type: 'completed'; at: string }
+  | { type: 'cancelled'; at: string };
 
 export type PlannedSessionRoutineSource = 'local' | 'shared';
 
@@ -187,6 +190,8 @@ export interface PlannedSession {
   recoveryForPlannedSessionId?: string;
   recoveredByPlannedSessionId?: string;
   isExtraordinary?: boolean;
+  /** Calendar shift already in force when this slot was added after prior pauses. */
+  scheduleShiftDays?: number;
 }
 
 export type MesocycleEntry = PlannedSession | { id: string; kind: 'rest' };
@@ -209,6 +214,11 @@ export interface Mesocycle {
   weeks: MesocycleWeek[];
   durationWeeks: number;
   startDate?: string;
+  pausedAt?: string;
+  pausedOn?: string;
+  /** Sum of local calendar days applied by completed pause intervals. */
+  scheduleShiftDays?: number;
+  lifecycleHistory?: MesocycleLifecycleEvent[];
   createdAt: string;
   sharedFrom?: {
     requestId: string;

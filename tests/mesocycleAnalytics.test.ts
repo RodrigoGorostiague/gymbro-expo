@@ -85,6 +85,7 @@ describe('mesocycle analytics domain utilities', () => {
       ['shared', ['shared']],
       ['draft', ['draft-new', 'draft-old']],
       ['completed', ['completed']],
+      ['cancelled', []],
       ['archived', ['archived']],
     ]);
   });

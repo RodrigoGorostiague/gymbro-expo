@@ -32,7 +32,7 @@ const plan = (): Mesocycle => ({
 });
 
 describe('planned session lifecycle', () => {
-  beforeEach(() => { storage.data.clear(); vi.clearAllMocks(); });
+  beforeEach(() => { storage.data.clear(); vi.clearAllMocks(); vi.setSystemTime(new Date('2026-08-16T12:00:00')); });
 
   test('normalizes legacy sessions to pending and retains valid lifecycle metadata', async () => {
     storage.data.set('@gymbro/mesocycles/v2/owner', JSON.stringify([plan(), {
@@ -70,10 +70,10 @@ describe('planned session lifecycle', () => {
     const entry = plan().weeks[0].entries[0];
     if ('kind' in entry) throw new Error('Expected routine entry');
     const transitioned = transitionPlannedSession(entry, 'skipped', '2026-08-16T10:00:00.000Z', 'Sick');
-    const [clone] = clonePlannedWeekEntries([{ ...transitioned, recoveryForPlannedSessionId: 'older', recoveredByPlannedSessionId: 'newer' }]);
+    const [clone] = clonePlannedWeekEntries([{ ...transitioned, recoveryForPlannedSessionId: 'older', recoveredByPlannedSessionId: 'newer' }], 4);
 
     expect(transitioned.planningTransition).toEqual({ from: 'pending', to: 'skipped', at: '2026-08-16T10:00:00.000Z', reason: 'Sick' });
-    expect(clone).toMatchObject({ planningState: 'pending' });
+    expect(clone).toMatchObject({ planningState: 'pending', scheduleShiftDays: 4 });
     expect(clone).not.toHaveProperty('planningTransition');
     expect(clone).not.toHaveProperty('recoveryForPlannedSessionId');
     expect(clone).not.toHaveProperty('recoveredByPlannedSessionId');
@@ -134,5 +134,10 @@ describe('planned session lifecycle', () => {
     expect(mesocycle.weeks[0].entries[0]).not.toHaveProperty('planningState');
     expect(() => reschedulePlannedSessionWithRecovery(mesocycle, { weekNumber: 1, entryId: 'source' }, { weekNumber: 3, entryId: 'outside-rest' }, [], '2026-08-16T10:00:00.000Z', 'recovery-slot')).toThrow('not an eligible empty or rest slot');
     expect(mesocycle.weeks[0].entries).toHaveLength(2);
+  });
+
+  test('excludes past rest and empty recovery destinations', () => {
+    const mesocycle = { ...plan(), startDate: '2026-08-14', weeks: [{ ...plan().weeks[0], entries: [{ id: 'past-rest', kind: 'rest' as const }] }] };
+    expect(eligibleRecoveryDestinations(mesocycle, new Date('2026-08-16T12:00:00'))).toEqual([]);
   });
 });

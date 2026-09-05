@@ -2,7 +2,7 @@ import React, { createContext, useContext, useEffect, useMemo, useRef, useState 
 import { ActiveWorkoutDraft, CatalogImportPlan, CatalogImportResult, ExperienceProgress, Exercise, ExerciseDefinition, ExerciseVariant, Mesocycle, MuscleGroup, PlannedSessionRef, Routine, UserProfile, WorkoutAttempt, WorkoutSession } from '../types';
 import { CatalogMuscleGroup, CatalogParticipationMode, filterCatalogExercises, loadCatalogExercises, loadCatalogMuscleGroups } from '../services/catalog';
 import { loadTrainingLibrary, saveTrainingLibrary, saveTrainingMesocycles, saveTrainingRoutines } from '../services/trainingLibrary';
-import { completeMesocycleWhenAllSessionsComplete } from '../utils/mesocycles';
+import { canDeleteMesocycle, completeMesocycleWhenAllSessionsComplete, isMesocycleLifecycleOnlyEdit } from '../utils/mesocycles';
 import {
   generateId,
   readLegacyCustomDefinitions,
@@ -578,9 +578,11 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
         throw new Error('Mesocycle not found.');
       }
 
+      const existing = current.find((item) => item.id === mesocycle.id)!;
       const used = attempts.some((attempt) => attempt.lineage?.mesocycleId === mesocycle.id);
+      const shouldVersion = used && !isMesocycleLifecycleOnlyEdit(existing, mesocycle);
       return {
-        next: used ? [...current, nextContentVersion(current.find((item) => item.id === mesocycle.id)!, mesocycle, generateId())] : current.map((item) => item.id === mesocycle.id ? mesocycle : item),
+        next: shouldVersion ? [...current, nextContentVersion(existing, mesocycle, generateId())] : current.map((item) => item.id === mesocycle.id ? mesocycle : item),
         result: undefined,
       };
     });
@@ -588,9 +590,11 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
 
   const deleteMesocycle = async (id: string): Promise<void> => {
     return enqueueMesocycleMutation((current) => {
-      if (!current.some((mesocycle) => mesocycle.id === id)) {
+      const existing = current.find((mesocycle) => mesocycle.id === id);
+      if (!existing) {
         throw new Error('Mesocycle not found.');
       }
+      if (!canDeleteMesocycle(existing, attempts)) throw new Error('Solo se pueden eliminar borradores sin entrenamientos registrados.');
 
       return {
         next: current.filter((mesocycle) => mesocycle.id !== id),

@@ -43,6 +43,18 @@ describe('training library RPC boundary', () => {
     await expect(loadTrainingLibrary()).rejects.toThrow('contenido inválido');
   });
 
+  test('loads grandfathered long plans and repairs a paused plan without restart metadata', async () => {
+    rpc.mockResolvedValueOnce({ data: { routines: [], mesocycles: [
+      { id: 'legacy', name: 'Legacy', status: 'archived', durationWeeks: 60, createdAt: '', weeks: [] },
+      { id: 'stranded', name: 'Paused', status: 'paused', durationWeeks: 1, createdAt: '', weeks: [] },
+    ] }, error: null });
+
+    await expect(loadTrainingLibrary()).resolves.toEqual({ routines: [], mesocycles: [
+      expect.objectContaining({ id: 'legacy', durationWeeks: 60 }),
+      expect.objectContaining({ id: 'stranded', status: 'active' }),
+    ] });
+  });
+
   test('sends only explicit partial updates to the RPC', async () => {
     rpc.mockResolvedValueOnce({ error: null });
 

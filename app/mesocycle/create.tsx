@@ -15,9 +15,8 @@ import { findOverlappingMesocycle } from '../../utils/mesocycleAnalytics';
 
 const STATUS_OPTIONS: { value: MesocycleStatus; label: string }[] = [
   { value: 'draft', label: 'Borrador' },
+  { value: 'scheduled', label: 'Programado' },
   { value: 'active', label: 'Activo' },
-  { value: 'completed', label: 'Completado' },
-  { value: 'archived', label: 'Archivado' },
 ];
 
 const buildWeeks = (durationWeeks: number): Mesocycle['weeks'] => Array.from({ length: durationWeeks }, (_, index) => ({
@@ -53,8 +52,8 @@ export default function CreateMesocycleScreen() {
       Alert.alert('Validación', 'El nombre no puede estar vacío.');
       return;
     }
-    if (!Number.isInteger(parsedWeeks) || parsedWeeks <= 0) {
-      Alert.alert('Validación', 'La duración debe ser un número entero mayor a 0.');
+    if (!Number.isInteger(parsedWeeks) || parsedWeeks <= 0 || parsedWeeks > 52) {
+      Alert.alert('Validación', 'La duración debe ser un número entero entre 1 y 52 semanas.');
       return;
     }
 

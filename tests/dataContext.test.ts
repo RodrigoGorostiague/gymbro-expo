@@ -134,6 +134,21 @@ describe('DataProvider catalog library integration', () => {
     expect(current?.isLoading).toBe(false);
   });
 
+  test('rejects deleting terminal or attempted mesocycles at the context boundary', async () => {
+    const draft = { id: 'draft', name: 'Draft', goal: '', status: 'draft' as const, durationWeeks: 1, createdAt: '', weeks: [] };
+    const completed = { ...draft, id: 'completed', status: 'completed' as const };
+    trainingLibrary.value = { routines: [], mesocycles: [draft, completed] };
+    trainingState.value = { ...trainingState.value, attempts: [{ lineage: { mesocycleId: draft.id, weekNumber: 1, plannedSessionId: 'session' } } as any] };
+    trainingState.load.mockResolvedValue(trainingState.value);
+    let current: ReturnType<typeof useData> | undefined;
+    const Probe = () => { current = useData(); return null; };
+    await act(async () => { TestRenderer.create(React.createElement(DataProvider, null, React.createElement(Probe))); });
+    await act(async () => { await expect(current!.deleteMesocycle(completed.id)).rejects.toThrow('borradores sin entrenamientos'); });
+    await act(async () => { await expect(current!.deleteMesocycle(draft.id)).rejects.toThrow('borradores sin entrenamientos'); });
+    expect(trainingLibrary.saveMesocycles).not.toHaveBeenCalled();
+    expect(current?.mesocycles).toHaveLength(2);
+  });
+
   test('marks a mesocycle completed when its final eligible session is accredited', async () => {
     const mesocycle = {
       id: 'mesocycle-1', name: 'Block', goal: '', status: 'active' as const, durationWeeks: 1,

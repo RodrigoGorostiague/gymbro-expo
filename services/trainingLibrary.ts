@@ -27,7 +27,7 @@ function isRoutine(value: unknown): value is Routine {
 function isMesocycle(value: unknown, routineIds: ReadonlySet<string>): value is Mesocycle {
   if (!isRecord(value) || typeof value.id !== 'string' || !value.id.trim()
     || typeof value.name !== 'string' || !value.name.trim()
-    || !['draft', 'active', 'completed', 'archived'].includes(value.status as string)
+    || !['draft', 'scheduled', 'active', 'completed', 'paused', 'cancelled', 'archived'].includes(value.status as string)
     || !Number.isInteger(value.durationWeeks) || (value.durationWeeks as number) < 1
     || typeof value.createdAt !== 'string' || !Array.isArray(value.weeks)) return false;
   return value.weeks.every((week) => isRecord(week) && typeof week.id === 'string'
@@ -61,7 +61,9 @@ export async function loadTrainingLibrary(): Promise<TrainingLibrary> {
   }
   return {
     routines,
-    mesocycles: value.mesocycles,
+    mesocycles: value.mesocycles.map((mesocycle) => mesocycle.status === 'paused' && (typeof mesocycle.pausedAt !== 'string' || Number.isNaN(Date.parse(mesocycle.pausedAt)))
+      ? { ...mesocycle, status: 'active', pausedAt: undefined, pausedOn: undefined }
+      : mesocycle),
   };
 }
 

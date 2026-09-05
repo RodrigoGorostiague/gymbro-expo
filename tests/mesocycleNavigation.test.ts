@@ -1,7 +1,7 @@
 import React from 'react';
 import { readFileSync } from 'node:fs';
 import { beforeEach, describe, expect, test, vi } from 'vitest';
-import { changeText, findButton, findText, mockRouter, press, render, resetRuntimeHarness, setMockData, setMockParams } from './helpers/runtimeHarness';
+import { changeText, findButton, findText, mockAlert, mockRouter, press, render, resetRuntimeHarness, setMockData, setMockParams } from './helpers/runtimeHarness';
 import CreateMesocycleScreen from '../app/mesocycle/create';
 import MesocycleDetailScreen from '../app/mesocycle/[id]';
 import MesocycleSummaryScreen from '../app/mesocycle/summary/[id]';
@@ -97,6 +97,18 @@ describe('mesocycle overview', () => {
     const source = readFileSync(new URL('../app/(tabs)/mesocycles/index.tsx', import.meta.url), 'utf8');
     expect(source).toContain('groupMesocyclesForList(mesocycles)');
   });
+
+  test('offers deletion only for unused drafts', () => {
+    const draft = { ...subject, id: 'draft', name: 'Draft', status: 'draft' as const };
+    const attempted = { ...draft, id: 'attempted', name: 'Attempted' };
+    const completed = { ...subject, id: 'completed', name: 'Completed', status: 'completed' as const };
+    setMockData({ mesocycles: [draft, attempted, completed], attempts: [{ lineage: { mesocycleId: attempted.id, weekNumber: 1, plannedSessionId: 'entry-1' }, exercises: [], completion: { status: 'partial' } } as any], routines: [] });
+    const screen = render(React.createElement(MesocyclesScreen));
+    press(screen.root.find((node) => node.props.accessibilityLabel === 'Mostrar Borradores'));
+    press(screen.root.find((node) => node.props.accessibilityLabel === 'Mostrar Completados'));
+
+    expect(new Set(screen.root.findAll((node) => String(node.props.accessibilityLabel ?? '').startsWith('Eliminar ')).map((node) => node.props.accessibilityLabel))).toEqual(new Set(['Eliminar Draft']));
+  });
 });
 
 describe('mesocycle edit schedule selection', () => {
@@ -104,12 +116,11 @@ describe('mesocycle edit schedule selection', () => {
     setMockData({ getMesocycle: vi.fn(() => subject), routines: [routine], attempts: [], updateMesocycle: vi.fn() });
     const screen = render(React.createElement(MesocycleDetailScreen));
 
-    const lists = screen.root.findAll((node) => (node.type as any) === 'DraggableFlatList');
-    expect(lists).toHaveLength(1);
-    expect(lists[0].props.scrollEnabled).toBe(false);
-    expect(lists[0].props.dragItemOverflow).toBe(false);
-    expect(screen.root.findAll((node) => (node.type as any) === 'NestableDraggableFlatList')).toHaveLength(0);
-    expect(screen.root.findAll((node) => (node.type as any) === 'NestableScrollContainer')).toHaveLength(0);
+    const source = readFileSync(new URL('../app/mesocycle/[id].tsx', import.meta.url), 'utf8');
+    expect(source).toContain('<NestableScrollContainer');
+    expect(source).toContain('<NestableDraggableFlatList');
+    expect(source).toContain('scrollEnabled={false}');
+    expect(source).toContain('dragItemOverflow={false}');
   });
 
   test('keeps a selected lifecycle status in the draft until planning is saved', async () => {
@@ -119,18 +130,10 @@ describe('mesocycle edit schedule selection', () => {
     const screen = render(React.createElement(MesocycleDetailScreen));
 
     expect(findText(screen.root, 'Las sesiones planificadas todavía no se pueden ejecutar.')).toBeTruthy();
-    press(screen.root.find((node) => node.props.accessibilityLabel === 'Estado: Activo'));
+    press(findButton(screen.root, 'Activar'));
     expect(updateMesocycle).not.toHaveBeenCalled();
-    expect(findText(screen.root, 'Habilita las sesiones vinculadas y las recompensas.')).toBeTruthy();
-    expect(screen.root.find((node) => node.props.accessibilityLabel === 'Estado: Activo').props.accessibilityState).toEqual({ selected: true });
-    ['Borrador', 'Activo', 'Archivado'].forEach((label) => {
-      expect(screen.root.find((node) => node.props.accessibilityLabel === `Estado: ${label}`)).toBeTruthy();
-    });
-    expect(screen.root.findAll((node) => node.props.accessibilityLabel === 'Estado: Completado')).toHaveLength(0);
+    expect(findText(screen.root, 'Las sesiones pendientes están habilitadas.')).toBeTruthy();
     expect(findText(screen.root, 'Completá al menos un entrenamiento del mesociclo antes de cerrarlo.')).toBeTruthy();
-    press(screen.root.find((node) => node.props.accessibilityLabel === 'Estado: Archivado'));
-    expect(findText(screen.root, 'Se conserva el historial, pero no se pueden iniciar sesiones planificadas.')).toBeTruthy();
-    press(screen.root.find((node) => node.props.accessibilityLabel === 'Estado: Activo'));
 
     press(findButton(screen.root, 'Guardar planificación'));
 
@@ -153,6 +156,17 @@ describe('mesocycle edit schedule selection', () => {
     const saved = updateMesocycle.mock.calls[0]![0];
     expect(saved).toMatchObject({ startDate: '2026-07-26' });
     expect(saved.weeks[0].entries[0]).toMatchObject({ ref: { routineId: 'routine-1' } });
+  });
+
+  test('shows the persisted start date and reports save failures', async () => {
+    const updateMesocycle = vi.fn(async () => { throw new Error('offline'); });
+    setMockData({ getMesocycle: vi.fn(() => subject), mesocycles: [subject], routines: [routine], attempts: [], updateMesocycle });
+    const screen = render(React.createElement(MesocycleDetailScreen));
+
+    const trigger = screen.root.find((node) => node.props.testID === 'mesocycle-edit-start-date-picker-trigger');
+    expect(trigger.findAll((node) => String(node.type) === 'Text')[0].children.join('')).toBe(subject.startDate);
+    press(findButton(screen.root, 'Guardar planificación'));
+    await vi.waitFor(() => expect(mockAlert.alert).toHaveBeenCalledWith('No se pudo guardar', 'offline'));
   });
 
   test('allows the same routine to be scheduled more than once in a week', async () => {

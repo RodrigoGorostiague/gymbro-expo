@@ -14,16 +14,15 @@ export interface MesocycleStatusCopy {
 
 export type MesocycleTemporalLabel = 'upcoming' | 'in-progress' | 'ended' | 'undated';
 
-type SupportedMesocycleStatus = CurrentMesocycleStatus | MesocycleStatus;
-
 export interface MesocycleAnalyticsInput {
   id: string;
-  status: SupportedMesocycleStatus;
+  status: MesocycleStatus;
   startDate?: string;
   durationWeeks: number;
+  scheduleShiftDays?: number;
 }
 
-export type MesocycleListSection = 'active' | 'shared' | 'draft' | 'completed' | 'archived';
+export type MesocycleListSection = 'active' | 'shared' | 'draft' | 'completed' | 'cancelled' | 'archived';
 
 export interface MesocycleListInput extends MesocycleAnalyticsInput {
   createdAt: string;
@@ -35,9 +34,9 @@ export interface MesocycleListGroup<T> {
   items: T[];
 }
 
-const TERMINAL_STATUSES: readonly SupportedMesocycleStatus[] = ['completed', 'cancelled', 'archived'];
+const TERMINAL_STATUSES: readonly MesocycleStatus[] = ['completed', 'cancelled', 'archived'];
 
-const STATUS_COPY: Readonly<Record<SupportedMesocycleStatus, MesocycleStatusCopy>> = {
+const STATUS_COPY: Readonly<Record<MesocycleStatus, MesocycleStatusCopy>> = {
   draft: {
     label: 'Borrador',
     description: 'Este mesociclo todavía está en preparación.',
@@ -99,16 +98,16 @@ export function isCurrentMesocycleStatus(status: string): status is CurrentMesoc
   return (MESOCYCLE_STATUSES as readonly string[]).includes(status);
 }
 
-export function isTerminalMesocycleStatus(status: SupportedMesocycleStatus): boolean {
+export function isTerminalMesocycleStatus(status: MesocycleStatus): boolean {
   return TERMINAL_STATUSES.includes(status);
 }
 
 /** Returns an inclusive calendar range, or null when a plan has no valid dated duration. */
-export function deriveMesocycleDateRange(mesocycle: Pick<MesocycleAnalyticsInput, 'startDate' | 'durationWeeks'>): MesocycleDateRange | null {
+export function deriveMesocycleDateRange(mesocycle: Pick<MesocycleAnalyticsInput, 'startDate' | 'durationWeeks' | 'scheduleShiftDays'>): MesocycleDateRange | null {
   const start = parseCivilDate(mesocycle.startDate);
   if (!start || !Number.isInteger(mesocycle.durationWeeks) || mesocycle.durationWeeks <= 0) return null;
 
-  const dayCount = mesocycle.durationWeeks * 7;
+  const dayCount = mesocycle.durationWeeks * 7 + Math.max(0, mesocycle.scheduleShiftDays ?? 0);
   const end = new Date(start.getFullYear(), start.getMonth(), start.getDate() + dayCount - 1, 12);
   return { startDate: formatCivilDate(start), endDate: formatCivilDate(end), dayCount };
 }
@@ -169,7 +168,7 @@ function activeTemporalPriority(mesocycle: MesocycleListInput): number {
 
 /** Groups the library in the order presented by the mesocycle screen. */
 export function groupMesocyclesForList<T extends MesocycleListInput>(mesocycles: readonly T[]): MesocycleListGroup<T>[] {
-  const active = mesocycles.filter((mesocycle) => mesocycle.status === 'active' && !mesocycle.sharedFrom)
+  const active = mesocycles.filter((mesocycle) => ['scheduled', 'active', 'paused'].includes(mesocycle.status) && !mesocycle.sharedFrom)
     .sort((left, right) => activeTemporalPriority(left) - activeTemporalPriority(right)
       || (left.startDate ?? '').localeCompare(right.startDate ?? '')
       || compareDatesDescending(left.createdAt, right.createdAt));
@@ -185,10 +184,11 @@ export function groupMesocyclesForList<T extends MesocycleListInput>(mesocycles:
     { key: 'shared', items: shared },
     { key: 'draft', items: historical('draft').sort((left, right) => compareDatesDescending(left.createdAt, right.createdAt)) },
     { key: 'completed', items: historical('completed') },
+    { key: 'cancelled', items: historical('cancelled') },
     { key: 'archived', items: historical('archived') },
   ];
 }
 
-export function getMesocycleStatusCopy(status: SupportedMesocycleStatus): MesocycleStatusCopy {
+export function getMesocycleStatusCopy(status: MesocycleStatus): MesocycleStatusCopy {
   return STATUS_COPY[status];
 }

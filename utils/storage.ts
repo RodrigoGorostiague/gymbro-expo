@@ -10,7 +10,9 @@ import {
   ExerciseDefinition,
   ExerciseVariant,
   Mesocycle,
+  MesocycleLifecycleEvent,
   MesocycleStatus,
+  MESOCYCLE_STATUSES as CURRENT_MESOCYCLE_STATUSES,
   PlannedSession,
   PlannedSessionRef,
   Routine,
@@ -146,7 +148,7 @@ let catalogLibraryMutationQueue: Promise<void> = Promise.resolve();
 const EXERCISE_CATALOG_VERSION = 1 as const;
 const DEFAULT_EXERCISE_VARIANTS: ExerciseVariant[] = ['barra', 'mancuernas', 'polea', 'libre'];
 const DEFAULT_MESOCYCLE_CREATED_AT = new Date(0).toISOString();
-const MESOCYCLE_STATUSES: readonly MesocycleStatus[] = ['draft', 'active', 'completed', 'archived'];
+const MESOCYCLE_STATUSES: readonly MesocycleStatus[] = [...CURRENT_MESOCYCLE_STATUSES, 'archived'];
 
 const CATALOG_LIBRARY_OWNERS: readonly LegacyAlias[] = ['rodaja', 'brisas'];
 
@@ -796,6 +798,22 @@ function normalizeMesocycleStatus(value: unknown): MesocycleStatus {
     : 'draft';
 }
 
+function normalizeMesocycleLifecycleHistory(value: unknown): MesocycleLifecycleEvent[] | undefined {
+  if (!Array.isArray(value)) return undefined;
+  const events = value.flatMap((candidate): MesocycleLifecycleEvent[] => {
+    if (!candidate || typeof candidate !== 'object' || Array.isArray(candidate)) return [];
+    const event = candidate as Partial<MesocycleLifecycleEvent> & { shiftedPlannedSessionIds?: unknown };
+    if (typeof event.at !== 'string') return [];
+    if (event.type === 'completed' || event.type === 'cancelled') return [{ type: event.type, at: event.at }];
+    if (event.type === 'paused' && typeof event.localDate === 'string') return [{ type: 'paused', at: event.at, localDate: event.localDate }];
+    if (event.type === 'resumed' && typeof event.localDate === 'string' && typeof event.pauseStartedAt === 'string' && typeof event.pauseStartedDate === 'string' && Number.isInteger(event.shiftDays) && (event.shiftDays ?? -1) >= 0 && Array.isArray(event.shiftedPlannedSessionIds)) {
+      return [{ type: 'resumed', at: event.at, localDate: event.localDate, pauseStartedAt: event.pauseStartedAt, pauseStartedDate: event.pauseStartedDate, shiftDays: event.shiftDays!, shiftedPlannedSessionIds: event.shiftedPlannedSessionIds.filter((id): id is string => typeof id === 'string') }];
+    }
+    return [];
+  });
+  return events.length ? events : undefined;
+}
+
 function normalizePlannedSessionRef(
   value: unknown,
   fallbackRoutineId: string,
@@ -858,6 +876,7 @@ function plannedSessionLifecycleFields(session: Partial<PlannedSession>): {
   recoveryForPlannedSessionId?: string;
   recoveredByPlannedSessionId?: string;
   isExtraordinary?: boolean;
+  scheduleShiftDays?: number;
 } {
   const planningTransition = normalizePlannedSessionTransition(session.planningTransition);
   const recoveryForPlannedSessionId = typeof session.recoveryForPlannedSessionId === 'string' ? session.recoveryForPlannedSessionId : undefined;
@@ -868,6 +887,7 @@ function plannedSessionLifecycleFields(session: Partial<PlannedSession>): {
     ...(recoveryForPlannedSessionId ? { recoveryForPlannedSessionId } : {}),
     ...(recoveredByPlannedSessionId ? { recoveredByPlannedSessionId } : {}),
     ...(session.isExtraordinary === true ? { isExtraordinary: true } : {}),
+    ...(typeof session.scheduleShiftDays === 'number' && Number.isInteger(session.scheduleShiftDays) && session.scheduleShiftDays >= 0 ? { scheduleShiftDays: session.scheduleShiftDays } : {}),
   };
 }
 
@@ -933,16 +953,29 @@ function normalizeMesocycle(value: unknown, index: number): Mesocycle {
     && mesocycle.durationWeeks > 0
     ? mesocycle.durationWeeks
     : Math.max(weeks.length, 1);
+  const lifecycleHistory = normalizeMesocycleLifecycleHistory(mesocycle.lifecycleHistory);
+  const sharedFrom = mesocycle.sharedFrom && typeof mesocycle.sharedFrom === 'object'
+    && typeof mesocycle.sharedFrom.requestId === 'string' && typeof mesocycle.sharedFrom.senderId === 'string' && typeof mesocycle.sharedFrom.acceptedAt === 'string'
+    ? { ...mesocycle.sharedFrom }
+    : undefined;
 
   return {
     id: typeof mesocycle.id === 'string' ? mesocycle.id : `mesocycle-${index + 1}`,
+    ...(typeof mesocycle.version === 'number' && Number.isInteger(mesocycle.version) && mesocycle.version > 0 ? { version: mesocycle.version } : {}),
+    ...(typeof mesocycle.versionOf === 'string' ? { versionOf: mesocycle.versionOf } : {}),
+    ...(typeof mesocycle.previousVersionId === 'string' ? { previousVersionId: mesocycle.previousVersionId } : {}),
     name: typeof mesocycle.name === 'string' ? mesocycle.name : 'Untitled mesocycle',
     goal: typeof mesocycle.goal === 'string' ? mesocycle.goal : '',
     status: normalizeMesocycleStatus(mesocycle.status),
     weeks,
     durationWeeks: Math.max(requestedDuration, weeks.length),
     startDate: typeof mesocycle.startDate === 'string' ? mesocycle.startDate : undefined,
+    pausedAt: typeof mesocycle.pausedAt === 'string' ? mesocycle.pausedAt : undefined,
+    pausedOn: typeof mesocycle.pausedOn === 'string' ? mesocycle.pausedOn : undefined,
+    scheduleShiftDays: typeof mesocycle.scheduleShiftDays === 'number' && Number.isInteger(mesocycle.scheduleShiftDays) && mesocycle.scheduleShiftDays >= 0 ? mesocycle.scheduleShiftDays : undefined,
+    ...(lifecycleHistory ? { lifecycleHistory } : {}),
     createdAt: typeof mesocycle.createdAt === 'string' ? mesocycle.createdAt : DEFAULT_MESOCYCLE_CREATED_AT,
+    ...(sharedFrom ? { sharedFrom } : {}),
   };
 }
 

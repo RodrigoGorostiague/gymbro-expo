@@ -11,12 +11,14 @@ import { MesocycleOverviewCard } from '../../../components/MesocycleOverviewCard
 import { useData } from '../../../context/DataContext';
 import { useTheme } from '../../../context/ThemeContext';
 import { groupMesocyclesForList, MesocycleListSection } from '../../../utils/mesocycleAnalytics';
+import { canDeleteMesocycle } from '../../../utils/mesocycles';
 
 const sectionCopy: Record<MesocycleListSection, string> = {
   active: 'Activos',
   shared: 'Compartidos conmigo',
   draft: 'Borradores',
   completed: 'Completados',
+  cancelled: 'Cancelados',
   archived: 'Archivados',
 };
 
@@ -27,6 +29,7 @@ export default function MesocyclesScreen({ navigation }: { navigation?: React.Re
     shared: false,
     draft: false,
     completed: false,
+    cancelled: false,
     archived: false,
   });
   const sections = groupMesocyclesForList(mesocycles).filter((section) => section.items.length > 0);
@@ -37,7 +40,7 @@ export default function MesocyclesScreen({ navigation }: { navigation?: React.Re
     const expanded = collapsibleKey === null || expandedSections[collapsibleKey];
     return <View style={styles.section}>
       {collapsibleKey ? <HapticPressable accessibilityRole="button" accessibilityState={{ expanded }} accessibilityLabel={`${expanded ? 'Ocultar' : 'Mostrar'} ${sectionCopy[section.key]}`} onPress={() => setExpandedSections((current) => ({ ...current, [collapsibleKey]: !current[collapsibleKey] }))} style={[styles.sectionHeader, { borderColor: theme.glassBorder }]}><View><Text style={[styles.sectionTitle, { color: theme.text }]}>{sectionCopy[section.key]}</Text><Text style={[styles.sectionCount, { color: theme.textMuted }]}>{section.items.length} {section.items.length === 1 ? 'mesociclo' : 'mesociclos'}</Text></View><Ionicons name={expanded ? 'chevron-up' : 'chevron-down'} size={21} color={theme.primary} /></HapticPressable> : <View style={[styles.sectionHeader, { borderColor: theme.glassBorder }]}><View><Text style={[styles.sectionTitle, { color: theme.text }]}>{sectionCopy[section.key]}</Text><Text style={[styles.sectionCount, { color: theme.textMuted }]}>{section.items.length} {section.items.length === 1 ? 'mesociclo' : 'mesociclos'}</Text></View></View>}
-      {expanded ? <View style={styles.sectionItems}>{section.items.map((mesocycle) => <MesocycleOverviewCard key={mesocycle.id} mesocycle={mesocycle} attempts={attempts} routines={routines} onOpen={() => router.push(`/mesocycle/summary/${mesocycle.id}`)} onDelete={() => confirmDelete(mesocycle.id, mesocycle.name)} />)}</View> : null}
+      {expanded ? <View style={styles.sectionItems}>{section.items.map((mesocycle) => <MesocycleOverviewCard key={mesocycle.id} mesocycle={mesocycle} attempts={attempts} routines={routines} onOpen={() => router.push(`/mesocycle/summary/${mesocycle.id}`)} onDelete={canDeleteMesocycle(mesocycle, attempts) ? () => confirmDelete(mesocycle.id, mesocycle.name) : undefined} />)}</View> : null}
     </View>;
   }} />}</SafeAreaView></ThemeBackground>;
 }
