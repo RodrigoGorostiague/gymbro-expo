@@ -1,7 +1,7 @@
 import React, { createContext, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { ActiveWorkoutDraft, CatalogImportPlan, CatalogImportResult, ExperienceProgress, Exercise, ExerciseDefinition, ExerciseVariant, Mesocycle, MuscleGroup, PlannedSessionRef, Routine, UserProfile, WorkoutAttempt, WorkoutSession } from '../types';
 import { CatalogMuscleGroup, CatalogParticipationMode, filterCatalogExercises, loadCatalogExercises, loadCatalogMuscleGroups } from '../services/catalog';
-import { loadTrainingLibrary, saveTrainingLibrary, saveTrainingMesocycles, saveTrainingRoutines } from '../services/trainingLibrary';
+import { loadTrainingLibrary, saveTrainingMesocycles, saveTrainingRoutines } from '../services/trainingLibrary';
 import { canDeleteMesocycle, completeMesocycleWhenAllSessionsComplete, isMesocycleLifecycleOnlyEdit } from '../utils/mesocycles';
 import {
   generateId,
@@ -121,13 +121,17 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
   const activeWorkoutMutationVersionRef = useRef(0);
   const deferredActiveWorkoutSaveRef = useRef<DeferredActiveWorkoutSave | null>(null);
   const [quarantinedSessionCount, setQuarantinedSessionCount] = useState(0);
+  const routinesRef = useRef<Routine[]>([]);
   const mesocyclesRef = useRef<Mesocycle[]>([]);
+  const routinesRevisionRef = useRef<number | null>(null);
+  const mesocyclesRevisionRef = useRef<number | null>(null);
   const sessionsRef = useRef<PersistedWorkoutSession[]>([]);
   const routinesLoadedRef = useRef(false);
   const mesocyclesLoadedRef = useRef(false);
   const activeUserRef = useRef(user);
   const trainingStateRef = useRef<TrainingState | null>(null);
   activeUserRef.current = user;
+  const routineMutationQueueRef = useRef<Promise<void>>(Promise.resolve());
   const mesocycleMutationQueueRef = useRef<Promise<void>>(Promise.resolve());
   const sessionMutationQueueRef = useRef<Promise<void>>(Promise.resolve());
   const trainingLibraryMutationQueueRef = useRef<Promise<void>>(Promise.resolve());
@@ -141,6 +145,10 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
     if (!user) {
       routinesLoadedRef.current = false;
       mesocyclesLoadedRef.current = false;
+      routinesRevisionRef.current = null;
+      mesocyclesRevisionRef.current = null;
+      routinesRef.current = [];
+      setLocalRoutines([]);
       mesocyclesRef.current = [];
       setMesocycles([]);
       sessionsRef.current = [];
@@ -166,7 +174,14 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
     setDataError(null);
     routinesLoadedRef.current = false;
     mesocyclesLoadedRef.current = false;
+    routinesRevisionRef.current = null;
+    mesocyclesRevisionRef.current = null;
+    routinesRef.current = [];
+    setLocalRoutines([]);
+    mesocyclesRef.current = [];
+    setMesocycles([]);
     const operation = sessionMutationQueueRef.current.then(async () => {
+      await trainingLibraryMutationQueueRef.current;
       const legacyDefinitions = await readLegacyCustomDefinitions(user);
       if (legacyDefinitions.length) await importLegacyCustomDefinitions(legacyDefinitions);
       const [state, trainingLibrary, loadedCatalogExercises, loadedCatalogMuscleGroups, loadedExperienceProgress] =
@@ -188,9 +203,12 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
       setExercises([...loadedCatalogExercises, ...state.definitions.map(definitionAsExercise)]);
       setVariants([...new Set([...loadedCatalogExercises, ...state.definitions.map(definitionAsExercise)].map((definition) => definition.variant))]);
       setCatalogMuscleGroups(loadedCatalogMuscleGroups);
+      routinesRef.current = training.routines;
+      routinesRevisionRef.current = training.routinesRevision;
       setLocalRoutines(training.routines);
       routinesLoadedRef.current = true;
       mesocyclesRef.current = training.mesocycles;
+      mesocyclesRevisionRef.current = training.mesocyclesRevision;
       setMesocycles(training.mesocycles);
       mesocyclesLoadedRef.current = true;
       const sortedSessions = state.sessions.map((session) => ({ ...session, owner: user })).sort(
@@ -399,12 +417,32 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
     return next;
   };
 
-  const persistRoutines = async (next: Routine[]): Promise<void> => {
-    if (!routinesLoadedRef.current) throw new Error('Las rutinas aún no terminaron de cargar.');
-    const operation = trainingLibraryMutationQueueRef.current.then(() => saveTrainingRoutines(next));
-    trainingLibraryMutationQueueRef.current = operation.then(() => undefined, () => undefined);
-    await operation;
-    if (activeUserRef.current) setLocalRoutines(next);
+  const enqueueRoutineMutation = <T,>(
+    mutation: (current: Routine[]) => { next: Routine[]; result: T },
+  ): Promise<T> => {
+    const owner = activeUserRef.current;
+    if (!owner) return Promise.reject(new Error('Se requiere autenticación.'));
+    const operation = routineMutationQueueRef.current.then(async () => {
+      const expectedRevision = routinesRevisionRef.current;
+      if (!routinesLoadedRef.current || expectedRevision === null || activeUserRef.current !== owner) {
+        throw new Error('Las rutinas aún no terminaron de cargar.');
+      }
+      const { next, result } = mutation(routinesRef.current);
+      const save = trainingLibraryMutationQueueRef.current.then(() => {
+        if (activeUserRef.current !== owner) throw new Error('La sesión cambió antes de guardar las rutinas.');
+        return saveTrainingRoutines({ expectedRevision, items: next });
+      });
+      trainingLibraryMutationQueueRef.current = save.then(() => undefined, () => undefined);
+      const canonical = await save;
+      if (activeUserRef.current === owner) {
+        routinesRef.current = canonical.items;
+        routinesRevisionRef.current = canonical.revision;
+        setLocalRoutines(canonical.items);
+      }
+      return result;
+    });
+    routineMutationQueueRef.current = operation.then(() => undefined, () => undefined);
+    return operation;
   };
 
   const enqueueMesocycleMutation = <T,>(
@@ -420,13 +458,21 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
         throw new Error('Mesocycles have not finished loading yet.');
       }
 
+      const expectedRevision = mesocyclesRevisionRef.current;
+      if (expectedRevision === null || activeUserRef.current !== owner) {
+        throw new Error('Mesocycles have not finished loading yet.');
+      }
       const { next, result } = mutation(mesocyclesRef.current);
-      const save = trainingLibraryMutationQueueRef.current.then(() => saveTrainingMesocycles(next));
+      const save = trainingLibraryMutationQueueRef.current.then(() => {
+        if (activeUserRef.current !== owner) throw new Error('La sesión cambió antes de guardar el mesociclo.');
+        return saveTrainingMesocycles({ expectedRevision, items: next });
+      });
       trainingLibraryMutationQueueRef.current = save.then(() => undefined, () => undefined);
-      await save;
+      const canonical = await save;
       if (activeUserRef.current === owner) {
-        mesocyclesRef.current = next;
-        setMesocycles(next);
+        mesocyclesRef.current = canonical.items;
+        mesocyclesRevisionRef.current = canonical.revision;
+        setMesocycles(canonical.items);
       }
       return result;
     });
@@ -482,17 +528,33 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
     const state = trainingStateRef.current;
     if (!state) throw new Error('El entrenamiento aún no terminó de cargar.');
     const result = planRecipientImport({ version: 2, owner, definitions: state.definitions, routines: [], mesocycles: [], attempts: state.attempts }, plan);
-    const routines = [...localRoutines, ...result.library.routines.filter((routine) => !localRoutines.some(({ id }) => id === routine.id))];
+    const routines = [...routinesRef.current, ...result.library.routines.filter((routine) => !routinesRef.current.some(({ id }) => id === routine.id))];
     const mesocycles = [...mesocyclesRef.current, ...result.library.mesocycles.filter((mesocycle) => !mesocyclesRef.current.some(({ id }) => id === mesocycle.id))];
-    const save = trainingLibraryMutationQueueRef.current.then(() => saveTrainingLibrary({ routines, mesocycles }));
+    const routinesRevision = routinesRevisionRef.current;
+    const mesocyclesRevision = mesocyclesRevisionRef.current;
+    if (routinesRevision === null || mesocyclesRevision === null) throw new Error('La planificación aún no terminó de cargar.');
+    const save = trainingLibraryMutationQueueRef.current.then(async () => {
+      if (activeUserRef.current !== owner) throw new Error('La sesión cambió antes de guardar la importación.');
+      const savedRoutines = await saveTrainingRoutines({ expectedRevision: routinesRevision, items: routines });
+      if (activeUserRef.current === owner) {
+        routinesRef.current = savedRoutines.items;
+        routinesRevisionRef.current = savedRoutines.revision;
+        setLocalRoutines(savedRoutines.items);
+      }
+      const savedMesocycles = await saveTrainingMesocycles({ expectedRevision: mesocyclesRevision, items: mesocycles });
+      return { savedRoutines, savedMesocycles };
+    });
     trainingLibraryMutationQueueRef.current = save.then(() => undefined, () => undefined);
-    await save;
+    const canonical = await save;
     if (activeUserRef.current === owner) {
       await saveTrainingState({ definitions: result.library.definitions });
       publishTrainingState({ ...state, definitions: result.library.definitions });
-      setLocalRoutines(routines);
-      mesocyclesRef.current = mesocycles;
-      setMesocycles(mesocycles);
+      routinesRef.current = canonical.savedRoutines.items;
+      routinesRevisionRef.current = canonical.savedRoutines.revision;
+      setLocalRoutines(canonical.savedRoutines.items);
+      mesocyclesRef.current = canonical.savedMesocycles.items;
+      mesocyclesRevisionRef.current = canonical.savedMesocycles.revision;
+      setMesocycles(canonical.savedMesocycles.items);
     }
     return result;
   };
@@ -526,18 +588,21 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
       exercises: [],
       createdAt: new Date().toISOString(),
     };
-    await persistRoutines([routine, ...localRoutines]);
-    return routine;
+    return enqueueRoutineMutation((current) => ({ next: [routine, ...current], result: routine }));
   };
 
   const updateRoutine = async (routine: Routine): Promise<void> => {
-    const current = localRoutines.find((item) => item.id === routine.id);
-    if (!current) throw new Error('La rutina ya no existe.');
-    const used = attempts.some((attempt) => attempt.routineId === routine.id);
-    const next = used
-      ? [...localRoutines, nextContentVersion(current, routine, generateId())]
-      : localRoutines.map((item) => item.id === routine.id ? routine : item);
-    await persistRoutines(next);
+    return enqueueRoutineMutation((current) => {
+      const existing = current.find((item) => item.id === routine.id);
+      if (!existing) throw new Error('La rutina ya no existe.');
+      const used = attempts.some((attempt) => attempt.routineId === routine.id);
+      return {
+        next: used
+          ? [...current, nextContentVersion(existing, routine, generateId())]
+          : current.map((item) => item.id === routine.id ? routine : item),
+        result: undefined,
+      };
+    });
   };
 
   const deleteRoutine = async (id: string): Promise<void> => {
@@ -545,7 +610,10 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
       week.entries.some((entry) => 'ref' in entry && entry.ref.routineId === id)));
     if (scheduled) throw new Error('No se puede eliminar la rutina porque está programada en un mesociclo.');
     try {
-      await persistRoutines(localRoutines.filter((routine) => routine.id !== id));
+      await enqueueRoutineMutation((current) => ({
+        next: current.filter((routine) => routine.id !== id),
+        result: undefined,
+      }));
     } catch (error) {
       if (error instanceof Error && error.message.includes('invalid training library input')) {
         throw new Error('No se puede eliminar la rutina porque está programada en un mesociclo.');

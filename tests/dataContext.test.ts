@@ -17,10 +17,14 @@ const storage = vi.hoisted(() => {
   };
 });
 const trainingLibrary = vi.hoisted(() => ({
-  value: { routines: [] as any[], mesocycles: [] as any[] },
-  saveMesocycles: vi.fn(async () => undefined),
-  saveRoutines: vi.fn(async () => undefined),
+  value: { routines: [] as any[], mesocycles: [] as any[] } as {
+    routines: any[]; mesocycles: any[]; routinesRevision?: number; mesocyclesRevision?: number;
+  },
+  load: vi.fn(async () => ({ routinesRevision: 0, mesocyclesRevision: 0, ...trainingLibrary.value })),
+  saveMesocycles: vi.fn(async (input: { expectedRevision: number; items: any[] }) => ({ revision: input.expectedRevision + 1, items: input.items })),
+  saveRoutines: vi.fn(async (input: { expectedRevision: number; items: any[] }) => ({ revision: input.expectedRevision + 1, items: input.items })),
 }));
+const authState = vi.hoisted(() => ({ user: 'rodaja' as string | null }));
 const trainingState = vi.hoisted(() => ({
   value: { definitions: [] as any[], attempts: [] as any[], sessions: [] as any[], activeWorkoutDraft: null as any },
   load: vi.fn(async () => trainingState.value),
@@ -31,15 +35,14 @@ const trainingState = vi.hoisted(() => ({
 const finalizeAttempt = vi.hoisted(() => vi.fn());
 
 vi.mock('@react-native-async-storage/async-storage', () => ({ default: storage }));
-vi.mock('../context/AuthContext', () => ({ useAuth: () => ({ user: 'rodaja' }) }));
+vi.mock('../context/AuthContext', () => ({ useAuth: () => ({ user: authState.user }) }));
 vi.mock('../services/catalog', () => ({
   loadCatalogExercises: vi.fn(async () => [{ id: 'EX-0001', name: 'Press banca', muscleGroups: ['GM-101'], variant: 'Barra', defaultSets: [] }]),
   loadCatalogMuscleGroups: vi.fn(async () => [{ id: 'GM-101', name: 'Pectoral mayor', displayName: 'Pectoral mayor', type: 'Músculo', level: 3, visibleInFilters: true, path: 'Cuerpo > Pecho > Pectoral mayor' }]),
   filterCatalogExercises: vi.fn(),
 }));
 vi.mock('../services/trainingLibrary', () => ({
-  loadTrainingLibrary: vi.fn(async () => trainingLibrary.value),
-  saveTrainingLibrary: vi.fn(async () => undefined),
+  loadTrainingLibrary: trainingLibrary.load,
   saveTrainingRoutines: trainingLibrary.saveRoutines,
   saveTrainingMesocycles: trainingLibrary.saveMesocycles,
 }));
@@ -81,7 +84,11 @@ describe('DataProvider catalog library integration', () => {
   beforeEach(() => {
     storage.data.clear();
     vi.clearAllMocks();
+    authState.user = 'rodaja';
     trainingLibrary.value = { routines: [], mesocycles: [] };
+    trainingLibrary.load.mockImplementation(async () => ({ routinesRevision: 0, mesocyclesRevision: 0, ...trainingLibrary.value }));
+    trainingLibrary.saveRoutines.mockImplementation(async (input) => ({ revision: input.expectedRevision + 1, items: input.items }));
+    trainingLibrary.saveMesocycles.mockImplementation(async (input) => ({ revision: input.expectedRevision + 1, items: input.items }));
     trainingState.value = { definitions: [], attempts: [], sessions: [], activeWorkoutDraft: null };
     trainingState.load.mockResolvedValue(trainingState.value);
     storage.data.set('@gymbro/catalog-library/v2/rodaja', JSON.stringify(library()));
@@ -128,7 +135,7 @@ describe('DataProvider catalog library integration', () => {
     await act(async () => { TestRenderer.create(React.createElement(DataProvider, null, React.createElement(Probe))); });
     await act(async () => { await current!.deleteMesocycle('mesocycle-1'); });
 
-    expect(trainingLibrary.saveMesocycles).toHaveBeenCalledWith([]);
+    expect(trainingLibrary.saveMesocycles).toHaveBeenCalledWith({ expectedRevision: 0, items: [] });
     expect(current?.mesocycles).toEqual([]);
     expect(current?.dataState).toBe('ready');
     expect(current?.isLoading).toBe(false);
@@ -173,7 +180,10 @@ describe('DataProvider catalog library integration', () => {
     await act(async () => { await current!.addAttempt(attempt); });
 
     expect(current?.mesocycles).toMatchObject([{ id: mesocycle.id, status: 'completed' }]);
-    expect(trainingLibrary.saveMesocycles).toHaveBeenCalledWith([expect.objectContaining({ id: mesocycle.id, status: 'completed' })]);
+    expect(trainingLibrary.saveMesocycles).toHaveBeenCalledWith({
+      expectedRevision: 0,
+      items: [expect.objectContaining({ id: mesocycle.id, status: 'completed' })],
+    });
   });
 
   test('rejects deleting a scheduled routine without changing the rendered library', async () => {
@@ -207,6 +217,142 @@ describe('DataProvider catalog library integration', () => {
     await expect(current!.deleteRoutine('routine-1')).rejects.toThrow('offline');
 
     expect(current?.routines.map(({ id }) => id)).toEqual(['routine-1']);
+  });
+
+  test('keeps independent revisions and publishes only canonical save responses', async () => {
+    const initialRoutine = library().routines[0];
+    const initialMesocycle = {
+      id: 'mesocycle-1', name: 'Block', goal: '', status: 'draft' as const, durationWeeks: 1,
+      createdAt: '2026-08-01T00:00:00.000Z', weeks: [{ id: 'week-1', weekNumber: 1, entries: [] }],
+    };
+    trainingLibrary.value = {
+      routines: [initialRoutine], mesocycles: [initialMesocycle], routinesRevision: 4, mesocyclesRevision: 9,
+    };
+    trainingLibrary.saveRoutines.mockResolvedValueOnce({
+      revision: 5, items: [{ ...initialRoutine, name: 'Canonical routine' }],
+    });
+    trainingLibrary.saveMesocycles.mockResolvedValueOnce({
+      revision: 10, items: [{ ...initialMesocycle, name: 'Canonical mesocycle' }],
+    });
+    let current: ReturnType<typeof useData> | undefined;
+    const Probe = () => { current = useData(); return null; };
+
+    await act(async () => { TestRenderer.create(React.createElement(DataProvider, null, React.createElement(Probe))); });
+    await act(async () => {
+      await current!.updateRoutine({ ...initialRoutine, name: 'Local routine draft' });
+      await current!.updateMesocycle({ ...initialMesocycle, name: 'Local mesocycle draft' });
+    });
+
+    expect(trainingLibrary.saveRoutines).toHaveBeenCalledWith({
+      expectedRevision: 4, items: [expect.objectContaining({ name: 'Local routine draft' })],
+    });
+    expect(trainingLibrary.saveMesocycles).toHaveBeenCalledWith({
+      expectedRevision: 9, items: [expect.objectContaining({ name: 'Local mesocycle draft' })],
+    });
+    expect(current?.routines[0].name).toBe('Canonical routine');
+    expect(current?.mesocycles[0].name).toBe('Canonical mesocycle');
+  });
+
+  test('preserves a local routine draft and server state on stale conflict without retrying', async () => {
+    const initialRoutine = library().routines[0];
+    const localDraft = { ...initialRoutine, name: 'Local draft' };
+    const serverCurrent = { revision: 8, items: [{ ...initialRoutine, name: 'Web saved first' }] };
+    const conflict = Object.assign(new Error('La planificación cambió en otro dispositivo.'), {
+      name: 'TrainingLibraryConflictError', collection: 'routines', expectedRevision: 7,
+      attemptedItems: [localDraft], current: serverCurrent,
+    });
+    trainingLibrary.value = {
+      routines: [initialRoutine], mesocycles: [], routinesRevision: 7, mesocyclesRevision: 2,
+    };
+    trainingLibrary.saveRoutines.mockRejectedValueOnce(conflict);
+    let current: ReturnType<typeof useData> | undefined;
+    const Probe = () => { current = useData(); return null; };
+
+    await act(async () => { TestRenderer.create(React.createElement(DataProvider, null, React.createElement(Probe))); });
+    const caught = await current!.updateRoutine(localDraft).catch((error) => error);
+
+    expect(caught).toBe(conflict);
+    expect(caught).toMatchObject({ attemptedItems: [localDraft], current: serverCurrent });
+    expect(trainingLibrary.saveRoutines).toHaveBeenCalledTimes(1);
+    expect(current?.routines).toEqual([initialRoutine]);
+  });
+
+  test('orders same-process routine mutations and advances from canonical revisions', async () => {
+    trainingLibrary.value = { routines: [], mesocycles: [], routinesRevision: 3, mesocyclesRevision: 0 };
+    let resolveFirst: ((value: { revision: number; items: any[] }) => void) | undefined;
+    trainingLibrary.saveRoutines
+      .mockImplementationOnce((input) => new Promise((resolve) => { resolveFirst = resolve; }))
+      .mockImplementationOnce(async (input) => ({ revision: 5, items: input.items }));
+    let current: ReturnType<typeof useData> | undefined;
+    const Probe = () => { current = useData(); return null; };
+
+    await act(async () => { TestRenderer.create(React.createElement(DataProvider, null, React.createElement(Probe))); });
+    let first!: Promise<unknown>;
+    let second!: Promise<unknown>;
+    await act(async () => {
+      first = current!.addRoutine('First', ['pecho']);
+      second = current!.addRoutine('Second', ['espalda']);
+      await Promise.resolve();
+    });
+    await vi.waitFor(() => expect(trainingLibrary.saveRoutines).toHaveBeenCalledTimes(1));
+    const firstItems = trainingLibrary.saveRoutines.mock.calls[0][0].items;
+    await act(async () => {
+      resolveFirst!({ revision: 4, items: firstItems });
+      await Promise.all([first, second]);
+    });
+
+    expect(trainingLibrary.saveRoutines.mock.calls[1][0]).toMatchObject({ expectedRevision: 4 });
+    expect(trainingLibrary.saveRoutines.mock.calls[1][0].items.map(({ name }) => name)).toEqual(['Second', 'First']);
+    expect(current?.routines.map(({ name }) => name)).toEqual(['Second', 'First']);
+  });
+
+  test('clears revision-backed data on session changes and hydrates the next owner atomically', async () => {
+    trainingLibrary.value = { routines: [library().routines[0]], mesocycles: [], routinesRevision: 7, mesocyclesRevision: 1 };
+    let current: ReturnType<typeof useData> | undefined;
+    const Probe = () => { current = useData(); return null; };
+    let renderer: TestRenderer.ReactTestRenderer;
+    await act(async () => { renderer = TestRenderer.create(React.createElement(DataProvider, null, React.createElement(Probe))); });
+
+    authState.user = null;
+    await act(async () => { renderer!.update(React.createElement(DataProvider, null, React.createElement(Probe))); });
+    expect(current?.routines).toEqual([]);
+    await expect(current!.addRoutine('Blocked', ['pecho'])).rejects.toThrow('autenticación');
+
+    authState.user = 'brisas';
+    trainingLibrary.value = { routines: [], mesocycles: [], routinesRevision: 2, mesocyclesRevision: 6 };
+    await act(async () => { renderer!.update(React.createElement(DataProvider, null, React.createElement(Probe))); });
+    await act(async () => { await current!.addRoutine('Brisas routine', ['pecho']); });
+
+    expect(current?.hydratedUserId).toBe('brisas');
+    expect(trainingLibrary.saveRoutines).toHaveBeenLastCalledWith({
+      expectedRevision: 2, items: [expect.objectContaining({ name: 'Brisas routine' })],
+    });
+  });
+
+  test('reloads the canonical routine and revision after an Expo provider remount', async () => {
+    trainingLibrary.value = { routines: [], mesocycles: [], routinesRevision: 5, mesocyclesRevision: 1 };
+    trainingLibrary.saveRoutines.mockImplementationOnce(async (input) => {
+      trainingLibrary.value = {
+        ...trainingLibrary.value,
+        routinesRevision: 6,
+        routines: input.items.map((item) => ({ ...item, name: 'Canonical after save' })),
+      };
+      return { revision: 6, items: trainingLibrary.value.routines };
+    });
+    let current: ReturnType<typeof useData> | undefined;
+    const Probe = () => { current = useData(); return null; };
+    let renderer: TestRenderer.ReactTestRenderer;
+
+    await act(async () => { renderer = TestRenderer.create(React.createElement(DataProvider, null, React.createElement(Probe))); });
+    await act(async () => { await current!.addRoutine('Local draft', ['pecho']); });
+    expect(current?.routines[0].name).toBe('Canonical after save');
+    await act(async () => { renderer!.unmount(); });
+    await act(async () => { renderer = TestRenderer.create(React.createElement(DataProvider, null, React.createElement(Probe))); });
+    await act(async () => { await current!.updateRoutine({ ...current!.routines[0], name: 'After reload' }); });
+
+    expect(trainingLibrary.saveRoutines).toHaveBeenLastCalledWith({
+      expectedRevision: 6, items: [expect.objectContaining({ name: 'After reload' })],
+    });
   });
 
   test('exposes a retryable error when remote training hydration fails without local fallback', async () => {
