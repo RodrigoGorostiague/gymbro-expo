@@ -108,14 +108,14 @@ export function SocialProvider({ children }: { children: React.ReactNode }) {
     if (!user) return undefined;
     let mounted = true;
     const retry = () => {
-      void flushPendingJointWorkoutPublications(user).then((published) => {
+      void flushPendingJointWorkoutPublications(user, undefined, attempts).then((published) => {
         if (mounted && published) setRealtimeRevision((revision) => revision + 1);
       }).catch(() => undefined);
     };
     retry();
     const interval = setInterval(retry, 30_000);
     return () => { mounted = false; clearInterval(interval); };
-  }, [user]);
+  }, [attempts, user]);
   useEffect(() => {
     if (!ownProfile?.autoShareCompletedWorkouts) return;
     for (const attempt of attempts) {

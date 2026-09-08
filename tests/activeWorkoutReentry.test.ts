@@ -10,6 +10,8 @@ import { hasActiveWorkoutReentryIntegrity, matchesActiveWorkout } from '../utils
 import { __emitAppState, __emitHardwareBackPress } from './helpers/reactNativeStub';
 
 const finishJointWorkout = vi.hoisted(() => vi.fn());
+const leaveJointWorkout = vi.hoisted(() => vi.fn());
+const prepareJointWorkoutPublication = vi.hoisted(() => vi.fn(async () => undefined));
 const queueJointWorkoutPublication = vi.hoisted(() => vi.fn(async () => undefined));
 const removePendingJointWorkoutPublication = vi.hoisted(() => vi.fn(async () => undefined));
 
@@ -20,8 +22,9 @@ vi.mock('../components/LogoutButton', () => ({ LogoutButton: () => null }));
 vi.mock('../services/jointWorkouts', async (importOriginal) => ({
   ...await importOriginal<typeof import('../services/jointWorkouts')>(),
   finishJointWorkout,
+  leaveJointWorkout,
 }));
-vi.mock('../services/jointWorkoutPublicationQueue', () => ({ queueJointWorkoutPublication, removePendingJointWorkoutPublication }));
+vi.mock('../services/jointWorkoutPublicationQueue', () => ({ prepareJointWorkoutPublication, queueJointWorkoutPublication, removePendingJointWorkoutPublication }));
 
 const routineA = { id: 'routine-a', name: 'Upper', muscleGroups: ['pecho'], exercises: [], createdAt: '' };
 const routineB = { ...routineA, id: 'routine-b', name: 'Lower' };
@@ -154,6 +157,119 @@ describe('active workout re-entry', () => {
     expect(mockRouter.setParams).toHaveBeenCalledWith({ jointWorkoutId: 'joint-1' });
   });
 
+  test('leaves the server joint session before cancelling the local draft', async () => {
+    const cancelActiveWorkout = vi.fn(async () => undefined);
+    const updateActiveWorkout = vi.fn(async () => undefined);
+    leaveJointWorkout.mockResolvedValue(undefined);
+    setMockParams({ id: routineA.id, jointWorkoutId: 'joint-1' });
+    setMockData({ getRoutine: vi.fn(() => routineA), mesocycles: [], activeWorkoutDraft: { ...draft, jointWorkoutId: 'joint-1' }, addAttempt: vi.fn(), startActiveWorkout: vi.fn(), updateActiveWorkout, cancelActiveWorkout });
+    const screen = render(React.createElement(ExecuteRoutineScreen));
+
+    press(screen.root.find((node) => node.props.accessibilityLabel === 'Pausar entrenamiento'));
+    await vi.waitFor(() => expect(findText(screen.root, 'Entrenamiento pausado')).toBeTruthy());
+    await act(async () => { screen.root.find((node) => node.props.accessibilityLabel === 'Cancelar entrenamiento').props.onPress(); await Promise.resolve(); });
+
+    await vi.waitFor(() => expect(cancelActiveWorkout).toHaveBeenCalledTimes(1));
+    expect(updateActiveWorkout).toHaveBeenCalledWith(expect.objectContaining({ jointCancellationPending: true }));
+    expect(leaveJointWorkout).toHaveBeenCalledWith('joint-1');
+    expect(updateActiveWorkout.mock.invocationCallOrder[0]).toBeLessThan(leaveJointWorkout.mock.invocationCallOrder[0]);
+    expect(leaveJointWorkout.mock.invocationCallOrder[0]).toBeLessThan(cancelActiveWorkout.mock.invocationCallOrder[0]);
+    expect(mockRouter.back).toHaveBeenCalled();
+  });
+
+  test('preserves the local draft when server joint cancellation fails', async () => {
+    const cancelActiveWorkout = vi.fn(async () => undefined);
+    const updateActiveWorkout = vi.fn(async () => undefined);
+    leaveJointWorkout.mockRejectedValue(new Error('Joint service unavailable'));
+    setMockParams({ id: routineA.id, jointWorkoutId: 'joint-1' });
+    setMockData({ getRoutine: vi.fn(() => routineA), mesocycles: [], activeWorkoutDraft: { ...draft, jointWorkoutId: 'joint-1' }, addAttempt: vi.fn(), startActiveWorkout: vi.fn(), updateActiveWorkout, cancelActiveWorkout });
+    const screen = render(React.createElement(ExecuteRoutineScreen));
+
+    press(screen.root.find((node) => node.props.accessibilityLabel === 'Pausar entrenamiento'));
+    await vi.waitFor(() => expect(findText(screen.root, 'Entrenamiento pausado')).toBeTruthy());
+    await act(async () => { screen.root.find((node) => node.props.accessibilityLabel === 'Cancelar entrenamiento').props.onPress(); await Promise.resolve(); });
+
+    await vi.waitFor(() => expect(mockAlert.alert).toHaveBeenCalledWith('No se pudo cancelar el entrenamiento', 'Joint service unavailable'));
+    expect(cancelActiveWorkout).not.toHaveBeenCalled();
+    expect(updateActiveWorkout).toHaveBeenCalledWith(expect.objectContaining({ jointCancellationPending: true }));
+    expect(mockRouter.back).not.toHaveBeenCalled();
+    expect(findButton(screen.root, 'Reanudar').props.disabled).toBe(true);
+    expect(findButton(screen.root, 'Finalizar entrenamiento').props.disabled).toBe(true);
+    expect(screen.root.find((node) => node.props.accessibilityLabel === 'Cancelar entrenamiento').props.disabled).toBe(false);
+  });
+
+  test('restores the durable cancellation lock after remount and retries leave before clearing the draft', async () => {
+    let persistedDraft = { ...draft, jointWorkoutId: 'joint-1' };
+    const updateActiveWorkout = vi.fn(async (next) => { persistedDraft = next; });
+    const firstCancelActiveWorkout = vi.fn(async () => undefined);
+    leaveJointWorkout.mockRejectedValueOnce(new Error('Response lost after commit'));
+    setMockParams({ id: routineA.id, jointWorkoutId: 'joint-1' });
+    setMockData({ getRoutine: vi.fn(() => routineA), mesocycles: [], activeWorkoutDraft: persistedDraft, addAttempt: vi.fn(), startActiveWorkout: vi.fn(), updateActiveWorkout, cancelActiveWorkout: firstCancelActiveWorkout });
+    const firstMount = render(React.createElement(ExecuteRoutineScreen));
+
+    press(firstMount.root.find((node) => node.props.accessibilityLabel === 'Pausar entrenamiento'));
+    await vi.waitFor(() => expect(findText(firstMount.root, 'Entrenamiento pausado')).toBeTruthy());
+    press(firstMount.root.find((node) => node.props.accessibilityLabel === 'Cancelar entrenamiento'));
+    await vi.waitFor(() => expect(mockAlert.alert).toHaveBeenCalledWith('No se pudo cancelar el entrenamiento', 'Response lost after commit'));
+    expect(persistedDraft).toMatchObject({ jointWorkoutId: 'joint-1', jointCancellationPending: true });
+    expect(firstCancelActiveWorkout).not.toHaveBeenCalled();
+
+    firstMount.unmount();
+    resetRuntimeHarness();
+    leaveJointWorkout.mockResolvedValue(undefined);
+    const restartedCancelActiveWorkout = vi.fn(async () => undefined);
+    setMockParams({ id: routineA.id });
+    setMockData({ getRoutine: vi.fn(() => routineA), mesocycles: [], activeWorkoutDraft: persistedDraft, addAttempt: vi.fn(), startActiveWorkout: vi.fn(), updateActiveWorkout, cancelActiveWorkout: restartedCancelActiveWorkout });
+    const restartedMount = render(React.createElement(ExecuteRoutineScreen));
+
+    await vi.waitFor(() => expect(findText(restartedMount.root, 'Entrenamiento pausado')).toBeTruthy());
+    expect(findButton(restartedMount.root, 'Reanudar').props.disabled).toBe(true);
+    expect(findButton(restartedMount.root, 'Finalizar entrenamiento').props.disabled).toBe(true);
+    await vi.waitFor(() => expect(leaveJointWorkout).toHaveBeenCalledTimes(2));
+    await vi.waitFor(() => expect(restartedCancelActiveWorkout).toHaveBeenCalledTimes(1));
+    expect(leaveJointWorkout.mock.invocationCallOrder[1]).toBeLessThan(restartedCancelActiveWorkout.mock.invocationCallOrder[0]);
+  });
+
+  test('waits through the old timeout boundary and clears the draft only after a late authoritative leave', async () => {
+    vi.useFakeTimers();
+    const cancelActiveWorkout = vi.fn(async () => undefined);
+    const addAttempt = vi.fn();
+    leaveJointWorkout.mockImplementation(() => new Promise<void>((resolve) => setTimeout(resolve, 12_001)));
+    setMockParams({ id: routineA.id, jointWorkoutId: 'joint-1' });
+    setMockData({ getRoutine: vi.fn(() => routineA), mesocycles: [], activeWorkoutDraft: { ...draft, jointWorkoutId: 'joint-1' }, addAttempt, startActiveWorkout: vi.fn(), updateActiveWorkout: vi.fn(), cancelActiveWorkout });
+    const screen = render(React.createElement(ExecuteRoutineScreen));
+
+    press(screen.root.find((node) => node.props.accessibilityLabel === 'Pausar entrenamiento'));
+    await act(async () => { await Promise.resolve(); });
+    press(screen.root.find((node) => node.props.accessibilityLabel === 'Cancelar entrenamiento'));
+    await act(async () => { await vi.advanceTimersByTimeAsync(12_000); });
+
+    expect(cancelActiveWorkout).not.toHaveBeenCalled();
+    expect(mockAlert.alert).not.toHaveBeenCalledWith('No se pudo cancelar el entrenamiento', expect.any(String));
+    expect(findButton(screen.root, 'Reanudar').props.disabled).toBe(true);
+    expect(findButton(screen.root, 'Finalizar entrenamiento').props.disabled).toBe(true);
+    act(() => { findButton(screen.root, 'Finalizar entrenamiento').props.onPress(); });
+    expect(addAttempt).not.toHaveBeenCalled();
+
+    await act(async () => { await vi.advanceTimersByTimeAsync(1); });
+    expect(cancelActiveWorkout).toHaveBeenCalledTimes(1);
+    expect(mockRouter.back).toHaveBeenCalledTimes(1);
+  });
+
+  test('keeps individual workout cancellation local', async () => {
+    const cancelActiveWorkout = vi.fn(async () => undefined);
+    setMockParams({ id: routineA.id });
+    setMockData({ getRoutine: vi.fn(() => routineA), mesocycles: [], activeWorkoutDraft: draft, addAttempt: vi.fn(), startActiveWorkout: vi.fn(), updateActiveWorkout: vi.fn(), cancelActiveWorkout });
+    const screen = render(React.createElement(ExecuteRoutineScreen));
+
+    press(screen.root.find((node) => node.props.accessibilityLabel === 'Pausar entrenamiento'));
+    await vi.waitFor(() => expect(findText(screen.root, 'Entrenamiento pausado')).toBeTruthy());
+    await act(async () => { screen.root.find((node) => node.props.accessibilityLabel === 'Cancelar entrenamiento').props.onPress(); await Promise.resolve(); });
+
+    await vi.waitFor(() => expect(cancelActiveWorkout).toHaveBeenCalledTimes(1));
+    expect(leaveJointWorkout).not.toHaveBeenCalled();
+  });
+
   test('keeps an accredited joint completion successful when its publication fails and retries only the publication', async () => {
     const routineWithSet = {
       ...routineA,
@@ -181,6 +297,7 @@ describe('active workout re-entry', () => {
     expect(findText(screen.root, '+1 gemas')).toBeTruthy();
     expect(findText(screen.root, 'Tu resultado conjunto todavía no se publicó')).toBeTruthy();
     expect(queueJointWorkoutPublication).toHaveBeenCalledWith('rodaja', expect.objectContaining({ workoutId: 'joint-1' }));
+    expect(prepareJointWorkoutPublication.mock.invocationCallOrder[0]).toBeLessThan(addAttempt.mock.invocationCallOrder[0]);
     expect(mockAlert.alert).not.toHaveBeenCalledWith('No se pudo finalizar el entrenamiento', expect.any(String));
 
     press(findButton(screen.root, 'Reintentar publicación'));
@@ -188,6 +305,54 @@ describe('active workout re-entry', () => {
     await vi.waitFor(() => expect(findText(screen.root, 'Tu resultado conjunto todavía no se publicó')).toBeUndefined());
     expect(removePendingJointWorkoutPublication).toHaveBeenCalledWith('rodaja', 'joint-1');
     expect(addAttempt).toHaveBeenCalledTimes(1);
+  });
+
+  test('retains an inert prepared joint publication when attempt finalization rejects generically', async () => {
+    const routineWithSet = {
+      ...routineA,
+      exercises: [{ id: 'exercise-1', name: 'Press', muscleGroups: ['pecho'], loadMode: 'external-load' as const, loadUnit: 'kg' as const, sets: [{ id: 'set-1', tipo: 1 as const, weight: 10, reps: 8 }] }],
+    };
+    const addAttempt = vi.fn().mockRejectedValue(new Error('rejected'));
+    setMockParams({ id: routineWithSet.id, jointWorkoutId: 'joint-1' });
+    setMockData({
+      getRoutine: vi.fn(() => routineWithSet), mesocycles: [], routines: [routineWithSet], exercises: [], definitions: [],
+      activeWorkoutDraft: { ...draft, routineId: routineWithSet.id, jointWorkoutId: 'joint-1' }, addAttempt, startActiveWorkout: vi.fn(),
+      updateActiveWorkout: vi.fn(), cancelActiveWorkout: vi.fn(), refreshActiveWorkoutTiming: vi.fn(),
+    });
+
+    const screen = render(React.createElement(ExecuteRoutineScreen));
+    press(screen.root.find((node) => node.props.accessibilityLabel === 'Pausar entrenamiento'));
+    await vi.waitFor(() => expect(findText(screen.root, 'Entrenamiento pausado')).toBeTruthy());
+    press(findButton(screen.root, 'Finalizar entrenamiento'));
+
+    await vi.waitFor(() => expect(mockAlert.alert).toHaveBeenCalledWith(expect.any(String), expect.any(String)));
+    expect(prepareJointWorkoutPublication.mock.invocationCallOrder[0]).toBeLessThan(addAttempt.mock.invocationCallOrder[0]);
+    expect(removePendingJointWorkoutPublication).not.toHaveBeenCalled();
+    expect(finishJointWorkout).not.toHaveBeenCalled();
+  });
+
+  test('keeps a prepared publication inert when finalization times out ambiguously', async () => {
+    vi.useFakeTimers();
+    const routineWithSet = {
+      ...routineA,
+      exercises: [{ id: 'exercise-1', name: 'Press', muscleGroups: ['pecho'], loadMode: 'external-load' as const, loadUnit: 'kg' as const, sets: [{ id: 'set-1', tipo: 1 as const, weight: 10, reps: 8 }] }],
+    };
+    setMockParams({ id: routineWithSet.id, jointWorkoutId: 'joint-1' });
+    setMockData({
+      getRoutine: vi.fn(() => routineWithSet), mesocycles: [], routines: [routineWithSet], exercises: [], definitions: [],
+      activeWorkoutDraft: { ...draft, routineId: routineWithSet.id, jointWorkoutId: 'joint-1' }, addAttempt: vi.fn(() => new Promise(() => undefined)), startActiveWorkout: vi.fn(),
+      updateActiveWorkout: vi.fn(), cancelActiveWorkout: vi.fn(), refreshActiveWorkoutTiming: vi.fn(),
+    });
+
+    const screen = render(React.createElement(ExecuteRoutineScreen));
+    press(screen.root.find((node) => node.props.accessibilityLabel === 'Pausar entrenamiento'));
+    await act(async () => { await Promise.resolve(); });
+    press(findButton(screen.root, 'Finalizar entrenamiento'));
+    await act(async () => { await vi.advanceTimersByTimeAsync(12_000); });
+
+    expect(prepareJointWorkoutPublication).toHaveBeenCalledWith('rodaja', expect.objectContaining({ attemptId: 'attempt-a', workoutId: 'joint-1' }));
+    expect(removePendingJointWorkoutPublication).not.toHaveBeenCalled();
+    expect(finishJointWorkout).not.toHaveBeenCalled();
   });
 
   test('keeps exercise addition collapsed at the end until a parent group is selected', () => {

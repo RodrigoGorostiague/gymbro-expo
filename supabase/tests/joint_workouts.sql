@@ -1,5 +1,5 @@
 begin;
-select plan(50);
+select plan(75);
 
 insert into auth.users (id, instance_id, aud, role, email, encrypted_password, email_confirmed_at, raw_app_meta_data, raw_user_meta_data, created_at, updated_at)
 select format('40000000-0000-0000-0000-%s', lpad(value::text, 12, '0'))::uuid, '00000000-0000-0000-0000-000000000000', 'authenticated', 'authenticated', format('joint%s@example.com', value), '', now(), '{}', '{}', now(), now()
@@ -23,6 +23,11 @@ insert into public.workout_start_activities (author_id, routine_name, expires_at
 set local role authenticated;
 select set_config('request.jwt.claim.sub', '40000000-0000-0000-0000-000000000001', true);
 select lives_ok($$select set_config('test.joint_id', public.create_joint_workout('40000000-0000-0000-0000-000000000002', '{"name":"Upper","muscleGroups":["back"],"exercises":[{"name":"Row","muscleGroups":["back"],"loadMode":"external-load","loadUnit":"kg","variant":"barbell","sets":[{"tipo":1,"weight":80,"reps":8}]}]}'::jsonb)::text, true)$$, 'initiator creates the first joint invite');
+set local role postgres;
+update public.workout_start_activities set joint_workout_id = current_setting('test.joint_id')::uuid
+where author_id = '40000000-0000-0000-0000-000000000001' and closed_at is null;
+set local role authenticated;
+select set_config('request.jwt.claim.sub', '40000000-0000-0000-0000-000000000001', true);
 select lives_ok($$select public.add_joint_workout_participant(current_setting('test.joint_id')::uuid, '40000000-0000-0000-0000-000000000003')$$, 'active initiator adds a Partner');
 select lives_ok($$select public.add_joint_workout_participant(current_setting('test.joint_id')::uuid, '40000000-0000-0000-0000-000000000004')$$, 'active initiator adds a second Bro');
 select throws_like($$select public.add_joint_workout_participant(current_setting('test.joint_id')::uuid, '40000000-0000-0000-0000-000000000005')$$, 'joint workout participant limit reached', 'server limits a session to four total participants');
@@ -68,7 +73,8 @@ select is((select closed_at is not null from public.workout_start_activities whe
 insert into public.joint_workout_participants (joint_workout_id, participant_id, status, joined_at)
 values (current_setting('test.joint_id')::uuid, '40000000-0000-0000-0000-000000000005', 'active', now());
 delete from public.relationships where member_low = '40000000-0000-0000-0000-000000000001' and member_high = '40000000-0000-0000-0000-000000000005';
-update public.joint_workout_posts set last_activity_at = created_at - interval '1 hour' where joint_workout_id = current_setting('test.joint_id')::uuid;
+update public.joint_workout_posts set last_activity_at = now() + interval '1 hour' where joint_workout_id = current_setting('test.joint_id')::uuid;
+select set_config('test.future_joint_activity', (select last_activity_at::text from public.joint_workout_posts where joint_workout_id = current_setting('test.joint_id')::uuid), true);
 set local role authenticated;
 select set_config('request.jwt.claim.sub', '40000000-0000-0000-0000-000000000005', true);
 select is(jsonb_array_length(public.list_joint_workout_posts()), 1, 'a session member without a direct relationship can reopen its joint post');
@@ -77,7 +83,7 @@ select set_config('request.jwt.claim.sub', '40000000-0000-0000-0000-000000000002
 select lives_ok($$select public.finish_joint_workout(current_setting('test.joint_id')::uuid, 'private', '{"routineName":"Lower","durationSeconds":70,"exercises":[{"name":"Squat","muscleGroupIds":["legs"],"sets":[{"weight":100,"reps":5,"completed":true}]}]}'::jsonb)$$, 'a later participant completion updates the existing group post');
 set local role postgres;
 select is((select count(*)::integer from public.joint_workout_posts where joint_workout_id = current_setting('test.joint_id')::uuid), 1, 'a later completion does not create a duplicate group post');
-select ok((select last_activity_at >= created_at from public.joint_workout_posts where joint_workout_id = current_setting('test.joint_id')::uuid), 'a later completion refreshes post activity');
+select is((select last_activity_at from public.joint_workout_posts where joint_workout_id = current_setting('test.joint_id')::uuid), current_setting('test.future_joint_activity')::timestamptz, 'a concurrent later commit cannot regress post activity');
 set local role authenticated;
 select set_config('request.jwt.claim.sub', '40000000-0000-0000-0000-000000000005', true);
 select ok(jsonb_path_exists(public.get_joint_workout_detail(current_setting('test.joint_id')::uuid), '$.participants[*] ? (@.id == "40000000-0000-0000-0000-000000000002" && @.workout.routineName == "Lower")'), 'a session member can access a result completed after the first finisher');
@@ -95,6 +101,105 @@ select is(jsonb_array_length(public.list_joint_participant_comments(current_sett
 select is(((public.get_joint_participant_reaction_states(current_setting('test.joint_id')::uuid) -> '40000000-0000-0000-0000-000000000001' ->> 'comment_count'))::integer, 1, 'joint participant engagement states include comment counters');
 select set_config('request.jwt.claim.sub', '40000000-0000-0000-0000-000000000004', true);
 select throws_like($$select public.respond_joint_workout_invite(current_setting('test.joint_id')::uuid, true)$$, 'joint workout invite unavailable', 'expired invitation cannot be accepted later');
+
+set local role postgres;
+select set_config('request.jwt.claim.sub', '', true);
+select ok(has_column_privilege('authenticated', 'public.joint_workout_participants', 'joint_workout_id', 'select'), 'Realtime subscribers can select the joint workout primary key');
+select ok(has_column_privilege('authenticated', 'public.joint_workout_participants', 'participant_id', 'select'), 'Realtime subscribers can select the participant primary key');
+select ok(not has_column_privilege('authenticated', 'public.joint_workout_participants', 'completed_workout', 'select'), 'Realtime authorization does not expose completed workout payloads directly');
+select ok(participant_lock > 0 and workout_lock > participant_lock, 'leave locks the participant before the workout to match finish lock ordering')
+from (select
+  strpos(pg_get_functiondef('public.leave_joint_workout(uuid)'::regprocedure), 'from public.joint_workout_participants') as participant_lock,
+  strpos(pg_get_functiondef('public.leave_joint_workout(uuid)'::regprocedure), 'from public.joint_workouts where id = workout_id for update') as workout_lock
+) lock_order;
+
+insert into public.joint_workouts (id, initiator_id, suggested_routine, completed_at)
+select '42000000-0000-0000-0000-000000000001', '40000000-0000-0000-0000-000000000001', suggested_routine, now() - interval '1 hour'
+from public.joint_workouts where id = current_setting('test.joint_id')::uuid;
+insert into public.joint_workouts (id, initiator_id, suggested_routine)
+select '42000000-0000-0000-0000-000000000002', '40000000-0000-0000-0000-000000000001', suggested_routine
+from public.joint_workouts where id = current_setting('test.joint_id')::uuid;
+insert into public.joint_workout_participants (joint_workout_id, participant_id, status, joined_at, completed_workout) values
+  ('42000000-0000-0000-0000-000000000001', '40000000-0000-0000-0000-000000000001', 'completed', now() - interval '2 hours', '{"routineName":"Old","durationSeconds":60,"exercises":[]}'::jsonb),
+  ('42000000-0000-0000-0000-000000000002', '40000000-0000-0000-0000-000000000001', 'active', now(), null);
+insert into public.workout_start_activities (author_id, routine_name, joint_workout_id, expires_at, closed_at) values
+  ('40000000-0000-0000-0000-000000000001', 'Old', '42000000-0000-0000-0000-000000000001', now() + interval '1 hour', now());
+insert into public.workout_start_activities (author_id, routine_name, joint_workout_id, expires_at) values
+  ('40000000-0000-0000-0000-000000000001', 'New', '42000000-0000-0000-0000-000000000002', now() + interval '1 hour');
+set local role authenticated;
+select set_config('request.jwt.claim.sub', '40000000-0000-0000-0000-000000000001', true);
+select lives_ok($$select public.finish_joint_workout('42000000-0000-0000-0000-000000000001', 'circle', '{"routineName":"Old","durationSeconds":60,"exercises":[]}'::jsonb)$$, 'an idempotent finish retry accepts an older completed joint workout');
+set local role postgres;
+select results_eq(
+  $$select joint_workout_id, closed_at is null from public.workout_start_activities where joint_workout_id in ('42000000-0000-0000-0000-000000000001', '42000000-0000-0000-0000-000000000002') order by joint_workout_id$$,
+  $$values ('42000000-0000-0000-0000-000000000001'::uuid, false), ('42000000-0000-0000-0000-000000000002'::uuid, true)$$,
+  'an older finish retry closes only its matching presence and preserves the newer open presence'
+);
+delete from public.workout_start_activities where joint_workout_id in ('42000000-0000-0000-0000-000000000001', '42000000-0000-0000-0000-000000000002');
+delete from public.joint_workouts where id in ('42000000-0000-0000-0000-000000000001', '42000000-0000-0000-0000-000000000002');
+
+insert into public.joint_workouts (id, initiator_id, suggested_routine)
+select seed.id, seed.initiator_id, source.suggested_routine
+from (values
+  ('41000000-0000-0000-0000-000000000001'::uuid, '40000000-0000-0000-0000-000000000001'::uuid),
+  ('41000000-0000-0000-0000-000000000002'::uuid, '40000000-0000-0000-0000-000000000003'::uuid),
+  ('41000000-0000-0000-0000-000000000003'::uuid, '40000000-0000-0000-0000-000000000003'::uuid)
+) seed(id, initiator_id)
+cross join (select suggested_routine from public.joint_workouts where id = current_setting('test.joint_id')::uuid) source;
+insert into public.joint_workout_participants (joint_workout_id, participant_id, status, joined_at, completed_workout) values
+  ('41000000-0000-0000-0000-000000000001', '40000000-0000-0000-0000-000000000001', 'active', now(), null),
+  ('41000000-0000-0000-0000-000000000001', '40000000-0000-0000-0000-000000000002', 'active', now(), null),
+  ('41000000-0000-0000-0000-000000000001', '40000000-0000-0000-0000-000000000004', 'invited', null, null),
+  ('41000000-0000-0000-0000-000000000002', '40000000-0000-0000-0000-000000000003', 'completed', now(), '{"routineName":"Preserved","durationSeconds":60,"exercises":[]}'::jsonb),
+  ('41000000-0000-0000-0000-000000000002', '40000000-0000-0000-0000-000000000004', 'active', now(), null),
+  ('41000000-0000-0000-0000-000000000003', '40000000-0000-0000-0000-000000000003', 'active', now(), null),
+  ('41000000-0000-0000-0000-000000000003', '40000000-0000-0000-0000-000000000004', 'invited', null, null);
+update public.joint_workout_participants set last_seen_at = now() - interval '2 hours 1 minute'
+where joint_workout_id = '41000000-0000-0000-0000-000000000003' and participant_id = '40000000-0000-0000-0000-000000000004';
+insert into public.joint_workout_posts (joint_workout_id) values ('41000000-0000-0000-0000-000000000002');
+insert into public.workout_start_activities (author_id, routine_name, joint_workout_id, expires_at) values
+  ('40000000-0000-0000-0000-000000000001', 'Upper', '41000000-0000-0000-0000-000000000001', now() + interval '1 hour');
+
+set local role authenticated;
+select set_config('request.jwt.claim.sub', '40000000-0000-0000-0000-000000000001', true);
+select lives_ok($$select public.leave_joint_workout('41000000-0000-0000-0000-000000000001')$$, 'the initiator can cancel active participation');
+select lives_ok($$select public.leave_joint_workout('41000000-0000-0000-0000-000000000001')$$, 'initiator cancellation retries are idempotent');
+set local role postgres;
+select is((select status::text from public.joint_workout_participants where joint_workout_id = '41000000-0000-0000-0000-000000000001' and participant_id = '40000000-0000-0000-0000-000000000001'), 'declined', 'initiator cancellation makes only the initiator terminal');
+select is((select status::text from public.joint_workout_participants where joint_workout_id = '41000000-0000-0000-0000-000000000001' and participant_id = '40000000-0000-0000-0000-000000000004'), 'declined', 'initiator cancellation closes outstanding invitations');
+select is((select status::text from public.joint_workout_participants where joint_workout_id = '41000000-0000-0000-0000-000000000001' and participant_id = '40000000-0000-0000-0000-000000000002'), 'active', 'initiator cancellation does not cancel an accepted member');
+select ok((select completed_at is null from public.joint_workouts where id = '41000000-0000-0000-0000-000000000001'), 'an accepted member keeps the cancelled initiator session open');
+select ok((select closed_at is not null from public.workout_start_activities where author_id = '40000000-0000-0000-0000-000000000001' and joint_workout_id = '41000000-0000-0000-0000-000000000001'), 'cancellation closes active workout presence');
+
+select set_config('request.jwt.claim.sub', '', true);
+insert into public.workout_start_activities (author_id, routine_name, joint_workout_id, expires_at) values
+  ('40000000-0000-0000-0000-000000000002', 'Upper', '41000000-0000-0000-0000-000000000001', now() + interval '1 hour');
+set local role authenticated;
+select set_config('request.jwt.claim.sub', '40000000-0000-0000-0000-000000000002', true);
+select lives_ok($$select public.leave_joint_workout('41000000-0000-0000-0000-000000000001')$$, 'an accepted member can abandon active participation');
+set local role postgres;
+select ok((select completed_at is not null from public.joint_workouts where id = '41000000-0000-0000-0000-000000000001'), 'the session becomes terminal after its final active member leaves');
+
+set local role authenticated;
+select set_config('request.jwt.claim.sub', '40000000-0000-0000-0000-000000000004', true);
+select lives_ok($$select public.leave_joint_workout('41000000-0000-0000-0000-000000000002')$$, 'an accepted member can leave after another participant completed');
+select lives_ok($$select public.leave_joint_workout('41000000-0000-0000-0000-000000000002')$$, 'accepted-member leave retries are idempotent');
+set local role postgres;
+select is((select completed_workout ->> 'routineName' from public.joint_workout_participants where joint_workout_id = '41000000-0000-0000-0000-000000000002' and participant_id = '40000000-0000-0000-0000-000000000003'), 'Preserved', 'leave preserves completed participant results');
+select is((select count(*)::integer from public.joint_workout_posts where joint_workout_id = '41000000-0000-0000-0000-000000000002'), 1, 'leave preserves an existing shared post');
+select ok((select completed_at is not null from public.joint_workouts where id = '41000000-0000-0000-0000-000000000002'), 'abandonment closes a session with preserved results');
+
+set local role authenticated;
+select set_config('request.jwt.claim.sub', '40000000-0000-0000-0000-000000000004', true);
+select is((public.get_community_badge_counts() ->> 'jointInvitations')::integer, 0, 'pending badges lazily exclude expired invitations');
+select throws_like($$select public.respond_joint_workout_invite('41000000-0000-0000-0000-000000000003', true)$$, 'joint workout invite unavailable', 'an expired invitation cannot be accepted');
+select is((select count(*) from jsonb_array_elements(public.list_joint_workouts()) item where item ->> 'id' = '41000000-0000-0000-0000-000000000003'), 0::bigint, 'expired invitations do not appear in the active session list');
+set local role postgres;
+select is((select status::text from public.joint_workout_participants where joint_workout_id = '41000000-0000-0000-0000-000000000003' and participant_id = '40000000-0000-0000-0000-000000000004'), 'declined', 'lazy expiry persists a terminal participant status');
+
+set local role authenticated;
+select set_config('request.jwt.claim.sub', '40000000-0000-0000-0000-000000000005', true);
+select is((select count(participant_id) from public.joint_workout_participants where joint_workout_id = '41000000-0000-0000-0000-000000000001'), 0::bigint, 'Realtime SELECT remains restricted to RLS-visible memberships');
 
 select set_config('request.jwt.claim.sub', '40000000-0000-0000-0000-000000000001', true);
 select lives_ok($$select public.send_partner_message('40000000-0000-0000-0000-000000000003', 'kiss')$$, 'current Partners can create a private message notification');

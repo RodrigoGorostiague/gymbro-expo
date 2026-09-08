@@ -1115,6 +1115,7 @@ function isActiveWorkoutDraft(value: unknown, owner: UserProfile): value is Acti
     && (draft.pausedAtMs === undefined || Number.isFinite(draft.pausedAtMs))
     && (draft.pausedDurationMs === undefined || Number.isFinite(draft.pausedDurationMs))
     && (draft.pausedRestRemainingSeconds === undefined || Number.isFinite(draft.pausedRestRemainingSeconds))
+    && (draft.jointCancellationPending === undefined || draft.jointCancellationPending === true)
     && (draft.routineSnapshot === undefined || (typeof draft.routineSnapshot === 'object' && draft.routineSnapshot !== null
       && typeof draft.routineSnapshot.id === 'string' && typeof draft.routineSnapshot.name === 'string'
       && Array.isArray(draft.routineSnapshot.exercises)));

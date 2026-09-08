@@ -260,6 +260,6 @@ describe('social graph client boundary', () => {
 
     await act(async () => { TestRenderer.create(React.createElement(SocialProvider, null, React.createElement(Probe))); });
 
-    await vi.waitFor(() => expect(flushPendingJointWorkoutPublications).toHaveBeenCalledWith('member-1'));
+    await vi.waitFor(() => expect(flushPendingJointWorkoutPublications).toHaveBeenCalledWith('member-1', undefined, expect.any(Array)));
   });
 });

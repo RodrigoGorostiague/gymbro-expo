@@ -13,6 +13,12 @@ describe('active workout drafts', () => {
   const draft = { version: 1 as const, owner: 'rodaja' as const, attemptId: 'a', routineId: 'r', startedAtMs: 1, restTimerSeconds: 0, completedSets: {}, setValues: {} };
   test('ignores and quarantines malformed owner drafts', async () => { storage.data.set('@gymbro/active-workout/v1/rodaja', JSON.stringify({ owner: 'brisas' })); await expect(loadActiveWorkoutDraft('rodaja')).resolves.toBeNull(); expect(storage.data.has('@gymbro/active-workout/v1/rodaja')).toBe(false); });
   test('stores drafts by owner', async () => { await saveActiveWorkoutDraft(draft); await expect(loadActiveWorkoutDraft('rodaja', 1)).resolves.toEqual(draft); });
+  test('stores a joint cancellation marker while accepting existing drafts without one', async () => {
+    await saveActiveWorkoutDraft({ ...draft, jointWorkoutId: 'joint-1', jointCancellationPending: true });
+    await expect(loadActiveWorkoutDraft('rodaja', 1)).resolves.toMatchObject({ jointWorkoutId: 'joint-1', jointCancellationPending: true });
+    await saveActiveWorkoutDraft(draft);
+    await expect(loadActiveWorkoutDraft('rodaja', 1)).resolves.toEqual(draft);
+  });
   test('round-trips the optional session prescription while accepting legacy drafts without one', async () => {
     const routineSnapshot = { id: 'r', name: 'Session-only', muscleGroups: ['pecho'], createdAt: '', exercises: [{ id: 'exercise', name: 'Press', muscleGroups: ['pecho'], variant: 'bar', sets: [{ id: 'set', tipo: 1, weight: 20, reps: 8 }] }] };
     await saveActiveWorkoutDraft({ ...draft, routineSnapshot });

@@ -47,7 +47,7 @@ function asRecap(row: unknown): WorkoutRecap {
   };
 }
 
-function asSharePayload(value: unknown): WorkoutRecapSharePayload | null {
+export function asSharePayload(value: unknown): WorkoutRecapSharePayload | null {
   if (!value || typeof value !== 'object') return null;
   const payload = value as WorkoutRecapSharePayload;
   const isRecord = (candidate: unknown): candidate is Record<string, unknown> => !!candidate && typeof candidate === 'object' && !Array.isArray(candidate);

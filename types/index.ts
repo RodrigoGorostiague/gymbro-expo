@@ -387,6 +387,8 @@ export interface ActiveWorkoutDraft {
   pausedRestRemainingSeconds?: number;
   lineage?: WorkoutLineage;
   jointWorkoutId?: string;
+  /** Durable lock retained until a joint-workout leave is authoritatively acknowledged. */
+  jointCancellationPending?: true;
   /** Session-local prescription. Existing drafts without it are migrated on resume. */
   routineSnapshot?: Routine;
 }

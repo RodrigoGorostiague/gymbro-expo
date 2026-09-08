@@ -45,8 +45,8 @@ import { matchesActiveWorkout } from '../../../utils/activeWorkoutReentry';
 import { reconcileActiveWorkoutTiming } from '../../../utils/activeWorkoutTiming';
 import { withTimeout } from '../../../utils/withTimeout';
 import { validateMesocycleExecutionLineage } from '../../../utils/mesocycleExecutionLineage';
-import { ActiveWorkoutInviteCandidate, completedJointWorkoutInput, finishJointWorkout, inviteActiveWorkoutMember, jointParticipantInviteCapacity, JointCompletedWorkout, JointParticipant, JointVisibility, JointWorkoutLiveState, listActiveWorkoutInviteCandidates, listJointWorkouts, updateJointWorkoutLiveProgress } from '../../../services/jointWorkouts';
-import { queueJointWorkoutPublication, removePendingJointWorkoutPublication } from '../../../services/jointWorkoutPublicationQueue';
+import { ActiveWorkoutInviteCandidate, completedJointWorkoutInput, finishJointWorkout, inviteActiveWorkoutMember, jointParticipantInviteCapacity, JointCompletedWorkout, JointParticipant, JointVisibility, JointWorkoutLiveState, leaveJointWorkout, listActiveWorkoutInviteCandidates, listJointWorkouts, updateJointWorkoutLiveProgress } from '../../../services/jointWorkouts';
+import { prepareJointWorkoutPublication, queueJointWorkoutPublication, removePendingJointWorkoutPublication } from '../../../services/jointWorkoutPublicationQueue';
 import { recapSharePayload } from '../../../services/workoutRecapFeed';
 import { closeWorkoutStartActivity, publishWorkoutStartActivity } from '../../../services/workoutStartActivity';
 import { attemptToSession } from '../../../utils/workoutAttempts';
@@ -110,6 +110,7 @@ interface SetRuntimeValues {
 }
 
 type PendingJointCompletion = {
+  attemptId: string;
   workoutId: string;
   visibility: JointVisibility;
   completedWorkout: JointCompletedWorkout;
@@ -207,6 +208,7 @@ export default function ExecuteRoutineScreen() {
   const [pickerVisible, setPickerVisible] = useState(false);
   const [positionMenuExerciseId, setPositionMenuExerciseId] = useState<string | null>(null);
   const [pauseMenuVisible, setPauseMenuVisible] = useState(false);
+  const [jointCancellationStatus, setJointCancellationStatus] = useState<'idle' | 'pending' | 'uncertain'>(activeWorkoutDraft?.jointCancellationPending ? 'pending' : 'idle');
   const [pauseSyncError, setPauseSyncError] = useState<string | null>(null);
   const [restCompletionBadgeVisible, setRestCompletionBadgeVisible] = useState(false);
   const [workoutControlsVisible, setWorkoutControlsVisible] = useState(true);
@@ -223,6 +225,8 @@ export default function ExecuteRoutineScreen() {
   const restEndsAtMsRef = useRef<number | null>(null);
   const restCompletionAlertedRef = useRef(false);
   const pauseMutationRef = useRef(false);
+  const jointCancellationStartedRef = useRef(activeWorkoutDraft?.jointCancellationPending === true);
+  const jointCancellationInFlightRef = useRef(false);
   const startInFlightRef = useRef(false);
   const publishedJointSessionRef = useRef<string | null>(null);
   const setCelebrationRef = useRef<SetCelebrationHandle | null>(null);
@@ -354,6 +358,11 @@ export default function ExecuteRoutineScreen() {
     applySetValues(activeWorkoutDraft.setValues);
     setCompletedSets(migratedCompletedSets);
     setWorkoutRoutine(snapshot);
+    if (activeWorkoutDraft.jointCancellationPending) {
+      jointCancellationStartedRef.current = true;
+      setJointCancellationStatus('pending');
+      setPauseMenuVisible(true);
+    }
     if (!activeWorkoutDraft.routineSnapshot || JSON.stringify(migratedCompletedSets) !== JSON.stringify(activeWorkoutDraft.completedSets)) {
       void updateCurrentActiveWorkout((draft) => ({ ...draft, routineSnapshot: snapshot, completedSets: migratedCompletedSets }));
     }
@@ -641,6 +650,7 @@ export default function ExecuteRoutineScreen() {
   };
 
   const resumeFromPauseMenu = () => {
+    if (jointCancellationStartedRef.current) return;
     setPauseMenuVisible(false);
     resumeWorkout();
   };
@@ -659,15 +669,39 @@ export default function ExecuteRoutineScreen() {
   }, [pauseSyncError]);
 
   const finishFromPauseMenu = () => {
+    if (jointCancellationStartedRef.current) return;
     setPauseMenuVisible(false);
     void finishWorkout(jointWorkoutId ? 'circle' : undefined);
   };
 
   const cancelFromPauseMenu = async () => {
-    setPauseMenuVisible(false);
-    await cancelActiveWorkout();
-    router.back();
+    if (jointCancellationInFlightRef.current) return;
+    jointCancellationInFlightRef.current = true;
+    if (jointWorkoutId) {
+      jointCancellationStartedRef.current = true;
+      setJointCancellationStatus('pending');
+    }
+    try {
+      if (jointWorkoutId) {
+        // Make the lock restart-safe before an idempotent leave can commit remotely.
+        await updateCurrentActiveWorkout((draft) => ({ ...draft, jointCancellationPending: true }));
+        await leaveJointWorkout(jointWorkoutId);
+      }
+      await cancelActiveWorkout();
+      router.back();
+    } catch (error) {
+      if (jointWorkoutId) setJointCancellationStatus('uncertain');
+      Alert.alert('No se pudo cancelar el entrenamiento', error instanceof Error ? error.message : 'Inténtalo nuevamente.');
+    } finally {
+      jointCancellationInFlightRef.current = false;
+    }
   };
+
+  useEffect(() => {
+    if (phase !== 'active' || !jointWorkoutId || activeWorkoutDraft?.jointCancellationPending !== true) return;
+    setPauseMenuVisible(true);
+    void cancelFromPauseMenu();
+  }, [activeWorkoutDraft?.jointCancellationPending, jointWorkoutId, phase]);
 
   const loadJointState = async (workoutId = jointWorkoutId) => {
     if (!workoutId) return;
@@ -856,10 +890,6 @@ export default function ExecuteRoutineScreen() {
           [`${exercise.exerciseId}:${set.setId}`, { performed: set.completed, reps: set.reps, load: set.weight }]))),
       });
       attemptRef.current = attempt;
-      // attemptRef keeps the attempt ID stable after a timeout, so a user retry
-      // reaches the server's existing finalization instead of creating a new one.
-      const finalized = await withTimeout(addAttempt(attempt), REMOTE_OPERATION_TIMEOUT_MS, 'Save workout');
-      void closeWorkoutStartActivity().catch(() => undefined);
       let jointCompletion: PendingJointCompletion | null = null;
       if (jointWorkoutId) {
         const sharePayload = recapSharePayload(
@@ -870,11 +900,17 @@ export default function ExecuteRoutineScreen() {
           { shareRoutineTemplate: true, shareMesocycleTemplate: true, sharePerformedSetDetails: true },
         );
         jointCompletion = {
+          attemptId: attempt.id,
           workoutId: jointWorkoutId,
           visibility: jointVisibility ?? 'circle',
           completedWorkout: completedJointWorkoutInput(routine, elapsed, exercises, sharePayload),
         };
+        await prepareJointWorkoutPublication(user, jointCompletion);
       }
+      // attemptRef and the prepared command survive an ambiguous timeout. A retry
+      // reuses the attempt ID, while only a persisted attempt can make the command publishable.
+      const finalized = await withTimeout(addAttempt(attempt), REMOTE_OPERATION_TIMEOUT_MS, 'Save workout');
+      void closeWorkoutStartActivity().catch(() => undefined);
       setRewardReceipt(finalized.receipt);
       setExperienceReceipt(finalized.experienceReceipt);
       setEarnedGems(receiptTotal(finalized.receipt));
@@ -1328,7 +1364,7 @@ export default function ExecuteRoutineScreen() {
           transparent
           animationType="fade"
           visible={pauseMenuVisible}
-          onRequestClose={() => void resumeFromPauseMenu()}
+          onRequestClose={() => resumeFromPauseMenu()}
         >
           <View style={styles.pauseMenuBackdrop}>
             <GlassCard style={[styles.pauseMenu, { borderColor: theme.glassBorder, backgroundColor: theme.tabBarBackground }]}>
@@ -1341,10 +1377,10 @@ export default function ExecuteRoutineScreen() {
                 <Text accessibilityRole="alert" style={[styles.pauseSyncErrorText, { color: theme.textMuted }]}>La pausa sigue guardada en este dispositivo. Se sincronizará al reintentar o volver a la app.</Text>
                 <GlassButton title="Reintentar sincronización" variant="secondary" onPress={retryActiveWorkoutSync} />
               </View> : null}
-              <GlassButton title="Reanudar" onPress={() => void resumeFromPauseMenu()} />
-              <GlassButton title="Finalizar entrenamiento" variant="secondary" disabled={isFinishing} onPress={finishFromPauseMenu} />
+              <GlassButton title="Reanudar" disabled={jointCancellationStatus !== 'idle'} onPress={() => void resumeFromPauseMenu()} />
+              <GlassButton title="Finalizar entrenamiento" variant="secondary" disabled={isFinishing || jointCancellationStatus !== 'idle'} onPress={finishFromPauseMenu} />
               <WorkoutSaveIndicator visible={isFinishing} color={theme.glassBorder} textColor={theme.textMuted} />
-              <HapticPressable accessibilityRole="button" accessibilityLabel="Cancelar entrenamiento" onPress={() => void cancelFromPauseMenu()} style={styles.pauseCancelButton}>
+              <HapticPressable accessibilityRole="button" accessibilityLabel="Cancelar entrenamiento" accessibilityState={{ disabled: jointCancellationStatus === 'pending' }} disabled={jointCancellationStatus === 'pending'} onPress={() => void cancelFromPauseMenu()} style={styles.pauseCancelButton}>
                 <Text style={styles.pauseCancelText}>Cancelar entrenamiento</Text>
               </HapticPressable>
             </GlassCard>
