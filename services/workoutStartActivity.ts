@@ -40,11 +40,11 @@ function asActivity(value: unknown): WorkoutStartActivity | null {
   };
 }
 
-export async function publishWorkoutStartActivity(routineName: string, jointWorkoutId?: string | null): Promise<void> {
+export async function publishWorkoutStartActivity(routineName: string, jointWorkoutId?: string | null, attemptId?: string): Promise<void> {
   const trimmedName = routineName.trim();
   if (!trimmedName) throw new Error('La rutina debe tener un nombre para compartir el inicio.');
   const { error } = await client().rpc('publish_workout_start_activity', {
-    input: { routine_name: trimmedName, ...(jointWorkoutId ? { joint_workout_id: jointWorkoutId } : {}) },
+    input: { routine_name: trimmedName, ...(attemptId ? { attempt_id: attemptId } : {}), ...(jointWorkoutId ? { joint_workout_id: jointWorkoutId } : {}) },
   });
   if (error) throw new Error(error.message);
 }
@@ -70,6 +70,10 @@ export async function subscribeToWorkoutStartActivityChanges(onChange: () => voi
   if (!data.session) return () => undefined;
   await instance.realtime.setAuth(data.session.access_token);
   const channel = instance.channel(`workout-start-activity:${data.session.user.id}`);
-  channel.on('postgres_changes', { event: '*', schema: 'public', table: 'workout_start_activities' }, onChange).subscribe();
+  channel.on('postgres_changes', { event: '*', schema: 'public', table: 'workout_start_activities' }, onChange).subscribe((status) => { if (status === 'SUBSCRIBED') onChange(); });
   return () => { void instance.removeChannel(channel); };
+}
+
+export function activeWorkoutStartActivities<T extends { expiresAt: string }>(activities: readonly T[], now: number): T[] {
+  return activities.filter((activity) => Date.parse(activity.expiresAt) > now);
 }

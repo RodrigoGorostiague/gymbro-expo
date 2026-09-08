@@ -95,6 +95,84 @@ describe('DataProvider catalog library integration', () => {
     storage.data.set('@gymbro/catalog-library/v2/brisas', JSON.stringify({ ...library(), owner: 'brisas' }));
   });
 
+  test('reconciles canonical reward metadata but rejects a changed captured result', async () => {
+    const { createWorkoutAttempt } = await import('../utils/workoutAttempts');
+    const captured = createWorkoutAttempt({ id: 'reconcile', owner: 'rodaja', routine: library().routines[0], completedAt: '2026-09-08T12:00:00Z', durationSeconds: 60, restTimerSeconds: 90, results: {} });
+    const canonical = { ...captured, rewardApplication: { ...captured.rewardApplication, state: 'applied' as const, appliedAt: '2026-09-08T12:00:01Z' } };
+    trainingState.load.mockResolvedValue({ ...trainingState.value, attempts: [canonical] });
+    finalizeAttempt.mockResolvedValue({ attempt: canonical, receipt: { balance: 0, entries: [], weekly: {} }, experienceReceipt: { progress: await trainingState.experience() } });
+    let current: ReturnType<typeof useData> | undefined;
+    const Probe = () => { current = useData(); return null; };
+    await act(async () => { TestRenderer.create(React.createElement(DataProvider, null, React.createElement(Probe))); });
+    await act(async () => { await current!.addAttempt(captured); });
+    expect(finalizeAttempt).toHaveBeenCalledWith(captured);
+    expect(current!.attempts).toEqual([canonical]);
+    const changed = createWorkoutAttempt({ id: captured.id, owner: captured.owner, routine: library().routines[0], completedAt: captured.completedAt, durationSeconds: captured.durationSeconds, restTimerSeconds: captured.restTimerSeconds, results: { 'routine-exercise-1-set-1': { performed: true, reps: 12, load: 25 } } });
+    await expect(current!.addAttempt(changed)).rejects.toThrow('otros datos capturados');
+    await expect(current!.addAttempt({ ...captured, rewardApplication: { ...captured.rewardApplication, id: 'another-receipt' } })).rejects.toThrow('otros datos capturados');
+    expect(finalizeAttempt).toHaveBeenCalledTimes(1);
+  });
+
+  test('prevents shared cancellation and unavailable-route cleanup from deleting pending finalization', async () => {
+    const { createWorkoutAttempt } = await import('../utils/workoutAttempts');
+    const attempt = createWorkoutAttempt({ id: 'pending', owner: 'rodaja', routine: library().routines[0], completedAt: '2026-09-08T12:00:00Z', durationSeconds: 60, restTimerSeconds: 90, results: {} });
+    const draft = { version: 1 as const, owner: 'rodaja', attemptId: attempt.id, routineId: library().routines[0].id, startedAtMs: Date.now(), restTimerSeconds: 90, completedSets: {}, setValues: {}, routineSnapshot: library().routines[0], jointWorkoutId: 'joint-1', pendingFinalization: { attempt } };
+    trainingState.load.mockResolvedValue({ ...trainingState.value, activeWorkoutDraft: draft });
+    let current: ReturnType<typeof useData> | undefined;
+    const Probe = () => { current = useData(); return null; };
+    await act(async () => { TestRenderer.create(React.createElement(DataProvider, null, React.createElement(Probe))); });
+    trainingState.save.mockClear();
+    await act(async () => { await expect(current!.cancelActiveWorkout()).rejects.toThrow('pendiente'); });
+    await act(async () => { await current!.clearActiveWorkoutIfMatches({ owner: draft.owner, routineId: draft.routineId }); });
+    const leave = vi.fn();
+    await expect(current!.updateActiveWorkout({ ...draft, jointCancellationPending: true }).then(leave)).rejects.toThrow('pendiente');
+    expect(leave).not.toHaveBeenCalled();
+    expect(current!.activeWorkoutDraft).toEqual(draft);
+    expect(trainingState.save).not.toHaveBeenCalled();
+    await act(async () => { await current!.updateActiveWorkout({ ...draft, pendingFinalization: undefined }); });
+    expect(current!.activeWorkoutDraft?.pendingFinalization).toEqual({ attempt });
+    expect(trainingState.save).toHaveBeenLastCalledWith({ activeWorkoutDraft: expect.objectContaining({ pendingFinalization: { attempt } }) });
+    await act(async () => { await current!.updateActiveWorkout({ ...draft, pendingFinalization: undefined }, { allowFinalizationReset: true }); });
+    expect(current!.activeWorkoutDraft?.pendingFinalization).toBeUndefined();
+  });
+
+  test('custom exercise writes never replace an active workout or other training fields', async () => {
+    let current: ReturnType<typeof useData> | undefined;
+    const Probe = () => { current = useData(); return null; };
+    await act(async () => { TestRenderer.create(React.createElement(DataProvider, null, React.createElement(Probe))); });
+    const draft = { version: 1 as const, owner: 'rodaja', attemptId: 'active', routineId: 'routine-1', startedAtMs: Date.now(), restTimerSeconds: 90, completedSets: {}, setValues: {} };
+    await act(async () => { await current!.startActiveWorkout(draft); });
+    await act(async () => { await current!.addExercise({ name: 'Custom press', muscleGroups: ['GM-101'], variant: 'Barra', defaultSets: [] }); });
+    expect(trainingState.save).toHaveBeenLastCalledWith({ definitions: [expect.objectContaining({ name: 'Custom press' })] });
+    expect(current!.activeWorkoutDraft).toEqual(draft);
+  });
+
+  test('custom exercise writes do not restore a deleted attempt from the hydration snapshot', async () => {
+    const { createWorkoutAttempt } = await import('../utils/workoutAttempts');
+    const attempt = createWorkoutAttempt({ id: 'deleted', owner: 'rodaja', routine: library().routines[0], completedAt: '2026-09-08T12:00:00Z', durationSeconds: 60, restTimerSeconds: 90, results: {} });
+    trainingState.value = { ...trainingState.value, attempts: [attempt] };
+    trainingState.load.mockResolvedValue(trainingState.value);
+    let current: ReturnType<typeof useData> | undefined;
+    const Probe = () => { current = useData(); return null; };
+    await act(async () => { TestRenderer.create(React.createElement(DataProvider, null, React.createElement(Probe))); });
+    await act(async () => { await current!.deleteSession(attempt.id); });
+    await act(async () => { await current!.addExercise({ name: 'Custom press', muscleGroups: ['GM-101'], variant: 'Barra', defaultSets: [] }); });
+    expect(current!.attempts).toEqual([]);
+    expect(current!.sessions).toEqual([]);
+    expect(trainingState.save).toHaveBeenLastCalledWith({ definitions: expect.any(Array) });
+  });
+
+  test('serializes concurrent custom exercise edits without dropping either definition', async () => {
+    let current: ReturnType<typeof useData> | undefined;
+    const Probe = () => { current = useData(); return null; };
+    await act(async () => { TestRenderer.create(React.createElement(DataProvider, null, React.createElement(Probe))); });
+    await act(async () => {
+      await Promise.all(['First', 'Second'].map((name) => current!.addExercise({ name, muscleGroups: ['GM-101'], variant: 'Barra', defaultSets: [] })));
+    });
+    expect(current!.definitions.map(({ name }) => name)).toEqual(['First', 'Second']);
+    expect(trainingState.save).toHaveBeenLastCalledWith({ definitions: [expect.objectContaining({ name: 'First' }), expect.objectContaining({ name: 'Second' })] });
+  });
+
   test('hydrates the remote normalized catalog without a broad local runtime wipe', async () => {
     let current: ReturnType<typeof useData> | undefined;
     const Probe = () => { current = useData(); return null; };
@@ -156,7 +234,7 @@ describe('DataProvider catalog library integration', () => {
     expect(current?.mesocycles).toHaveLength(2);
   });
 
-  test('marks a mesocycle completed when its final eligible session is accredited', async () => {
+  test.each([false, true])('keeps the finalization boundary when mesocycle completion save fails: %s', async (failMesocycleSave) => {
     const mesocycle = {
       id: 'mesocycle-1', name: 'Block', goal: '', status: 'active' as const, durationWeeks: 1,
       createdAt: '2026-08-01T00:00:00.000Z', weeks: [{ id: 'week-1', weekNumber: 1, entries: [{ id: 'entry-1', ref: { routineId: 'routine-1', routineName: 'Upper', source: 'local' as const }, order: 1 }] }],
@@ -177,6 +255,13 @@ describe('DataProvider catalog library integration', () => {
     const Probe = () => { current = useData(); return null; };
 
     await act(async () => { TestRenderer.create(React.createElement(DataProvider, null, React.createElement(Probe))); });
+    if (failMesocycleSave) {
+      const failure = new Error('mesocycle CAS conflict after finalization');
+      trainingLibrary.saveMesocycles.mockRejectedValueOnce(failure);
+      await act(async () => { await expect(current!.addAttempt(attempt)).rejects.toBe(failure); });
+      expect(finalizeAttempt).toHaveBeenCalledWith(attempt);
+      return;
+    }
     await act(async () => { await current!.addAttempt(attempt); });
 
     expect(current?.mesocycles).toMatchObject([{ id: mesocycle.id, status: 'completed' }]);
@@ -595,4 +680,28 @@ describe('DataProvider catalog library integration', () => {
     expect(remoteRestEndsAtMs).toBe(2_000);
     vi.useRealTimers();
   });
+  test('associates only the captured active attempt and preserves latest draft fields', async () => {
+    const activeWorkoutDraft = { version: 1 as const, owner: 'rodaja', attemptId: 'attempt-1', routineId: 'routine-1', startedAtMs: 1, restTimerSeconds: 90, completedSets: {}, setValues: {} };
+    trainingLibrary.value = { routines: [library().routines[0]], mesocycles: [] };
+    trainingState.value = { definitions: [], attempts: [], sessions: [], activeWorkoutDraft };
+    trainingState.load.mockResolvedValue(trainingState.value);
+    let current: ReturnType<typeof useData>;
+    const Probe = () => { current = useData(); return null; };
+    let tree: TestRenderer.ReactTestRenderer;
+    await act(async () => { tree = TestRenderer.create(React.createElement(DataProvider, null, React.createElement(Probe))); });
+    await act(async () => {
+      await current!.updateActiveWorkout({ ...activeWorkoutDraft, pausedAtMs: 5 });
+      await current!.associateActiveWorkoutJoint('rodaja', 'older-attempt', 'wrong');
+      await current!.associateActiveWorkoutJoint('other-owner', 'attempt-1', 'wrong');
+      await current!.associateActiveWorkoutJoint('rodaja', 'attempt-1', 'canonical');
+    });
+    expect(current!.activeWorkoutDraft).toMatchObject({ attemptId: 'attempt-1', pausedAtMs: 5, jointWorkoutId: 'canonical' });
+    await act(async () => {
+      await current!.updateActiveWorkout({ ...current!.activeWorkoutDraft!, jointCancellationPending: true });
+      await current!.associateActiveWorkoutJoint('rodaja', 'attempt-1', 'must-not-change');
+    });
+    expect(current!.activeWorkoutDraft).toMatchObject({ jointWorkoutId: 'canonical', jointCancellationPending: true });
+    await act(async () => tree!.unmount());
+  });
+
 });

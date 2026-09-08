@@ -1,3 +1,4 @@
+import { useLatestRequest } from '../../../hooks/useLatestRequest';
 import React, { useCallback, useEffect, useEffectEvent, useRef, useState } from 'react';
 import {
   Alert,
@@ -36,7 +37,7 @@ import { useSocial } from '../../../context/SocialContext';
 import { ActiveWorkoutDraft, CompletedExercise, CompletedSet, Exercise, ExperienceReceipt, Routine, RoutineSet, SetType, WorkoutAttempt } from '../../../types';
 import { vibrateRestTimerComplete } from '../../../utils/haptics';
 import { generateId } from '../../../utils/storage';
-import { classifyTrainingFinalizationError } from '../../../services/trainingState';
+import { classifyTrainingFinalizationError, isDefinitelyRejectedFinalization } from '../../../services/trainingState';
 import { createWorkoutAttempt } from '../../../utils/workoutAttempts';
 import { receiptTotal } from '../../../services/rewardWallet';
 import * as Haptics from 'expo-haptics';
@@ -45,7 +46,7 @@ import { matchesActiveWorkout } from '../../../utils/activeWorkoutReentry';
 import { reconcileActiveWorkoutTiming } from '../../../utils/activeWorkoutTiming';
 import { withTimeout } from '../../../utils/withTimeout';
 import { validateMesocycleExecutionLineage } from '../../../utils/mesocycleExecutionLineage';
-import { ActiveWorkoutInviteCandidate, completedJointWorkoutInput, finishJointWorkout, inviteActiveWorkoutMember, jointParticipantInviteCapacity, JointCompletedWorkout, JointParticipant, JointVisibility, JointWorkoutLiveState, leaveJointWorkout, listActiveWorkoutInviteCandidates, listJointWorkouts, updateJointWorkoutLiveProgress } from '../../../services/jointWorkouts';
+import { ActiveWorkoutInviteCandidate, completedJointWorkoutInput, finishJointWorkoutAttempt, resolveJointWorkoutAttempt, inviteActiveWorkoutMember, jointParticipantInviteCapacity, JointCompletedWorkout, JointParticipant, JointVisibility, JointWorkoutLiveState, leaveJointWorkoutAttempt, listActiveWorkoutInviteCandidates, listJointWorkouts, updateJointWorkoutLiveProgress } from '../../../services/jointWorkouts';
 import { prepareJointWorkoutPublication, queueJointWorkoutPublication, removePendingJointWorkoutPublication } from '../../../services/jointWorkoutPublicationQueue';
 import { recapSharePayload } from '../../../services/workoutRecapFeed';
 import { closeWorkoutStartActivity, publishWorkoutStartActivity } from '../../../services/workoutStartActivity';
@@ -169,6 +170,8 @@ export default function ExecuteRoutineScreen() {
   const id = readSingleParam(params.id) ?? '';
   const { user } = useAuth();
   const { realtimeRevision } = useSocial();
+  const rosterReads = useLatestRequest(`${user}:${id}`);
+  const candidateReads = useLatestRequest(`${user}:${id}`);
   const { getRoutine, addAttempt, mesocycles, routines, exercises: catalogExercises, definitions = [], activeWorkoutDraft, startActiveWorkout, updateActiveWorkout, cancelActiveWorkout, clearActiveWorkoutIfMatches, refreshActiveWorkoutTiming = async () => undefined } = useData();
   const { theme } = useTheme();
   const [pendingJointCompletion, setPendingJointCompletion] = useState<PendingJointCompletion | null>(null);
@@ -183,7 +186,7 @@ export default function ExecuteRoutineScreen() {
     ?.entries.find((entry) => entry.id === lineage.plannedSessionId);
   const sourceRoutine = plannedEntry && 'routineSnapshot' in plannedEntry && plannedEntry.routineSnapshot
     ? plannedEntry.routineSnapshot
-    : getRoutine(id);
+    : getRoutine(id) ?? (activeWorkoutDraft?.pendingFinalization && matchesActiveWorkout(activeWorkoutDraft, { owner: user, routineId: id }) ? activeWorkoutDraft.routineSnapshot : undefined);
   const initialJointWorkoutId = readSingleParam(params.jointWorkoutId) ?? activeWorkoutDraft?.jointWorkoutId;
 
   const [phase, setPhase] = useState<'setup' | 'active' | 'done'>('setup');
@@ -194,6 +197,9 @@ export default function ExecuteRoutineScreen() {
   const [completedSets, setCompletedSets] = useState<Record<SetKey, boolean>>({});
   const [setValues, setSetValues] = useState<Record<SetKey, SetRuntimeValues>>({});
   const [isFinishing, setIsFinishing] = useState(false);
+  const [finalizationLocked, setFinalizationLocked] = useState(!!activeWorkoutDraft?.pendingFinalization);
+  const ambiguousFinalizationRef = useRef(!!activeWorkoutDraft?.pendingFinalization);
+  const pendingFinalizationRef = useRef(activeWorkoutDraft?.pendingFinalization);
   const [isStarting, setIsStarting] = useState(false);
   const [earnedGems, setEarnedGems] = useState(0);
   const [rewardReceipt, setRewardReceipt] = useState<RewardReceipt | null>(null);
@@ -248,14 +254,14 @@ export default function ExecuteRoutineScreen() {
     activeWorkoutDraftRef.current = activeWorkoutDraft;
   }, [activeWorkoutDraft]);
 
-  const updateCurrentActiveWorkout = useCallback((updater: (draft: ActiveWorkoutDraft) => ActiveWorkoutDraft, defer = false) => {
+  const updateCurrentActiveWorkout = useCallback((updater: (draft: ActiveWorkoutDraft) => ActiveWorkoutDraft, defer = false, allowFinalizationReset = false) => {
     const current = activeWorkoutDraftRef.current;
     if (!current) return Promise.resolve();
     const next = updater(current);
     activeWorkoutDraftRef.current = next;
     let operation: Promise<void>;
     try {
-      operation = Promise.resolve(defer ? updateActiveWorkout(next, { defer: true }) : updateActiveWorkout(next));
+      operation = Promise.resolve(allowFinalizationReset ? updateActiveWorkout(next, { allowFinalizationReset: true }) : defer ? updateActiveWorkout(next, { defer: true }) : updateActiveWorkout(next));
     } catch (error) {
       operation = Promise.reject(error);
     }
@@ -351,6 +357,12 @@ export default function ExecuteRoutineScreen() {
   useEffect(() => {
     if (!sourceRoutine || !activeWorkoutDraft || !matchesActiveWorkout(activeWorkoutDraft, { owner: user, routineId: sourceRoutine.id, ...(lineage ? { lineage } : {}) }) || phase !== 'setup') return;
     attemptIdRef.current = activeWorkoutDraft.attemptId;
+    if (activeWorkoutDraft.pendingFinalization) {
+      attemptRef.current = activeWorkoutDraft.pendingFinalization.attempt;
+      pendingFinalizationRef.current = activeWorkoutDraft.pendingFinalization;
+      ambiguousFinalizationRef.current = true;
+      setFinalizationLocked(true);
+    }
     startTimeRef.current = activeWorkoutDraft.startedAtMs;
     setRestSeconds(String(activeWorkoutDraft.restTimerSeconds));
     const snapshot = activeWorkoutDraft.routineSnapshot ?? snapshotWorkoutRoutine(sourceRoutine);
@@ -375,8 +387,8 @@ export default function ExecuteRoutineScreen() {
   }, [activeWorkoutDraft, initialJointWorkoutId, lineage, phase, sourceRoutine, updateCurrentActiveWorkout, user]);
 
   useEffect(() => {
-    if (phase === 'active' && attemptIdRef.current && !activeWorkoutDraft) setPhase('setup');
-  }, [activeWorkoutDraft, phase]);
+    if (phase === 'active' && attemptIdRef.current && !activeWorkoutDraft && !finalizationLocked) setPhase('setup');
+  }, [activeWorkoutDraft, finalizationLocked, phase]);
 
   useEffect(() => {
     const draftJointWorkoutId = activeWorkoutDraft?.jointWorkoutId;
@@ -394,12 +406,12 @@ export default function ExecuteRoutineScreen() {
   }, [activeWorkoutDraft, jointWorkoutId, lineage, phase, sourceRoutine, user]);
 
   useEffect(() => {
-    if (phase !== 'active' || !jointWorkoutId) return;
+    if (phase !== 'active') return;
     void loadJointState().catch(() => undefined);
   }, [jointWorkoutId, phase]);
 
   useEffect(() => {
-    if (phase !== 'active' || !jointWorkoutId || realtimeRevision === 0) return;
+    if (phase !== 'active' || realtimeRevision === 0) return;
     void loadJointState().catch(() => undefined);
   }, [jointWorkoutId, phase, realtimeRevision]);
 
@@ -508,7 +520,7 @@ export default function ExecuteRoutineScreen() {
       attemptRef.current = null;
       setPhase('active');
       startTimeRef.current = Date.now();
-      void publishWorkoutStartActivity(snapshot.name, initialJointWorkoutId).catch(() => undefined);
+      void publishWorkoutStartActivity(snapshot.name, initialJointWorkoutId, attemptId).catch(() => undefined);
     } catch (error) {
       const message = error instanceof Error ? error.message : 'No se pudo iniciar el entrenamiento.';
       Alert.alert('No se pudo iniciar el entrenamiento', message);
@@ -685,7 +697,8 @@ export default function ExecuteRoutineScreen() {
       if (jointWorkoutId) {
         // Make the lock restart-safe before an idempotent leave can commit remotely.
         await updateCurrentActiveWorkout((draft) => ({ ...draft, jointCancellationPending: true }));
-        await leaveJointWorkout(jointWorkoutId);
+        if (!user || !attemptIdRef.current) throw new Error('Authentication required.');
+        await leaveJointWorkoutAttempt(user, attemptIdRef.current, jointWorkoutId);
       }
       await cancelActiveWorkout();
       router.back();
@@ -704,8 +717,22 @@ export default function ExecuteRoutineScreen() {
   }, [activeWorkoutDraft?.jointCancellationPending, jointWorkoutId, phase]);
 
   const loadJointState = async (workoutId = jointWorkoutId) => {
+    const isCurrent = rosterReads.begin();
+    const captured = activeWorkoutDraftRef.current;
+    const canonical = captured ? await withTimeout(resolveJointWorkoutAttempt(captured.attemptId), REMOTE_OPERATION_TIMEOUT_MS, 'Joint workout association') : null;
+    if (!isCurrent() || (captured && activeWorkoutDraftRef.current?.attemptId !== captured.attemptId)) return;
+    if (canonical && captured && !captured.pendingFinalization && !captured.jointCancellationPending) {
+      workoutId = canonical;
+      if (jointWorkoutId !== canonical) {
+        await updateCurrentActiveWorkout((draft) => ({ ...draft, jointWorkoutId: canonical }));
+        if (!isCurrent()) return;
+        setJointWorkoutId(canonical);
+        router.setParams({ jointWorkoutId: canonical });
+      }
+    }
     if (!workoutId) return;
     const sessions = await withTimeout(listJointWorkouts(), REMOTE_OPERATION_TIMEOUT_MS, 'Joint workout roster refresh');
+    if (!isCurrent()) return;
     const current = sessions.find((session) => session.id === workoutId);
     setJointTargets(current?.participants.filter((participant) => !participant.isSelf) ?? []);
   };
@@ -724,19 +751,23 @@ export default function ExecuteRoutineScreen() {
     if (!routine || phase !== 'active' || !selectedJointInviteIds.length) return;
     const selected = jointInviteCandidates.filter((profile) => selectedJointInviteIds.includes(profile.id));
     if (!selected.length) return;
+    const captured = activeWorkoutDraftRef.current;
+    if (!captured || captured.pendingFinalization || captured.jointCancellationPending) return;
     setJointBusy(true);
     const successfulIds = new Set<string>();
     let activeWorkoutId = jointWorkoutId;
     try {
+      await withTimeout(publishWorkoutStartActivity(routine.name, captured.jointWorkoutId, captured.attemptId), REMOTE_OPERATION_TIMEOUT_MS, 'Joint workout invitation presence');
       for (const profile of selected) {
         try {
           {
             const invitedWorkoutId = await withTimeout(inviteActiveWorkoutMember(profile.id, routine), REMOTE_OPERATION_TIMEOUT_MS, 'Joint workout invitation');
+            if (activeWorkoutDraftRef.current?.attemptId !== captured.attemptId || activeWorkoutDraftRef.current.owner !== captured.owner) return;
             activeWorkoutId = invitedWorkoutId;
             if (invitedWorkoutId !== jointWorkoutId) {
             setJointWorkoutId(invitedWorkoutId);
             setJointExpanded(false);
-            void updateCurrentActiveWorkout((draft) => ({ ...draft, jointWorkoutId: invitedWorkoutId }));
+            await updateCurrentActiveWorkout((draft) => draft.pendingFinalization || draft.jointCancellationPending ? draft : ({ ...draft, jointWorkoutId: invitedWorkoutId }));
             router.setParams({ jointWorkoutId: invitedWorkoutId });
             }
           }
@@ -753,20 +784,25 @@ export default function ExecuteRoutineScreen() {
       else Alert.alert(successfulIds.size ? 'Invitaciones parciales' : 'No se pudo invitar', successfulIds.size
         ? `Se enviaron ${successfulIds.size} de ${selected.length} invitaciones. Las restantes siguen seleccionadas para reintentar.`
         : 'No se pudo enviar ninguna invitación. Intentá otra vez.');
+    } catch (error) {
+      Alert.alert('No se pudo invitar', error instanceof Error ? error.message : 'Inténtalo de nuevo.');
     } finally { setJointBusy(false); }
   };
 
   const loadJointInviteCandidates = async (resetSelection = false, showLoading = true) => {
     if (phase !== 'active') return;
+    const isCurrent = candidateReads.begin();
     if (showLoading) setJointBusy(true);
     try {
       const candidates = await withTimeout(listActiveWorkoutInviteCandidates(), REMOTE_OPERATION_TIMEOUT_MS, 'Active workout connections');
+      if (!isCurrent()) return;
       setJointInviteCandidates(candidates);
       setSelectedJointInviteIds((current) => current.filter((id) => candidates.some((candidate) => candidate.id === id)));
       if (resetSelection) setSelectedJointInviteIds([]);
     } catch (error) {
+      if (!isCurrent()) return;
       if (resetSelection) Alert.alert('No se pudieron cargar tus conexiones', error instanceof Error ? error.message : 'Inténtalo nuevamente.');
-    } finally { if (showLoading) setJointBusy(false); }
+    } finally { if (isCurrent() && showLoading) setJointBusy(false); }
   };
 
   const toggleJointHeader = () => {
@@ -837,7 +873,7 @@ export default function ExecuteRoutineScreen() {
       if (!user) throw new Error('Authentication required.');
       await queueJointWorkoutPublication(user, completion);
       await withTimeout(
-        finishJointWorkout(completion.workoutId, completion.visibility, completion.completedWorkout),
+        finishJointWorkoutAttempt(user, completion.attemptId, completion.workoutId, completion.visibility, completion.completedWorkout),
         REMOTE_OPERATION_TIMEOUT_MS,
         'Finish joint workout',
       );
@@ -875,8 +911,12 @@ export default function ExecuteRoutineScreen() {
       }),
     }));
 
+    let dispatched = false;
+    const wasAmbiguous = ambiguousFinalizationRef.current;
     try {
       if (!user) throw new Error('Authentication required.');
+      const canonicalGroup = !attemptRef.current && attemptIdRef.current ? await withTimeout(resolveJointWorkoutAttempt(attemptIdRef.current), REMOTE_OPERATION_TIMEOUT_MS, 'Joint workout finalization association') : null;
+      const completionGroup = attemptRef.current?.jointWorkoutId ?? canonicalGroup ?? jointWorkoutId;
       const attempt = attemptRef.current ?? createWorkoutAttempt({
         id: attemptIdRef.current ?? (attemptIdRef.current = generateId()),
         owner: user,
@@ -885,14 +925,14 @@ export default function ExecuteRoutineScreen() {
         durationSeconds: elapsed,
         restTimerSeconds: restTimerConfig,
         lineage,
-        jointWorkoutId: jointWorkoutId ?? undefined,
+        jointWorkoutId: completionGroup ?? undefined,
         results: Object.fromEntries(exercises.flatMap((exercise) => exercise.sets.map((set) =>
           [`${exercise.exerciseId}:${set.setId}`, { performed: set.completed, reps: set.reps, load: set.weight }]))),
       });
       attemptRef.current = attempt;
       let jointCompletion: PendingJointCompletion | null = null;
-      if (jointWorkoutId) {
-        const sharePayload = recapSharePayload(
+      if (completionGroup) {
+        const sharePayload = pendingFinalizationRef.current?.sharePayload ?? recapSharePayload(
           attemptToSession(attempt),
           routine,
           lineage ? mesocycles.find((mesocycle) => mesocycle.id === lineage.mesocycleId) : undefined,
@@ -901,14 +941,25 @@ export default function ExecuteRoutineScreen() {
         );
         jointCompletion = {
           attemptId: attempt.id,
-          workoutId: jointWorkoutId,
-          visibility: jointVisibility ?? 'circle',
-          completedWorkout: completedJointWorkoutInput(routine, elapsed, exercises, sharePayload),
+          workoutId: completionGroup,
+          visibility: pendingFinalizationRef.current?.jointVisibility ?? jointVisibility ?? 'circle',
+          completedWorkout: completedJointWorkoutInput(routine, attempt.durationSeconds, attemptToSession(attempt).exercises, sharePayload),
         };
         await prepareJointWorkoutPublication(user, jointCompletion);
       }
+      setFinalizationLocked(true);
+      const pendingFinalization = { attempt, ...(jointCompletion ? { sharePayload: jointCompletion.completedWorkout.sharePayload, jointVisibility: jointCompletion.visibility } : {}) };
+      if (activeWorkoutDraftRef.current) {
+        await updateCurrentActiveWorkout((draft) => ({ ...draft, pendingFinalization }));
+        pendingFinalizationRef.current = pendingFinalization;
+      } else if (!wasAmbiguous || !pendingFinalizationRef.current) {
+        throw new Error('No hay un borrador activo para guardar el resultado.');
+      }
+      // A late successful request can already have cleared the durable draft.
+      // Reconcile that captured ID without resurrecting a finalized draft.
       // attemptRef and the prepared command survive an ambiguous timeout. A retry
       // reuses the attempt ID, while only a persisted attempt can make the command publishable.
+      dispatched = true;
       const finalized = await withTimeout(addAttempt(attempt), REMOTE_OPERATION_TIMEOUT_MS, 'Save workout');
       void closeWorkoutStartActivity().catch(() => undefined);
       setRewardReceipt(finalized.receipt);
@@ -921,6 +972,21 @@ export default function ExecuteRoutineScreen() {
         await syncJointCompletion(jointCompletion);
       }
     } catch (error) {
+      if (!wasAmbiguous && (!dispatched || isDefinitelyRejectedFinalization(error))) {
+        try {
+          await updateCurrentActiveWorkout((draft) => ({ ...draft, pendingFinalization: undefined }), false, true);
+          attemptRef.current = null;
+          pendingFinalizationRef.current = undefined;
+          setFinalizationLocked(false);
+          elapsedRef.current = setInterval(() => reconcileElapsedRef.current(), 1000);
+        } catch {
+          ambiguousFinalizationRef.current = true;
+          setFinalizationLocked(true);
+        }
+      } else {
+        ambiguousFinalizationRef.current = true;
+        setFinalizationLocked(true);
+      }
       console.error('Training finalization failed', error);
       const failure = classifyTrainingFinalizationError(error);
       Alert.alert(
@@ -991,7 +1057,7 @@ export default function ExecuteRoutineScreen() {
     return <ThemeBackground><SafeAreaView style={[styles.safe, styles.center]}><GlassCard style={styles.doneCard}><Text style={[styles.doneTitle, { color: theme.text }]}>Entrenamiento no disponible</Text><Text style={[styles.doneMeta, { color: theme.textMuted }]}>Este entrenamiento ya no está disponible. Volvé a Entrenar para elegir una rutina vigente.</Text><View style={styles.spacer} /><GlassButton title="Volver a entrenar" onPress={() => router.replace('/(tabs)/train')} /></GlassCard></SafeAreaView></ThemeBackground>;
   }
 
-  if (!lineageValidation.valid) {
+  if (!lineageValidation.valid && !pendingFinalizationRef.current) {
     const message = lineageValidation.reason === 'expired-planned-session'
       ? 'La fecha programada para esta sesión ya pasó.'
       : lineageValidation.reason === 'inactive-mesocycle'
@@ -1088,6 +1154,14 @@ export default function ExecuteRoutineScreen() {
       </ThemeBackground>
     );
   }
+
+  if (finalizationLocked) return <ThemeBackground><SafeAreaView style={[styles.safe, styles.center]}><GlassCard style={styles.doneCard}>
+    <Text style={[styles.doneTitle, { color: theme.text }]}>Guardado pendiente</Text>
+    <Text style={{ color: theme.textMuted }}>El resultado está pendiente de confirmación. Reintentá guardarlo antes de modificar o cancelar el entrenamiento.</Text>
+    <GlassButton title="Reintentar guardado" disabled={isFinishing} onPress={() => void finishWorkout()} />
+    <WorkoutSaveIndicator visible={isFinishing} color={theme.glassBorder} textColor={theme.textMuted} />
+    <GlassButton title="Volver" variant="secondary" disabled={isFinishing} onPress={() => router.back()} />
+  </GlassCard></SafeAreaView></ThemeBackground>;
 
   const totalSets = routine.exercises.reduce((acc, e) => acc + e.sets.length, 0);
   const doneSets = Object.values(completedSets).filter(Boolean).length;

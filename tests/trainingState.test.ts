@@ -8,7 +8,7 @@ vi.mock('../services/supabase', () => ({
   supabaseConfigurationError: null,
 }));
 
-import { classifyTrainingFinalizationError, finalizeTrainingAttempt, importLegacyCustomDefinitions, loadTrainingState, saveTrainingState } from '../services/trainingState';
+import { classifyTrainingFinalizationError, isDefinitelyRejectedFinalization, finalizeTrainingAttempt, importLegacyCustomDefinitions, loadTrainingState, saveTrainingState } from '../services/trainingState';
 
 const definition: ExerciseDefinition = {
   id: 'custom:owner:press', source: { kind: 'custom', owner: 'owner', originId: 'press' }, name: 'Press',
@@ -62,7 +62,9 @@ describe('training state RPC boundary', () => {
     } as any;
     const error = { code: 'P0001', message: 'invalid training attempt input', details: 'server-only', hint: 'server-only' };
     rpc.mockResolvedValueOnce({ data: null, error });
-    await expect(finalizeTrainingAttempt(attempt)).rejects.toBe(error);
+    const failure = await finalizeTrainingAttempt(attempt).catch((value) => value);
+    expect(isDefinitelyRejectedFinalization(failure)).toBe(true);
+    expect(failure).toMatchObject(error);
   });
 });
 
@@ -76,5 +78,25 @@ describe('training finalization error classification', () => {
     [new Error('unexpected failure'), 'No se pudo guardar el entrenamiento', 'No pudimos finalizar el entrenamiento. Intentá nuevamente.'],
   ])('returns a safe message for %o', (error, title, body) => {
     expect(classifyTrainingFinalizationError(error)).toEqual({ title, body });
+  });
+});
+
+describe('finalization certainty', () => {
+  const attempt = { version: 1, id: 'attempt', owner: 'owner', routineId: 'routine', recordedRoutineName: 'Routine', completedAt: '2026-09-08T12:00:00Z', durationSeconds: 60, restTimerSeconds: 90, exercises: [], completion: {}, reward: {}, rewardApplication: { id: 'reward', state: 'pending' } } as any;
+  test.each([{ code: 'P0001', message: 'unrecognized backend error' }, { code: 'NETWORK', message: 'invalid training attempt input' }])('does not classify unproven failures as rollback: %j', async (error) => {
+    rpc.mockResolvedValueOnce({ data: null, error });
+    expect(isDefinitelyRejectedFinalization(await finalizeTrainingAttempt(attempt).catch((error) => error))).toBe(false);
+  });
+  test('does not thaw a malformed success acknowledgement', async () => {
+    rpc.mockResolvedValueOnce({ data: { attempt }, error: null });
+    expect(isDefinitelyRejectedFinalization(await finalizeTrainingAttempt(attempt).catch((error) => error))).toBe(false);
+  });
+  test('preserves a pending command in draft save/load without stripping it', async () => {
+    const draft = { version: 1, owner: 'owner', attemptId: attempt.id, routineId: attempt.routineId, startedAtMs: 1, restTimerSeconds: 90, completedSets: {}, setValues: {}, pendingFinalization: { attempt } } as any;
+    rpc.mockResolvedValueOnce({ error: null });
+    await saveTrainingState({ activeWorkoutDraft: draft });
+    expect(rpc).toHaveBeenLastCalledWith('save_training_state', expect.objectContaining({ active_workout_draft_input: draft }));
+    rpc.mockResolvedValueOnce({ data: { definitions: [], attempts: [], sessions: [], activeWorkoutDraft: draft }, error: null });
+    await expect(loadTrainingState()).resolves.toMatchObject({ activeWorkoutDraft: { pendingFinalization: { attempt } } });
   });
 });

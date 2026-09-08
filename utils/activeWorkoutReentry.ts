@@ -31,6 +31,9 @@ export function hasActiveWorkoutReentryIntegrity(
   routines: readonly Routine[],
   mesocycles: readonly Mesocycle[],
 ): boolean {
+  if (draft?.pendingFinalization && draft.routineSnapshot?.id === draft.routineId
+    && draft.pendingFinalization.attempt.id === draft.attemptId
+    && draft.pendingFinalization.attempt.owner === draft.owner) return true;
   if (!draft || !routines.some((routine) => routine.id === draft.routineId)) return false;
   if (!draft.lineage) return true;
 

@@ -1,4 +1,5 @@
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
+import { AppState } from 'react-native';
 import { useAuth } from './AuthContext';
 import { useData } from './DataContext';
 import {
@@ -15,7 +16,7 @@ import {
   listReceivedPrivatePlanShareRequests,
   rejectPrivatePlanShareRequest,
 } from '../services/privatePlanSharing';
-import { subscribeToJointWorkoutChanges } from '../services/jointWorkouts';
+import { resolveJointWorkoutAttempt, subscribeToJointWorkoutChanges } from '../services/jointWorkouts';
 import { flushPendingJointWorkoutPublications } from '../services/jointWorkoutPublicationQueue';
 import { subscribeToWorkoutStartActivityChanges } from '../services/workoutStartActivity';
 
@@ -52,13 +53,19 @@ const SocialContext = createContext<SocialContextValue | null>(null);
 
 export function SocialProvider({ children }: { children: React.ReactNode }) {
   const { user } = useAuth();
-  const { attempts, routines, mesocycles } = useData();
+  const { attempts, routines, mesocycles, activeWorkoutDraft, associateActiveWorkoutJoint } = useData();
+  const account = useRef(user); account.current = user;
+  const profileRevision = useRef(0);
   const [ownProfile, setOwnProfile] = useState<OwnProfile | null>(null);
   const [realtimeRevision, setRealtimeRevision] = useState(0);
   const [failedAutoRecapSessionIds, setFailedAutoRecapSessionIds] = useState<ReadonlySet<string>>(new Set());
   const autoPublishingKeys = useRef(new Set<string>());
   const [recapRetryRevision, setRecapRetryRevision] = useState(0);
-  const refreshOwnProfile = useCallback(async () => setOwnProfile(await getOwnProfile()), []);
+  const refreshOwnProfile = useCallback(async () => {
+    const owner = user; const revision = ++profileRevision.current;
+    const profile = await getOwnProfile();
+    if (account.current === owner && revision === profileRevision.current) setOwnProfile(profile);
+  }, [user]);
   const clearFailedAutoRecapSession = useCallback((sessionId: string) => setFailedAutoRecapSessionIds((current) => {
     if (!current.has(sessionId)) return current;
     const next = new Set(current); next.delete(sessionId); return next;
@@ -69,6 +76,9 @@ export function SocialProvider({ children }: { children: React.ReactNode }) {
   }, [refreshOwnProfile]);
   useEffect(() => {
     let mounted = true;
+    let invalidationTimer: ReturnType<typeof setTimeout> | undefined;
+    setOwnProfile(null);
+    setFailedAutoRecapSessionIds(new Set());
     let unsubscribeGraph: () => void = () => undefined;
     let unsubscribeRecaps: () => void = () => undefined;
     let unsubscribeActivities: () => void = () => undefined;
@@ -80,8 +90,13 @@ export function SocialProvider({ children }: { children: React.ReactNode }) {
     }
     void refreshOwnProfile().catch(() => undefined);
     const invalidate = () => {
-      if (mounted) setRealtimeRevision((revision) => revision + 1);
+      if (!mounted || invalidationTimer) return;
+      invalidationTimer = setTimeout(() => {
+        invalidationTimer = undefined;
+        if (mounted) setRealtimeRevision((revision) => revision + 1);
+      }, 50);
     };
+    const foreground = AppState.addEventListener('change', (state) => { if (state === 'active') invalidate(); });
     void subscribeToSocialGraphChanges(invalidate).then((cleanup) => {
       if (mounted) unsubscribeGraph = cleanup;
       else cleanup();
@@ -102,8 +117,17 @@ export function SocialProvider({ children }: { children: React.ReactNode }) {
       if (mounted) unsubscribeWorkoutStarts = cleanup;
       else cleanup();
     }).catch(() => undefined);
-    return () => { mounted = false; unsubscribeGraph(); unsubscribeRecaps(); unsubscribeActivities(); unsubscribeJointWorkouts(); unsubscribeWorkoutStarts(); };
+    return () => { mounted = false; if (invalidationTimer) clearTimeout(invalidationTimer); foreground.remove(); unsubscribeGraph(); unsubscribeRecaps(); unsubscribeActivities(); unsubscribeJointWorkouts(); unsubscribeWorkoutStarts(); };
   }, [user, refreshOwnProfile]);
+  useEffect(() => {
+    if (!user || !activeWorkoutDraft || activeWorkoutDraft.owner !== user) return;
+    let current = true;
+    const attemptId = activeWorkoutDraft.attemptId;
+    void resolveJointWorkoutAttempt(attemptId).then((canonical) => {
+      if (current && canonical && account.current === user) return associateActiveWorkoutJoint(user, attemptId, canonical);
+    }).catch(() => undefined);
+    return () => { current = false; };
+  }, [user, activeWorkoutDraft?.attemptId, realtimeRevision]);
   useEffect(() => {
     if (!user) return undefined;
     let mounted = true;

@@ -25,6 +25,7 @@ const ACTIVE_WORKOUT_SAVE_DEBOUNCE_MS = 750;
 
 type ActiveWorkoutSaveOptions = {
   defer?: boolean;
+  allowFinalizationReset?: boolean;
 };
 
 type DeferredActiveWorkoutSave = {
@@ -79,6 +80,7 @@ interface DataContextValue {
   activeWorkoutDraft: ActiveWorkoutDraft | null;
   cancelActiveWorkout: () => Promise<void>;
   startActiveWorkout: (draft: ActiveWorkoutDraft) => Promise<void>;
+  associateActiveWorkoutJoint: (owner: string, attemptId: string, jointWorkoutId: string) => Promise<void>;
   updateActiveWorkout: (draft: ActiveWorkoutDraft, options?: ActiveWorkoutSaveOptions) => Promise<void>;
   clearActiveWorkoutIfMatches: (target: WorkoutLaunchTarget) => Promise<void>;
   refreshActiveWorkoutTiming: () => Promise<void>;
@@ -130,6 +132,7 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
   const mesocyclesLoadedRef = useRef(false);
   const activeUserRef = useRef(user);
   const trainingStateRef = useRef<TrainingState | null>(null);
+  const definitionMutationQueueRef = useRef<Promise<void>>(Promise.resolve());
   activeUserRef.current = user;
   const routineMutationQueueRef = useRef<Promise<void>>(Promise.resolve());
   const mesocycleMutationQueueRef = useRef<Promise<void>>(Promise.resolve());
@@ -327,6 +330,8 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
   const updateActiveWorkout = async (draft: ActiveWorkoutDraft, options: ActiveWorkoutSaveOptions = {}) => {
     const current = activeWorkoutDraftRef.current;
     if (!current || draft.owner !== current.owner || draft.attemptId !== current.attemptId) throw new Error('El borrador activo no coincide.');
+    if (current.pendingFinalization && draft.jointCancellationPending) throw new Error('El guardado del entrenamiento está pendiente de confirmación.');
+    if (current.pendingFinalization && !options.allowFinalizationReset) draft = { ...draft, pendingFinalization: current.pendingFinalization };
     // Publish immediately so the execution UI never waits for a remote draft write.
     activeWorkoutDraftRef.current = draft;
     setActiveWorkoutDraft(draft);
@@ -343,10 +348,17 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
     }
     await enqueueActiveWorkoutSave(draft, version);
   };
-  const cancelActiveWorkout = async () => { const owner = activeUserRef.current; if (!owner) throw new Error('Se requiere autenticación.'); discardDeferredActiveWorkoutSave(); await saveTrainingState({ activeWorkoutDraft: null }); if (activeUserRef.current === owner) { activeWorkoutDraftRef.current = null; setActiveWorkoutDraft(null); } };
+  const associateActiveWorkoutJoint = async (owner: string, attemptId: string, jointWorkoutId: string) => {
+    const current = activeWorkoutDraftRef.current;
+    if (activeUserRef.current !== owner || current?.owner !== owner || current.attemptId !== attemptId) return;
+    // Association never rewrites captured finalization or cancellation intent.
+    if (current.pendingFinalization || current.jointCancellationPending || current.jointWorkoutId === jointWorkoutId) return;
+    await updateActiveWorkout({ ...current, jointWorkoutId });
+  };
+  const cancelActiveWorkout = async () => { if (activeWorkoutDraftRef.current?.pendingFinalization) throw new Error('El guardado del entrenamiento está pendiente de confirmación.'); const owner = activeUserRef.current; if (!owner) throw new Error('Se requiere autenticación.'); discardDeferredActiveWorkoutSave(); await saveTrainingState({ activeWorkoutDraft: null }); if (activeUserRef.current === owner) { activeWorkoutDraftRef.current = null; setActiveWorkoutDraft(null); } };
   const clearActiveWorkoutIfMatches = async (target: WorkoutLaunchTarget) => {
     const draft = activeWorkoutDraftRef.current;
-    if (!matchesActiveWorkout(draft, target)) return;
+    if (!matchesActiveWorkout(draft, target) || draft?.pendingFinalization) return;
     const owner = target.owner;
     if (!owner || activeUserRef.current !== owner) return;
     discardDeferredActiveWorkoutSave();
@@ -399,22 +411,27 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
 
   const routines = localRoutines;
 
-  const publishTrainingState = (state: TrainingState) => {
-    trainingStateRef.current = state;
-    setDefinitions(state.definitions);
-    setExercises((current) => [...current.filter((item) => !item.id.startsWith('custom:')), ...state.definitions.map(definitionAsExercise)]);
-    setAttempts(state.attempts);
+  const publishDefinitions = (next: ExerciseDefinition[]) => {
+    if (trainingStateRef.current) trainingStateRef.current = { ...trainingStateRef.current, definitions: next };
+    setDefinitions(next);
+    setExercises((current) => [...current.filter((item) => !item.id.startsWith('custom:')), ...next.map(definitionAsExercise)]);
   };
 
-  const mutateTrainingState = async (mutation: (state: TrainingState) => TrainingState) => {
+  const mutateTrainingDefinitions = async (mutation: (definitions: ExerciseDefinition[]) => ExerciseDefinition[]) => {
     const owner = activeUserRef.current;
     if (!owner) throw new Error('Se requiere autenticación.');
-    const current = trainingStateRef.current;
-    if (!current) throw new Error('El entrenamiento aún no terminó de cargar.');
-    const next = mutation(current);
-    await saveTrainingState(next);
-    if (activeUserRef.current === owner) publishTrainingState(next);
-    return next;
+    const operation = definitionMutationQueueRef.current.then(async () => {
+      if (activeUserRef.current !== owner) throw new Error('La sesión cambió antes de guardar el ejercicio.');
+      const current = trainingStateRef.current;
+      if (!current) throw new Error('El entrenamiento aún no terminó de cargar.');
+      const next = mutation(current.definitions);
+      // Catalog edits own only definitions, never drafts or attempt/history snapshots.
+      await saveTrainingState({ definitions: next });
+      if (activeUserRef.current === owner) publishDefinitions(next);
+      return next;
+    });
+    definitionMutationQueueRef.current = operation.then(() => undefined, () => undefined);
+    return operation;
   };
 
   const enqueueRoutineMutation = <T,>(
@@ -491,16 +508,16 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
       loadMode: exercise.loadMode ?? 'external-load',
       loadUnit: exercise.loadUnit ?? 'kg',
     };
-    await mutateTrainingState((state) => ({ ...state, definitions: [...state.definitions, definition] }));
+    await mutateTrainingDefinitions((definitions) => [...definitions, definition]);
     return definitionAsExercise(definition);
   };
 
   const updateExercise = async (exercise: Exercise): Promise<void> => {
-    await mutateTrainingState((state) => {
-      const existing = state.definitions.find((definition) => definition.id === exercise.id);
+    await mutateTrainingDefinitions((definitions) => {
+      const existing = definitions.find((definition) => definition.id === exercise.id);
       if (!existing) throw new Error('El ejercicio ya no existe en el catálogo.');
       if (existing.source.kind !== 'custom' || existing.source.owner !== activeUserRef.current) throw new Error('Las definiciones del sistema son inmutables. Edita la prescripción dentro de una rutina.');
-      return { ...state, definitions: state.definitions.map((definition) => definition.id === exercise.id ? {
+      return definitions.map((definition) => definition.id === exercise.id ? {
         ...existing,
         name: exercise.name,
         muscleGroups: exercise.muscleGroups,
@@ -508,7 +525,7 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
         loadUnit: exercise.loadUnit ?? existing.loadUnit,
         variant: exercise.variant,
         defaultSets: exercise.defaultSets,
-      } : definition) };
+      } : definition);
     });
   };
 
@@ -519,7 +536,7 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
   const deleteDefinition = async (id: string, replacementId?: string): Promise<void> => {
     const owner = activeUserRef.current;
     if (!owner) throw new Error('Se requiere autenticación.');
-    await mutateTrainingState((state) => ({ ...state, definitions: deleteCustomDefinition({ version: 2, owner, definitions: state.definitions, routines: [], mesocycles: [], attempts: [] }, owner, id, replacementId).definitions }));
+    await mutateTrainingDefinitions((definitions) => deleteCustomDefinition({ version: 2, owner, definitions, routines: [], mesocycles: [], attempts: [] }, owner, id, replacementId).definitions);
   };
 
   const importCatalogContent = async (plan: CatalogImportPlan): Promise<CatalogImportResult> => {
@@ -547,8 +564,10 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
     trainingLibraryMutationQueueRef.current = save.then(() => undefined, () => undefined);
     const canonical = await save;
     if (activeUserRef.current === owner) {
-      await saveTrainingState({ definitions: result.library.definitions });
-      publishTrainingState({ ...state, definitions: result.library.definitions });
+      await mutateTrainingDefinitions((definitions) => [
+        ...definitions,
+        ...result.library.definitions.filter((definition) => !state.definitions.some(({ id }) => id === definition.id) && !definitions.some(({ id }) => id === definition.id)),
+      ]);
       routinesRef.current = canonical.savedRoutines.items;
       routinesRevisionRef.current = canonical.savedRoutines.revision;
       setLocalRoutines(canonical.savedRoutines.items);
@@ -824,7 +843,14 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
     const owner = activeUserRef.current;
     if (!owner || attempt.owner !== owner) throw new Error('El propietario del intento debe coincidir con el perfil activo.');
     const existing = attempts.find((item) => item.id === attempt.id);
-    if (existing && JSON.stringify(existing) !== JSON.stringify(attempt)) throw new Error('La identidad del intento ya pertenece a otros datos capturados.');
+    // Only these settlement fields are server-owned; preserve receipt identity and all captured data.
+    // Sort object keys because JSONB roundtrips do not preserve client property ordering.
+    const capturedIdentity = ({ rewardApplication: { state: _state, appliedAt: _appliedAt, ...rewardIdentity }, ...captured }: WorkoutAttempt) => JSON.stringify(
+      { ...captured, rewardApplication: rewardIdentity },
+      (_key, value) => value && typeof value === 'object' && !Array.isArray(value)
+        ? Object.fromEntries(Object.keys(value).sort().map((key) => [key, value[key]])) : value,
+    );
+    if (existing && capturedIdentity(existing) !== capturedIdentity(attempt)) throw new Error('La identidad del intento ya pertenece a otros datos capturados.');
     const finalized = await finalizeTrainingAttempt(attempt);
     const next = existing ? attempts : [finalized.attempt, ...attempts];
     const lineage = finalized.attempt.lineage;
@@ -937,6 +963,7 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
          cancelActiveWorkout,
          startActiveWorkout,
           updateActiveWorkout,
+          associateActiveWorkoutJoint,
           clearActiveWorkoutIfMatches,
           refreshActiveWorkoutTiming,
       }}

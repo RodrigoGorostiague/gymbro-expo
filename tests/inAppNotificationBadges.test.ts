@@ -9,8 +9,10 @@ const inbox = vi.hoisted(() => ({ listNotificationInbox: vi.fn(), markNotificati
 const joint = vi.hoisted(() => ({ respondToJointInvite: vi.fn(), inviteActiveWorkoutMember: vi.fn() }));
 const updateActiveWorkout = vi.hoisted(() => vi.fn());
 
+vi.mock('../context/SocialContext', () => ({ useSocial: () => ({ realtimeRevision: 0 }) }));
+vi.mock('../services/workoutStartActivity', () => ({ publishWorkoutStartActivity: vi.fn(async () => undefined) }));
 vi.mock('../context/AuthContext', () => ({ useAuth: () => ({ user: 'member-1' }) }));
-vi.mock('../context/DataContext', () => ({ useData: () => ({ activeWorkoutDraft: { routineId: 'routine-1', routineSnapshot: { id: 'routine-1', name: 'Upper', muscleGroups: ['back'], exercises: [], createdAt: '2026-08-08T00:00:00Z' } }, updateActiveWorkout }) }));
+vi.mock('../context/DataContext', () => ({ useData: () => ({ activeWorkoutDraft: { attemptId: 'attempt-1', routineId: 'routine-1', routineSnapshot: { id: 'routine-1', name: 'Upper', muscleGroups: ['back'], exercises: [], createdAt: '2026-08-08T00:00:00Z' } }, associateActiveWorkoutJoint: updateActiveWorkout }) }));
 vi.mock('../context/ThemeContext', () => ({ useTheme: () => ({ theme: { tabBarBackground: '#111', primary: '#0f0', text: '#fff', textMuted: '#aaa', onPrimary: '#000' } }) }));
 vi.mock('../services/notificationInbox', () => inbox);
 vi.mock('../services/jointWorkouts', () => joint);
@@ -46,7 +48,7 @@ describe('InAppNotificationBadges', () => {
     const accept = renderer!.root.findByProps({ 'aria-label': 'Aceptar invitación' });
     await act(async () => { accept.props.onClick(); await Promise.resolve(); await Promise.resolve(); });
     expect(joint.respondToJointInvite).toHaveBeenCalledWith('workout-1', true);
-    expect(updateActiveWorkout).toHaveBeenCalledWith({ routineId: 'routine-1', routineSnapshot: { id: 'routine-1', name: 'Upper', muscleGroups: ['back'], exercises: [], createdAt: '2026-08-08T00:00:00Z' }, jointWorkoutId: 'workout-1' });
+    expect(updateActiveWorkout).toHaveBeenCalledWith('member-1', 'attempt-1', 'workout-1');
     expect(inbox.markNotificationRead).toHaveBeenCalledWith('notice-1');
     expect(() => renderer!.root.findByProps({ 'aria-label': 'Aceptar invitación' })).toThrow();
   });
@@ -68,7 +70,7 @@ describe('InAppNotificationBadges', () => {
     const invite = renderer!.root.findByProps({ 'aria-label': 'Invitar a entrenar' });
     await act(async () => { invite.props.onClick(); await Promise.resolve(); await Promise.resolve(); });
     expect(joint.inviteActiveWorkoutMember).toHaveBeenCalledWith('member-2', { id: 'routine-1', name: 'Upper', muscleGroups: ['back'], exercises: [], createdAt: '2026-08-08T00:00:00Z' });
-    expect(updateActiveWorkout).toHaveBeenCalledWith({ routineId: 'routine-1', routineSnapshot: { id: 'routine-1', name: 'Upper', muscleGroups: ['back'], exercises: [], createdAt: '2026-08-08T00:00:00Z' }, jointWorkoutId: 'workout-2' });
+    expect(updateActiveWorkout).toHaveBeenCalledWith('member-1', 'attempt-1', 'workout-2');
     expect(inbox.markNotificationRead).toHaveBeenCalledWith('notice-2');
   });
 

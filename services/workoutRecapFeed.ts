@@ -352,6 +352,6 @@ export async function subscribeToWorkoutRecapChanges(onChange: () => void): Prom
 
   await client.realtime.setAuth(session.access_token);
   const channel = client.channel(`workout-recap-feed:${session.user.id}`);
-  channel.on('postgres_changes', { event: '*', schema: 'public', table: 'workout_recaps' }, () => onChange()).subscribe();
+  channel.on('postgres_changes', { event: '*', schema: 'public', table: 'workout_recaps' }, () => onChange()).subscribe((status) => { if (status === 'SUBSCRIBED') onChange(); });
   return () => { void client.removeChannel(channel); };
 }

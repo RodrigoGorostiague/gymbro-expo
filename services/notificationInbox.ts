@@ -79,6 +79,6 @@ export async function subscribeToNotificationInboxChanges(onChange: () => void):
   if (!data.session) return () => undefined;
   await instance.realtime.setAuth(data.session.access_token);
   const channel = instance.channel(`notification-inbox:${data.session.user.id}`);
-  channel.on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'notification_inbox' }, onChange).subscribe();
+  channel.on('postgres_changes', { event: '*', schema: 'public', table: 'notification_inbox' }, onChange).subscribe((status) => { if (status === 'SUBSCRIBED') onChange(); });
   return () => { void instance.removeChannel(channel); };
 }

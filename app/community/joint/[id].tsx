@@ -1,3 +1,5 @@
+import { useLatestRequest } from '../../../hooks/useLatestRequest';
+import { useSocial } from '../../../context/SocialContext';
 import React, { useCallback, useEffect, useState } from 'react';
 import { Alert, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { router, useFocusEffect, useLocalSearchParams } from 'expo-router';
@@ -15,24 +17,31 @@ import { JointParticipantProfileCard } from '../../../components/JointParticipan
 
 export default function JointWorkoutDetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>(); const { theme } = useTheme(); const { user } = useAuth(); const { importCatalogContent } = useData(); const [workout, setWorkout] = useState<JointWorkout | null>(null); const [selectedParticipantId, setSelectedParticipantId] = useState<string | null>(null); const [saving, setSaving] = useState<'routine' | 'mesocycle' | null>(null);
+  const { realtimeRevision } = useSocial();
+  const reads = useLatestRequest(`${user}:${id}`);
+  useEffect(() => { setWorkout(null); setSelectedParticipantId(null); }, [user, id]);
   const load = useCallback(async () => {
+    const current = reads.begin();
     const live = (await listJointWorkouts()).find((item) => item.id === id);
+    if (!current()) return;
     const self = live?.participants.find((participant) => participant.isSelf);
     if (self?.status === 'active') await touchJointWorkoutPresence(id);
     try {
       const detail = await getJointWorkoutDetail(id);
+      if (!current()) return;
       if (detail) return setWorkout(detail);
     } catch {
       // Before the first completion, a group post does not exist yet.
     }
-    setWorkout(live ?? null);
-  }, [id]);
+    if (current()) setWorkout(live ?? null);
+  }, [id, user, reads]);
   useFocusEffect(useCallback(() => { void load().catch((error) => Alert.alert('Sesión no disponible', error instanceof Error ? error.message : 'Intentá nuevamente.')); }, [load]));
-  useEffect(() => { const timer = setInterval(() => void load(), 15_000); return () => clearInterval(timer); }, [load]);
+  useEffect(() => { const timer = setInterval(() => void load().catch(() => undefined), 15_000); return () => clearInterval(timer); }, [load]);
   useEffect(() => {
     if (!workout) return;
     setSelectedParticipantId((current) => current && workout.participants.some((participant) => participant.id === current) ? current : defaultJointParticipantId(workout));
   }, [workout]);
+  useEffect(() => { if (realtimeRevision) void load().catch(() => undefined); }, [realtimeRevision, load]);
   const participant = workout?.participants.find((item) => item.id === selectedParticipantId); const isLive = !!workout && !workout.completedAt;
   const save = async (kind: 'routine' | 'mesocycle') => { if (!participant?.sharePayload || !user) return; setSaving(kind); try { await importCatalogContent(recapImportPlan(`${workout!.id}:${participant.id}`, user, participant.sharePayload, kind === 'mesocycle')); } catch (error) { Alert.alert('No se pudo guardar', error instanceof Error ? error.message : 'Intentá nuevamente.'); } finally { setSaving(null); } };
   const participantRecap: WorkoutRecapPresentationModel | null = participant?.status === 'completed' && participant.workout ? { routineName: participant.workout.routineName, durationSeconds: participant.workout.durationSeconds, exerciseCount: participant.workout.exercises.length, metrics: { volume: participant.workout.exercises.reduce((total, exercise) => total + exercise.sets.reduce((sets, set) => sets + (set.completed ? set.weight * set.reps : 0), 0), 0) }, exercises: participant.workout.exercises, sharePayload: participant.sharePayload } : null;

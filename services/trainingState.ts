@@ -108,7 +108,12 @@ function isDraft(value: unknown): value is ActiveWorkoutDraft {
     && (value.routineSnapshot === undefined || (isRecord(value.routineSnapshot)
       && isNonEmptyString(value.routineSnapshot.id) && isNonEmptyString(value.routineSnapshot.name)
       && Array.isArray(value.routineSnapshot.exercises)))
-    && (value.restEndsAtMs === undefined || Number.isFinite(value.restEndsAtMs));
+    && (value.restEndsAtMs === undefined || Number.isFinite(value.restEndsAtMs))
+    && (value.pendingFinalization === undefined || (isRecord(value.pendingFinalization)
+      && isAttempt(value.pendingFinalization.attempt)
+      && value.pendingFinalization.attempt.id === value.attemptId
+      && value.pendingFinalization.attempt.owner === value.owner
+      && value.pendingFinalization.attempt.routineId === value.routineId));
 }
 
 function requireClient() {
@@ -174,11 +179,32 @@ function experienceReceipt(value: unknown): ExperienceReceipt {
   };
 }
 
+export class DefinitelyRejectedFinalizationError extends Error {
+  readonly code?: string;
+  readonly details?: string;
+  readonly hint?: string;
+  constructor(cause: unknown) {
+    super(cause instanceof Error ? cause.message : isRecord(cause) && typeof cause.message === 'string' ? cause.message : 'El intento de entrenamiento no es válido.');
+    this.name = 'DefinitelyRejectedFinalizationError';
+    if (isRecord(cause)) {
+      this.code = typeof cause.code === 'string' ? cause.code : undefined;
+      this.details = typeof cause.details === 'string' ? cause.details : undefined;
+      this.hint = typeof cause.hint === 'string' ? cause.hint : undefined;
+    }
+  }
+}
+export const isDefinitelyRejectedFinalization = (error: unknown): error is DefinitelyRejectedFinalizationError => error instanceof DefinitelyRejectedFinalizationError;
+
 export async function finalizeTrainingAttempt(attempt: WorkoutAttempt): Promise<{ attempt: WorkoutAttempt; receipt: RewardReceipt; experienceReceipt: ExperienceReceipt }> {
-  if (!isAttempt(attempt)) throw new Error('El intento de entrenamiento no es válido.');
-  const { data, error } = await requireClient().rpc('finalize_training_attempt', { attempt_input: attempt });
+  if (!isAttempt(attempt)) throw new DefinitelyRejectedFinalizationError(new Error('El intento de entrenamiento no es válido.'));
+  let client: ReturnType<typeof requireClient>;
+  try { client = requireClient(); } catch (error) { throw new DefinitelyRejectedFinalizationError(error); }
+  const { data, error } = await client.rpc('finalize_training_attempt', { attempt_input: attempt });
   // Preserve RPC metadata so the UI can classify safe messages and diagnostics retain the cause.
-  if (error) throw error;
+  if (error) {
+    if (error.code === 'P0001' && ['invalid training attempt input', 'invalid planned session lineage'].includes(error.message)) throw new DefinitelyRejectedFinalizationError(error);
+    throw error;
+  }
   if (!isRecord(data) || !isAttempt(data.attempt) || !isReceipt(data.receipt) || !isExperienceReceipt(data.experience_receipt)) {
     throw new Error('La confirmación de recompensas tiene un formato inválido. Inténtalo nuevamente.');
   }

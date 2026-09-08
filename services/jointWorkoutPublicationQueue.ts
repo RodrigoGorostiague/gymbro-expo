@@ -1,5 +1,5 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { finishJointWorkout, JointCompletedWorkout, JointVisibility } from './jointWorkouts';
+import { finishJointWorkoutAttempt, JointCompletedWorkout, JointVisibility } from './jointWorkouts';
 import { asSharePayload } from './workoutRecapFeed';
 
 export type PendingJointWorkoutPublication = {
@@ -170,7 +170,7 @@ export async function removePendingJointWorkoutPublication(owner: string, workou
 
 export async function flushPendingJointWorkoutPublications(
   owner: string,
-  publish: (workoutId: string, visibility: JointVisibility, completedWorkout: JointCompletedWorkout) => Promise<void> = finishJointWorkout,
+  publish?: (workoutId: string, visibility: JointVisibility, completedWorkout: JointCompletedWorkout) => Promise<void>,
   finalizedAttempts: readonly { id: string; owner: string; jointWorkoutId?: string }[] = [],
 ): Promise<number> {
   return runForOwner(owner, async () => {
@@ -184,7 +184,8 @@ export async function flushPendingJointWorkoutPublications(
     for (const publication of [...pending]) {
       if (publication.state !== 'ready') continue;
       try {
-        await publish(publication.workoutId, publication.visibility, publication.completedWorkout);
+        if (publish) await publish(publication.workoutId, publication.visibility, publication.completedWorkout);
+        else await finishJointWorkoutAttempt(owner, publication.attemptId, publication.workoutId, publication.visibility, publication.completedWorkout);
         pending = pending.filter((item) => item.workoutId !== publication.workoutId);
         await save(owner, pending);
         published += 1;

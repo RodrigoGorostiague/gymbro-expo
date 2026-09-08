@@ -1,3 +1,6 @@
+import { useLatestRequest } from '../hooks/useLatestRequest';
+import { useSocial } from '../context/SocialContext';
+import { publishWorkoutStartActivity } from '../services/workoutStartActivity';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Alert, Animated as RNAnimated, StyleSheet, Text, View } from 'react-native';
 import { router } from 'expo-router';
@@ -90,14 +93,18 @@ function InAppNotificationBadge({ item, busy, canInviteWorkoutStart, onAct, onDi
 
 export function InAppNotificationBadges() {
   const { user } = useAuth();
-  const { activeWorkoutDraft, updateActiveWorkout } = useData();
+  const { activeWorkoutDraft, associateActiveWorkoutJoint } = useData();
   const { theme } = useTheme();
   const insets = useSafeAreaInsets();
+  const { realtimeRevision } = useSocial();
+  const reads = useLatestRequest(user);
   const [items, setItems] = useState<NotificationInboxItem[]>([]);
   const [busy, setBusy] = useState<string | null>(null);
-  const load = useCallback(async () => setItems((await listNotificationInbox(8)).filter((item) => !item.readAt).sort((left, right) => left.createdAt.localeCompare(right.createdAt))), []);
+  const load = useCallback(async () => { const current = reads.begin(); const next = await listNotificationInbox(8); if (current()) setItems(next.filter((item) => !item.readAt).sort((left, right) => left.createdAt.localeCompare(right.createdAt))); }, [user, reads]);
+  useEffect(() => { if (user && realtimeRevision) void load().catch(() => undefined); }, [user, realtimeRevision, load]);
 
   useEffect(() => {
+    setItems([]);
     let mounted = true;
     let unsubscribe: () => void = () => undefined;
     if (!user) { setItems([]); return undefined; }
@@ -106,7 +113,7 @@ export function InAppNotificationBadges() {
       if (mounted) unsubscribe = cleanup;
       else cleanup();
     }).catch(() => undefined);
-    return () => { mounted = false; unsubscribe(); };
+    return () => { mounted = false; reads.invalidate(); unsubscribe(); };
   }, [load, user]);
 
   const dismiss = async (item: NotificationInboxItem) => {
@@ -121,12 +128,16 @@ export function InAppNotificationBadges() {
     const actorId = workoutStartActorId(item);
     setBusy(item.id);
     try {
+      if ((workoutId || actorId) && activeWorkoutDraft?.routineSnapshot && user) {
+        if (activeWorkoutDraft.pendingFinalization || activeWorkoutDraft.jointCancellationPending) throw new Error('El entrenamiento está finalizando.');
+        await publishWorkoutStartActivity(activeWorkoutDraft.routineSnapshot.name, activeWorkoutDraft.jointWorkoutId, activeWorkoutDraft.attemptId);
+      }
       if (workoutId) {
         await respondToJointInvite(workoutId, true);
-        if (activeWorkoutDraft) await updateActiveWorkout({ ...activeWorkoutDraft, jointWorkoutId: workoutId });
+        if (activeWorkoutDraft && user) await associateActiveWorkoutJoint(user, activeWorkoutDraft.attemptId, workoutId);
       } else if (actorId && activeWorkoutDraft?.routineSnapshot) {
         const jointWorkoutId = await inviteActiveWorkoutMember(actorId, activeWorkoutDraft.routineSnapshot);
-        await updateActiveWorkout({ ...activeWorkoutDraft, jointWorkoutId });
+        if (user) await associateActiveWorkoutJoint(user, activeWorkoutDraft.attemptId, jointWorkoutId);
       } else if (typeof item.data.url === 'string' && item.data.url.startsWith('/')) {
         router.push(item.data.url);
       }

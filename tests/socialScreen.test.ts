@@ -46,13 +46,14 @@ vi.mock('react-native', async () => {
     View: host('View'),
   };
 });
+vi.mock('../context/AuthContext', () => ({ useAuth: () => ({ user: 'member-1' }) }));
 vi.mock('../context/SocialContext', () => ({ useSocial: () => social }));
 vi.mock('../services/onboarding', () => ({ getOwnOnboarding: vi.fn(async () => ({ sex: 'male' })) }));
 const workoutData = vi.hoisted(() => ({ sessions: [] as Array<Record<string, unknown>>, ensureRecapPublicationKey: vi.fn() }));
 vi.mock('../context/DataContext', () => ({ useData: () => workoutData }));
 vi.mock('../services/workoutRecapFeed', () => ({ recapInputFromSession: vi.fn() }));
 vi.mock('../services/jointWorkouts', () => ({ listJointWorkoutPosts: feedServices.listJointWorkoutPosts }));
-vi.mock('../services/workoutStartActivity', () => ({ listWorkoutStartActivities: feedServices.listWorkoutStartActivities }));
+vi.mock('../services/workoutStartActivity', async (importOriginal) => ({ ...await importOriginal<typeof import('../services/workoutStartActivity')>(), listWorkoutStartActivities: feedServices.listWorkoutStartActivities }));
 vi.mock('../services/communityBadge', () => ({ getCommunityBadgeCounts: feedServices.getCommunityBadgeCounts }));
 vi.mock('../context/ThemeContext', () => ({
   useTheme: () => ({ theme: { text: '#111', textMuted: '#666', primary: '#00f', success: '#0a0' } }),
@@ -422,4 +423,31 @@ describe('Community feed', () => {
     expect(social.requests).toHaveBeenNthCalledWith(2, 'next-page');
     expect(tree!.root.findAll((node) => String(node.type) === 'Text').map((node) => node.children.join(''))).toEqual(expect.arrayContaining(['First', 'Second']));
   });
+  test('an older feed response cannot overwrite the newest refresh', async () => {
+    let oldResponse: (value: any) => void = () => undefined;
+    social.getWorkoutRecaps.mockImplementationOnce(() => new Promise((resolve) => { oldResponse = resolve; }));
+    let tree: TestRenderer.ReactTestRenderer;
+    await act(async () => { tree = TestRenderer.create(React.createElement(CommunityFeedScreen)); });
+    social.getWorkoutRecaps.mockResolvedValueOnce({ recaps: [], nextCursor: 'fresh' });
+    await act(async () => { tree!.root.find((node) => String(node.type) === 'ScrollView').props.refreshControl.props.onRefresh(); });
+    await act(async () => { oldResponse({ recaps: [], nextCursor: 'stale' }); });
+    const more = tree!.root.find((node) => String(node.type) === 'GlassButton' && node.props.title === 'Ver más');
+    await act(async () => { more.props.onPress(); });
+    expect(social.getWorkoutRecaps).toHaveBeenLastCalledWith('fresh');
+    await act(async () => tree!.unmount());
+  });
+
+  test('a delayed presence response already expired on arrival is immediately hidden', async () => {
+    const start=Date.parse('2026-09-08T12:00:00Z'); vi.setSystemTime(start);
+    let respond: (value: any[]) => void = () => undefined;
+    feedServices.listWorkoutStartActivities.mockImplementationOnce(() => new Promise((resolve) => { respond=resolve; }));
+    let tree: TestRenderer.ReactTestRenderer;
+    await act(async () => { tree=TestRenderer.create(React.createElement(CommunityFeedScreen)); });
+    vi.setSystemTime(start+2_000);
+    await act(async () => { respond([{id:'late-presence',authorAlias:'Expired athlete',routineName:'Upper',startedAt:new Date(start).toISOString(),expiresAt:new Date(start+1_000).toISOString(),isAuthor:false}]); });
+    expect(tree!.root.findAll((node) => String(node.type) === 'Text').map((node) => node.children.join('')).join(' ')).not.toContain('Expired athlete');
+    await act(async () => tree!.unmount());
+    vi.useRealTimers();
+  });
+
 });

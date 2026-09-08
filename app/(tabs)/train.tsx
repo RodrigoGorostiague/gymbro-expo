@@ -39,7 +39,7 @@ export default function TrainEntryScreen() {
     const navigation = <>
       {resumableDraft ? <ActiveWorkoutCard draft={resumableDraft} onContinue={continueActiveWorkout} onCancel={() => Alert.alert('Cancelar entrenamiento', 'Se perderá el progreso de la sesión en curso.', [
         { text: 'Volver', style: 'cancel' },
-        { text: 'Cancelar entrenamiento', style: 'destructive', onPress: () => void cancelActiveWorkout() },
+        { text: 'Cancelar entrenamiento', style: 'destructive', onPress: () => void cancelActiveWorkout().catch((error) => Alert.alert('No se pudo cancelar el entrenamiento', error instanceof Error ? error.message : 'Inténtalo nuevamente.')) },
       ])} /> : null}
       <TrainViewSwitcher value={view} onChange={setSelectedView} />
     </>;

@@ -9,18 +9,20 @@ Chained PRs recommended: Yes
 Chain strategy: size-exception
 400-line budget risk: High
 
-Maintainer-authorized `size:exception`; implementation tasks and both local closure corrections are complete, with automated checks and scoped independent validation passing. Manual product acceptance and remote delivery remain pending.
+Maintainer-authorized `size:exception`; implementation tasks and closure corrections are complete, with automated checks and scoped independent validation passing. Database migrations are applied locally and to the linked remote project. Manual product acceptance and web hosting deployment remain pending.
 
 ### Local closure review — 2026-09-08
 
 - [x] Prevent concurrent first-time publication copies from overwriting each other when the recipient has no training-library row; add concurrency regression coverage.
 - [x] Support valid email authentication callbacks opened in a fresh browser tab without weakening callback validation; add fresh-tab regression coverage in the web repository.
 
-Publication APIs and their additive correction are committed locally as `9899923`; the initial web snapshot, including the callback correction, is committed in the separate web repository as `1be165a`. No push or deployment has occurred.
+Publication APIs and their additive correction are recorded in `9899923`; the initial web snapshot, including the callback correction, is committed in the separate web repository as `1be165a`. Web hosting deployment remains a separate step.
 
 Validation: the isolated concurrency regression changed from one retained routine to both imports preserved; 89 pgTAP assertions passed. Web verification passed 89 unit tests, typechecking, 13 E2E tests with one expected skip, and a final production build. Both corrections passed scoped independent validation. Browser tests use mocked gateways, not real email delivery or live mobile/web interoperability.
 
-The additive SQL correction was applied only to disposable schema-clone databases, which were removed. Applying it to the original local database and remote environments remains a separate delivery step; no original data was reset or modified.
+On 2026-09-08, the authorized database deployment applied `20260908190000` and `20260908210000` locally, and `20260905220000`, `20260906160000`, `20260906180000`, `20260908190000`, and `20260908210000` to the linked remote project. Both environments have 120/120 migration parity through `20260908210000`; recovery functions, ownership constraints, and safe presence permissions passed read-only postflight checks. Protected pre-deployment backups were verified, and no database reset or seed was performed.
+
+Functional follow-up validation passed 576 client tests, typechecking, and 14 recovery plus 75 existing joint-workout SQL assertions against an isolated clone of the deployed local schema. Actual two-client WebSocket delivery and native-device behavior still require a live smoke test.
 
 ### Suggested Remediation Slices
 

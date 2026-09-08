@@ -389,6 +389,12 @@ export interface ActiveWorkoutDraft {
   jointWorkoutId?: string;
   /** Durable lock retained until a joint-workout leave is authoritatively acknowledged. */
   jointCancellationPending?: true;
+  /** Durable immutable command retained until finalization is resolved. */
+  pendingFinalization?: {
+    attempt: WorkoutAttempt;
+    sharePayload?: WorkoutRecapSharePayload;
+    jointVisibility?: 'public' | 'circle' | 'private';
+  };
   /** Session-local prescription. Existing drafts without it are migrated on resume. */
   routineSnapshot?: Routine;
 }

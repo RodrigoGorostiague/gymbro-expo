@@ -88,6 +88,6 @@ export async function subscribeToCommunityActivityChanges(onChange: () => void):
   if (!data.session) return () => undefined;
   await client.realtime.setAuth(data.session.access_token);
   const channel = client.channel(`community-activities:${data.session.user.id}`);
-  channel.on('postgres_changes', { event: '*', schema: 'public', table: 'community_activities' }, onChange).subscribe();
+  channel.on('postgres_changes', { event: '*', schema: 'public', table: 'community_activities' }, onChange).subscribe((status) => { if (status === 'SUBSCRIBED') onChange(); });
   return () => { void client.removeChannel(channel); };
 }

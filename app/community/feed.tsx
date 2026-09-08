@@ -1,3 +1,5 @@
+import { useLatestRequest } from '../../hooks/useLatestRequest';
+import { useAuth } from '../../context/AuthContext';
 import React, { useCallback, useEffect, useState } from 'react';
 import { Alert, RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { router, useFocusEffect } from 'expo-router';
@@ -16,7 +18,7 @@ import { ProfileAvatar } from '../../components/ProfileAvatar';
 import { ProfileTitleBadge } from '../../components/ProfileTitleBadge';
 import { listJointWorkoutPosts } from '../../services/jointWorkouts';
 import { CommunityBadgeCounts, getCommunityBadgeCounts } from '../../services/communityBadge';
-import { listWorkoutStartActivities, WorkoutStartActivity } from '../../services/workoutStartActivity';
+import { activeWorkoutStartActivities, listWorkoutStartActivities, WorkoutStartActivity } from '../../services/workoutStartActivity';
 import { setWorkoutRecapReaction } from '../../services/workoutRecapFeed';
 import { feedDayKey, formatFeedDay, formatRelativeTime } from '../../utils/feedTimeline';
 
@@ -49,6 +51,8 @@ function timestamp(value: string): number {
 }
 
 export default function CommunityFeedScreen() {
+  const { user } = useAuth();
+  const reads = useLatestRequest(user);
   const { theme } = useTheme();
   const { getWorkoutRecaps, getCommunityActivities, deleteWorkoutRecap, realtimeRevision } = useSocial();
   const [recaps, setRecaps] = useState<WorkoutRecap[]>([]);
@@ -62,7 +66,10 @@ export default function CommunityFeedScreen() {
   const [badges, setBadges] = useState<CommunityBadgeCounts | null>(null);
   const [now, setNow] = useState(() => Date.now());
 
+  useEffect(() => { setRecaps([]); setJointPosts([]); setActivities([]); setStartActivities([]); setBadges(null); setRecapCursor(null); setActivityCursor(null); }, [user]);
+
   const load = useCallback(async (nextRecapCursor: string | null = null, nextActivityCursor: string | null = null, append = false) => {
+    const currentRequest = reads.begin();
     setLoading(true);
     setError(null);
     try {
@@ -73,20 +80,26 @@ export default function CommunityFeedScreen() {
         nextRecapCursor || nextActivityCursor ? Promise.resolve(null) : listWorkoutStartActivities().catch(() => null),
         nextRecapCursor || nextActivityCursor ? Promise.resolve(null) : getCommunityBadgeCounts().catch(() => null),
       ]);
+      if (!currentRequest()) return;
       setRecaps((current) => append ? [...current, ...page.recaps.filter((item) => !current.some(({ id }) => id === item.id))] : page.recaps);
       if (posts) setJointPosts(posts);
        setActivities((current) => append ? [...current, ...activities.activities.filter((item) => !current.some(({ id }) => id === item.id))] : activities.activities);
-      if (starts) setStartActivities(starts);
+      if (starts) {
+        const receivedAt = Date.now();
+        setNow(receivedAt);
+        setStartActivities(activeWorkoutStartActivities(starts, receivedAt));
+      }
       if (nextBadges) setBadges(nextBadges);
        setRecapCursor(page.nextCursor);
        setActivityCursor(activities.nextCursor);
     } catch (reason) {
+      if (!currentRequest()) return;
       if (!append) setRecaps([]);
       setError(reason instanceof Error ? reason.message : 'No se pudo actualizar el feed.');
     } finally {
-      setLoading(false);
+      if (currentRequest()) setLoading(false);
     }
-  }, [getCommunityActivities, getWorkoutRecaps]);
+  }, [getCommunityActivities, getWorkoutRecaps, reads, user]);
 
   useFocusEffect(useCallback(() => { void load(); }, [load]));
   useEffect(() => { if (realtimeRevision > 0) void load(); }, [load, realtimeRevision]);
@@ -94,6 +107,13 @@ export default function CommunityFeedScreen() {
     const timer = setInterval(() => setNow(Date.now()), 60_000);
     return () => clearInterval(timer);
   }, []);
+
+  useEffect(() => {
+    const nextExpiry = Math.min(...startActivities.map((activity) => Date.parse(activity.expiresAt)).filter((expires) => expires > Date.now()));
+    if (!Number.isFinite(nextExpiry)) return;
+    const timer = setTimeout(() => setNow(Date.now()), Math.max(0, nextExpiry - Date.now()));
+    return () => clearTimeout(timer);
+  }, [startActivities, now]);
 
   const remove = async (recap: WorkoutRecap) => {
     try {
@@ -124,7 +144,7 @@ export default function CommunityFeedScreen() {
     ...recaps.map((recap) => ({ kind: 'recap' as const, id: recap.id, publishedAt: recap.createdAt, recap })),
     ...jointPosts.map((post) => ({ kind: 'joint' as const, id: post.id, publishedAt: post.updatedAt, post })),
     ...activities.map((activity) => ({ kind: 'milestone' as const, id: activity.id, publishedAt: activity.createdAt, activity })),
-    ...startActivities.map((activity) => ({ kind: 'start' as const, id: activity.id, publishedAt: activity.startedAt, activity })),
+    ...activeWorkoutStartActivities(startActivities, now).map((activity) => ({ kind: 'start' as const, id: activity.id, publishedAt: activity.startedAt, activity })),
   ].sort((left, right) => timestamp(right.publishedAt) - timestamp(left.publishedAt) || right.id.localeCompare(left.id));
 
   const feedCard = (item: FeedItem) => {

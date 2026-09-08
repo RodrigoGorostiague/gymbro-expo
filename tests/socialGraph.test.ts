@@ -231,6 +231,16 @@ describe('social graph client boundary', () => {
     expect(client.removeChannel).toHaveBeenCalledWith(channel);
   });
 
+  test('refetches after initial subscription and every successful reconnect', async () => {
+    let status: ((value: string) => void) | undefined;
+    const channel = { on: vi.fn(() => channel), subscribe: vi.fn((callback) => { status = callback; return channel; }) };
+    client.channel.mockReturnValue(channel);
+    const invalidate = vi.fn();
+    await subscribeToSocialGraphChanges(invalidate);
+    status?.('SUBSCRIBED'); status?.('CHANNEL_ERROR'); status?.('SUBSCRIBED');
+    expect(invalidate).toHaveBeenCalledTimes(2);
+  });
+
   test('updates Community consumers after an authorized relationship event without navigation reload', async () => {
     let current: ReturnType<typeof useSocial> | undefined;
     let relationshipHandler: (() => void) | undefined;
@@ -247,7 +257,7 @@ describe('social graph client boundary', () => {
 
     await act(async () => { tree = TestRenderer.create(React.createElement(SocialProvider, null, React.createElement(Probe))); });
     expect(current?.realtimeRevision).toBe(0);
-    await act(async () => { relationshipHandler?.(); });
+    await act(async () => { relationshipHandler?.(); await new Promise((resolve) => setTimeout(resolve, 60)); });
     expect(current?.realtimeRevision).toBe(1);
 
     await act(async () => { tree!.unmount(); });

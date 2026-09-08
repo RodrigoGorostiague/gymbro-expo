@@ -267,7 +267,7 @@ export async function subscribeToSocialGraphChanges(onChange: () => void): Promi
     .on('postgres_changes', { event: '*', schema: 'public', table: 'relationship_requests', filter: `recipient_id=eq.${session.user.id}` }, change)
     .on('postgres_changes', { event: '*', schema: 'public', table: 'blocks', filter: `blocker_id=eq.${session.user.id}` }, change)
     .on('postgres_changes', { event: '*', schema: 'public', table: 'blocks', filter: `blocked_id=eq.${session.user.id}` }, change)
-    .subscribe();
+    .subscribe((status) => { if (status === 'SUBSCRIBED') onChange(); });
 
   return () => { void client.removeChannel(channel); };
 }

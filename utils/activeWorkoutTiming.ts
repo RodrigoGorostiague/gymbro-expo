@@ -14,6 +14,7 @@ export function reconcileActiveWorkoutTiming(
   draft: ActiveWorkoutDraft,
   nowMs: number,
 ): ActiveWorkoutTiming {
+  if (draft.pendingFinalization) return { draft, elapsedSeconds: draft.pendingFinalization.attempt.durationSeconds, restRemainingSeconds: 0, isResting: false, cleanup: 'none' };
   const pausedDurationMs = Math.max(0, draft.pausedDurationMs ?? 0);
   const currentPauseMs = draft.pausedAtMs ? Math.max(0, nowMs - draft.pausedAtMs) : 0;
   const effectiveNowMs = nowMs - pausedDurationMs - currentPauseMs;

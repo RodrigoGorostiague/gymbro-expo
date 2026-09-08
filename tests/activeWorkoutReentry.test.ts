@@ -9,6 +9,10 @@ import ExecuteRoutineScreen from '../app/routine/execute/[id]';
 import { hasActiveWorkoutReentryIntegrity, matchesActiveWorkout } from '../utils/activeWorkoutReentry';
 import { __emitAppState, __emitHardwareBackPress } from './helpers/reactNativeStub';
 
+const publishWorkoutStartActivity = vi.hoisted(() => vi.fn(async () => undefined));
+const listActiveWorkoutInviteCandidates = vi.hoisted(() => vi.fn(async (): Promise<any[]> => []));
+const inviteActiveWorkoutMember = vi.hoisted(() => vi.fn(async () => 'joint-new'));
+const resolveJointWorkoutAttempt = vi.hoisted(() => vi.fn(async (): Promise<string | null> => null));
 const finishJointWorkout = vi.hoisted(() => vi.fn());
 const leaveJointWorkout = vi.hoisted(() => vi.fn());
 const prepareJointWorkoutPublication = vi.hoisted(() => vi.fn(async () => undefined));
@@ -21,9 +25,12 @@ vi.mock('../context/ShopContext', () => ({ useShop: () => ({ retryPendingRewards
 vi.mock('../components/LogoutButton', () => ({ LogoutButton: () => null }));
 vi.mock('../services/jointWorkouts', async (importOriginal) => ({
   ...await importOriginal<typeof import('../services/jointWorkouts')>(),
-  finishJointWorkout,
-  leaveJointWorkout,
+  finishJointWorkoutAttempt: finishJointWorkout,
+  leaveJointWorkoutAttempt: leaveJointWorkout,
+  resolveJointWorkoutAttempt,
+  listActiveWorkoutInviteCandidates, inviteActiveWorkoutMember,
 }));
+vi.mock('../services/workoutStartActivity', async (importOriginal) => ({ ...await importOriginal<typeof import('../services/workoutStartActivity')>(), publishWorkoutStartActivity }));
 vi.mock('../services/jointWorkoutPublicationQueue', () => ({ prepareJointWorkoutPublication, queueJointWorkoutPublication, removePendingJointWorkoutPublication }));
 
 const routineA = { id: 'routine-a', name: 'Upper', muscleGroups: ['pecho'], exercises: [], createdAt: '' };
@@ -171,7 +178,7 @@ describe('active workout re-entry', () => {
 
     await vi.waitFor(() => expect(cancelActiveWorkout).toHaveBeenCalledTimes(1));
     expect(updateActiveWorkout).toHaveBeenCalledWith(expect.objectContaining({ jointCancellationPending: true }));
-    expect(leaveJointWorkout).toHaveBeenCalledWith('joint-1');
+    expect(leaveJointWorkout).toHaveBeenCalledWith('rodaja', 'attempt-a', 'joint-1');
     expect(updateActiveWorkout.mock.invocationCallOrder[0]).toBeLessThan(leaveJointWorkout.mock.invocationCallOrder[0]);
     expect(leaveJointWorkout.mock.invocationCallOrder[0]).toBeLessThan(cancelActiveWorkout.mock.invocationCallOrder[0]);
     expect(mockRouter.back).toHaveBeenCalled();
@@ -273,7 +280,7 @@ describe('active workout re-entry', () => {
   test('keeps an accredited joint completion successful when its publication fails and retries only the publication', async () => {
     const routineWithSet = {
       ...routineA,
-      exercises: [{ id: 'exercise-1', name: 'Press', muscleGroups: ['pecho'], loadMode: 'external-load' as const, loadUnit: 'kg' as const, sets: [{ id: 'set-1', tipo: 1 as const, weight: 10, reps: 8 }] }],
+      exercises: [{ id: 'exercise-1', name: 'Press', muscleGroups: ['legacy-label'], attribution: { primary: 'GM-101', secondary: ['GM-102'], weights: { 'GM-101': 1, 'GM-102': 0.5 } }, loadMode: 'external-load' as const, loadUnit: 'kg' as const, sets: [{ id: 'set-1', tipo: 1 as const, weight: 10, reps: 8 }] }],
     };
     const addAttempt = vi.fn().mockResolvedValue({
       attempt: {},
@@ -297,6 +304,7 @@ describe('active workout re-entry', () => {
     expect(findText(screen.root, '+1 gemas')).toBeTruthy();
     expect(findText(screen.root, 'Tu resultado conjunto todavía no se publicó')).toBeTruthy();
     expect(queueJointWorkoutPublication).toHaveBeenCalledWith('rodaja', expect.objectContaining({ workoutId: 'joint-1' }));
+    expect(finishJointWorkout).toHaveBeenCalledWith('rodaja', 'attempt-a', 'joint-1', 'circle', expect.objectContaining({ exercises: [expect.objectContaining({ muscleGroupIds: ['GM-101', 'GM-102'] })] }));
     expect(prepareJointWorkoutPublication.mock.invocationCallOrder[0]).toBeLessThan(addAttempt.mock.invocationCallOrder[0]);
     expect(mockAlert.alert).not.toHaveBeenCalledWith('No se pudo finalizar el entrenamiento', expect.any(String));
 
@@ -853,3 +861,144 @@ describe('active workout re-entry', () => {
    });
 
  });
+
+describe('finalization recovery boundaries', () => {
+  const captureRoutine = { ...routineA, exercises: [{ id: 'exercise-1', name: 'Press', muscleGroups: ['GM-101'], variant: 'Barra', sets: [{ id: 'set-1', tipo: 1 as const, weight: 10, reps: 8 }] }] };
+  const capturedDraft = { ...draft, startedAtMs: Date.now(), routineSnapshot: captureRoutine, completedSets: { 'exercise-1-set-1': true }, setValues: { 'exercise-1-set-1': { weight: '10', reps: '8' } } };
+  const receipt = { attempt: {}, receipt: { balance: 0, entries: [], weekly: {} }, experienceReceipt: undefined };
+  function setup(addAttempt: ReturnType<typeof vi.fn>, updateActiveWorkout = vi.fn(async () => undefined), activeDraft: any = capturedDraft) {
+    setMockParams({ id: captureRoutine.id });
+    setMockData({ getRoutine: vi.fn(() => captureRoutine), routines: [captureRoutine], mesocycles: [], activeWorkoutDraft: activeDraft, addAttempt, updateActiveWorkout, startActiveWorkout: vi.fn(), cancelActiveWorkout: vi.fn(), refreshActiveWorkoutTiming: vi.fn() });
+    return render(React.createElement(ExecuteRoutineScreen));
+  }
+  function finish(screen: ReturnType<typeof render>) {
+    press(screen.root.find((node) => node.props.accessibilityLabel === 'Pausar entrenamiento'));
+    press(findButton(screen.root, 'Finalizar entrenamiento'));
+  }
+  test('bounds an unresolved canonical preflight and ignores its late resolution before retry', async () => {
+    vi.useFakeTimers();
+    const addAttempt = vi.fn().mockResolvedValue(receipt);
+    const screen = setup(addAttempt);
+    await act(async () => { await Promise.resolve(); });
+    let resolveLate: (value: string | null) => void = () => undefined;
+    resolveJointWorkoutAttempt.mockImplementationOnce(() => new Promise((resolve) => { resolveLate = resolve; }));
+    finish(screen);
+    await act(async () => { await vi.advanceTimersByTimeAsync(12_000); });
+    expect(mockAlert.alert).toHaveBeenCalledWith('No se pudo conectar', expect.any(String));
+    expect(addAttempt).not.toHaveBeenCalled();
+    await act(async () => { resolveLate(null); await Promise.resolve(); });
+    expect(addAttempt).not.toHaveBeenCalled();
+    finish(screen);
+    await act(async () => { await Promise.resolve(); });
+    expect(addAttempt).toHaveBeenCalledTimes(1);
+  });
+  test('bounds invitation presence preflight and never invites after its late resolution', async () => {
+    vi.useFakeTimers();
+    listActiveWorkoutInviteCandidates.mockResolvedValueOnce([{id:'bro',alias:'Bro',avatarId:'capiboy',themeId:null,relationshipKind:'bro',groupMemberCount:1}]);
+    const screen=setup(vi.fn());
+    await act(async () => { await Promise.resolve(); });
+    listActiveWorkoutInviteCandidates.mockResolvedValueOnce([{id:'bro',alias:'Bro',avatarId:'capiboy',themeId:null,relationshipKind:'bro',groupMemberCount:1}]);
+    await act(async () => { screen.root.find((node) => typeof node.props.onToggle === 'function' && Array.isArray(node.props.participants)).props.onToggle(); });
+    press(screen.root.find((node) => node.props.accessibilityLabel === 'Invitar a Bro'));
+    let resolveLate: () => void = () => undefined;
+    publishWorkoutStartActivity.mockImplementationOnce(() => new Promise((resolve) => { resolveLate=() => resolve(undefined); }));
+    press(findButton(screen.root,'Invitar a 1 persona'));
+    await act(async () => { await vi.advanceTimersByTimeAsync(12_000); });
+    expect(mockAlert.alert).toHaveBeenCalledWith('No se pudo invitar',expect.stringContaining('timed out'));
+    expect(findButton(screen.root,'Invitar a 1 persona').props.disabled).toBe(false);
+    await act(async () => { resolveLate(); await Promise.resolve(); });
+    expect(inviteActiveWorkoutMember).not.toHaveBeenCalled();
+  });
+  test('does not dispatch finalization when its durable marker cannot be saved', async () => {
+    const addAttempt = vi.fn();
+    const screen = setup(addAttempt, vi.fn(async () => { throw new Error('offline'); }));
+    finish(screen);
+    await vi.waitFor(() => expect(mockAlert.alert).toHaveBeenCalled());
+    expect(addAttempt).not.toHaveBeenCalled();
+  });
+  test.each(['network timeout', 'mesocycle CAS conflict after finalization'])('locks edits on ambiguous failure %s and retries the exact captured attempt', async (message) => {
+    const addAttempt = vi.fn().mockRejectedValueOnce(new Error(message)).mockResolvedValueOnce(receipt);
+    const update = vi.fn(async () => undefined);
+    const screen = setup(addAttempt, update);
+    finish(screen);
+    await vi.waitFor(() => expect(addAttempt).toHaveBeenCalledTimes(1));
+    expect(update).toHaveBeenCalledWith(expect.objectContaining({ pendingFinalization: expect.objectContaining({ attempt: expect.objectContaining({ id: draft.attemptId }) }) }));
+    await vi.waitFor(() => expect(findButton(screen.root, 'Reintentar guardado')).toBeTruthy());
+    expect(screen.root.findAll((node) => (node.type as any) === 'GlassInput')).toHaveLength(0);
+    const captured = addAttempt.mock.calls[0][0];
+    press(findButton(screen.root, 'Reintentar guardado'));
+    await vi.waitFor(() => expect(addAttempt).toHaveBeenCalledTimes(2));
+    expect(addAttempt.mock.calls[1][0]).toBe(captured);
+  });
+  test('reconciles the same attempt after a timed-out request succeeds late and clears the draft', async () => {
+    vi.useFakeTimers();
+    let settle: (value: typeof receipt) => void = () => undefined;
+    const addAttempt = vi.fn().mockImplementationOnce(() => new Promise((resolve) => { settle = resolve; })).mockResolvedValueOnce(receipt);
+    const screen = setup(addAttempt);
+    finish(screen);
+    await act(async () => { await Promise.resolve(); });
+    expect(addAttempt).toHaveBeenCalledTimes(1);
+    await act(async () => { await vi.advanceTimersByTimeAsync(12_000); });
+    await act(async () => {
+      settle(receipt);
+      setMockData({ getRoutine: vi.fn(() => captureRoutine), routines: [captureRoutine], mesocycles: [], activeWorkoutDraft: null, addAttempt, updateActiveWorkout: vi.fn(async () => undefined), startActiveWorkout: vi.fn(), cancelActiveWorkout: vi.fn(), refreshActiveWorkoutTiming: vi.fn() });
+      screen.update(React.createElement(ExecuteRoutineScreen));
+    });
+    expect(screen.root.findAll((node) => (node.type as any) === 'GlassButton').map((node) => node.props.title)).toContain('Reintentar guardado');
+    press(findButton(screen.root, 'Reintentar guardado'));
+    await act(async () => { await Promise.resolve(); });
+    expect(addAttempt).toHaveBeenCalledTimes(2);
+    expect(addAttempt.mock.calls[1][0]).toBe(addAttempt.mock.calls[0][0]);
+  });
+
+  test('restores a durable pending attempt as retry-only after remount', async () => {
+    const { createWorkoutAttempt } = await import('../utils/workoutAttempts');
+    const attempt = createWorkoutAttempt({ id: draft.attemptId, owner: 'rodaja', routine: captureRoutine, completedAt: '2026-09-08T12:00:00Z', durationSeconds: 60, restTimerSeconds: 90, results: {} });
+    const addAttempt = vi.fn().mockResolvedValue(receipt);
+    const screen = setup(addAttempt, vi.fn(async () => undefined), { ...capturedDraft, pendingFinalization: { attempt } });
+    expect(findButton(screen.root, 'Reintentar guardado')).toBeTruthy();
+    expect(screen.root.findAll((node) => (node.type as any) === 'GlassInput')).toHaveLength(0);
+    press(findButton(screen.root, 'Reintentar guardado'));
+    await vi.waitFor(() => expect(addAttempt).toHaveBeenCalledWith(attempt));
+  });
+  test('rebuilds edited results with the same ID only after definite rejection', async () => {
+    const { DefinitelyRejectedFinalizationError } = await import('../services/trainingState');
+    const addAttempt = vi.fn().mockRejectedValueOnce(new DefinitelyRejectedFinalizationError({ code: 'P0001', message: 'invalid training attempt input' })).mockResolvedValueOnce(receipt);
+    const screen = setup(addAttempt, vi.fn(async () => undefined), { ...capturedDraft, completedSets: {} });
+    finish(screen);
+    await vi.waitFor(() => expect(mockAlert.alert).toHaveBeenCalled());
+    expect(screen.root.findAll((node) => (node.type as any) === 'GlassButton' && node.props.title === 'Reintentar guardado')).toHaveLength(0);
+    const inputs = screen.root.findAll((node) => (node.type as any) === 'GlassInput');
+    changeText(inputs[0], '25');
+    changeText(inputs[1], '12');
+    const complete = screen.root.findAll((node) => typeof node.props.onPress === 'function' && node.findAll((child) => (child.type as any) === 'Text' && child.children.join('') === 'Finalizar serie').length > 0)[0];
+    press(complete);
+    finish(screen);
+    await vi.waitFor(() => expect(addAttempt).toHaveBeenCalledTimes(2));
+    expect(addAttempt.mock.calls[1][0].id).toBe(addAttempt.mock.calls[0][0].id);
+    expect(addAttempt.mock.calls[1][0].exercises[0].sets[0].result.performance).toMatchObject({ load: 25, reps: 12 });
+  });
+
+  test('never thaws an ambiguous attempt after a subsequent definite rejection', async () => {
+    const { DefinitelyRejectedFinalizationError } = await import('../services/trainingState');
+    const addAttempt = vi.fn().mockRejectedValueOnce(new Error('timeout')).mockRejectedValueOnce(new DefinitelyRejectedFinalizationError({ code: 'P0001', message: 'invalid training attempt input' }));
+    const screen = setup(addAttempt);
+    finish(screen);
+    await vi.waitFor(() => expect(findButton(screen.root, 'Reintentar guardado')?.props.disabled).toBe(false));
+    press(findButton(screen.root, 'Reintentar guardado'));
+    await vi.waitFor(() => expect(addAttempt).toHaveBeenCalledTimes(2));
+    await vi.waitFor(() => expect(findButton(screen.root, 'Reintentar guardado')?.props.disabled).toBe(false));
+    expect(screen.root.findAll((node) => (node.type as any) === 'GlassInput')).toHaveLength(0);
+    expect(addAttempt.mock.calls[1][0]).toBe(addAttempt.mock.calls[0][0]);
+  });
+
+  test('keeps unresolved finalization through expiration and missing plan cleanup', async () => {
+    const { createWorkoutAttempt } = await import('../utils/workoutAttempts');
+    const { reconcileActiveWorkoutTiming } = await import('../utils/activeWorkoutTiming');
+    const attempt = createWorkoutAttempt({ id: draft.attemptId, owner: 'rodaja', routine: captureRoutine, completedAt: '2026-09-08T12:00:00Z', durationSeconds: 60, restTimerSeconds: 90, results: {} });
+    const pending = { ...capturedDraft, pendingFinalization: { attempt } };
+    expect(reconcileActiveWorkoutTiming(pending, Date.now() + 24 * 3600_000)).toMatchObject({ cleanup: 'none', elapsedSeconds: 60 });
+    expect(hasActiveWorkoutReentryIntegrity(pending, [], [])).toBe(true);
+  });
+
+});

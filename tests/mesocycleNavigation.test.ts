@@ -10,6 +10,7 @@ import JointWorkoutScreen from '../app/community/joint-workout';
 import { deriveFirstEntryStartDate } from '../utils/mesocycles';
 const listJointWorkouts = vi.hoisted(() => vi.fn());
 const respondToJointInvite = vi.hoisted(() => vi.fn());
+vi.mock('../services/workoutStartActivity', () => ({ publishWorkoutStartActivity: vi.fn(async () => undefined) }));
 vi.mock('../services/jointWorkouts', () => ({ listJointWorkouts, respondToJointInvite }));
 const subject = { id: 'mesocycle-1', name: 'Block', goal: '', status: 'active' as const, durationWeeks: 1, startDate: '2026-07-26', createdAt: '', weeks: [{ id: 'week-1', weekNumber: 1, entries: [{ id: 'entry-1', ref: { routineId: 'routine-1', routineName: 'Upper', source: 'local' as const }, order: 1 }, { id: 'rest-1', kind: 'rest' as const }] }] };
 const routine = { id: 'routine-1', name: 'Upper', muscleGroups: ['Pecho', 'Espalda'], exercises: [{ id: 'exercise-1', name: 'Press', sets: [] }, { id: 'exercise-2', name: 'Remo', sets: [] }], createdAt: '' };
@@ -36,7 +37,7 @@ describe('joint workout mesocycle navigation', () => {
 
   test('accepts with the current active workout and preserves its lineage without a routine selector', async () => {
     const updateActiveWorkout = vi.fn().mockResolvedValue(undefined);
-    setMockData({ activeWorkoutDraft: { routineId: 'routine-1', lineage: { mesocycleId: 'mesocycle-1', weekNumber: 1, plannedSessionId: 'entry-1' } }, updateActiveWorkout });
+    setMockData({ activeWorkoutDraft: { attemptId: 'attempt-1', routineId: 'routine-1', lineage: { mesocycleId: 'mesocycle-1', weekNumber: 1, plannedSessionId: 'entry-1' } }, associateActiveWorkoutJoint: updateActiveWorkout });
     const screen = render(React.createElement(JointWorkoutScreen));
 
     await vi.waitFor(() => expect(findButton(screen.root, 'Aceptar con mi entrenamiento activo')).toBeTruthy());
@@ -44,7 +45,7 @@ describe('joint workout mesocycle navigation', () => {
 
     await vi.waitFor(() => expect(mockRouter.replace).toHaveBeenCalledWith({ pathname: '/routine/execute/[id]', params: { id: 'routine-1', jointWorkoutId: 'joint-1', mesocycleId: 'mesocycle-1', weekNumber: '1', plannedSessionId: 'entry-1' } }));
     expect(respondToJointInvite).toHaveBeenCalledWith('joint-1', true);
-    expect(updateActiveWorkout).toHaveBeenCalledWith({ routineId: 'routine-1', lineage: { mesocycleId: 'mesocycle-1', weekNumber: 1, plannedSessionId: 'entry-1' }, jointWorkoutId: 'joint-1' });
+    expect(updateActiveWorkout).toHaveBeenCalledWith(expect.any(String), 'attempt-1', 'joint-1');
   });
 
   test('does not render a routine-selection UI for invitations', async () => {

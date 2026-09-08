@@ -100,5 +100,20 @@ export async function getJointParticipantPublicationDetail(workoutId: string, pa
 }
 export function directPartnerRecipient(workout: JointWorkout | null): string | null { const partners = workout?.participants.filter((participant) => participant.relationshipKind === 'partner') ?? []; return partners.length === 1 ? partners[0].id : null; }
 export function defaultJointParticipantId(workout: JointWorkout): string | null { return workout.participants.find((participant) => participant.id === workout.initiatorId)?.id ?? workout.participants[0]?.id ?? null; }
-export function jointParticipantInviteCapacity(participants: readonly JointParticipant[]): number { return Math.max(0, 3 - participants.filter((participant) => !participant.isSelf).length); }
-export async function subscribeToJointWorkoutChanges(onChange: () => void): Promise<() => void> { const instance = client(); const { data, error } = await instance.auth.getSession(); if (error) throw new Error(error.message); if (!data.session) return () => undefined; await instance.realtime.setAuth(data.session.access_token); const channel = instance.channel(`joint-workout-feed:${data.session.user.id}`); channel.on('postgres_changes', { event: '*', schema: 'public', table: 'joint_workout_participants' }, onChange).subscribe(); return () => { void instance.removeChannel(channel); }; }
+export function jointParticipantInviteCapacity(participants: readonly JointParticipant[]): number { return Math.max(0, 3 - participants.filter((participant) => !participant.isSelf && participant.status !== 'declined').length); }
+export async function subscribeToJointWorkoutChanges(onChange: () => void): Promise<() => void> { const instance = client(); const { data, error } = await instance.auth.getSession(); if (error) throw new Error(error.message); if (!data.session) return () => undefined; await instance.realtime.setAuth(data.session.access_token); const channel = instance.channel(`joint-workout-feed:${data.session.user.id}`); channel.on('postgres_changes', { event: '*', schema: 'public', table: 'joint_workout_participants' }, onChange).subscribe((status) => { if (status === 'SUBSCRIBED') onChange(); }); return () => { void instance.removeChannel(channel); }; }
+
+export async function resolveJointWorkoutAttempt(attemptId: string): Promise<string | null> {
+  const { data, error } = await client().rpc('resolve_joint_workout_attempt', { attempt_id_input: attemptId });
+  if (error) throw new Error(error.message);
+  if (data !== null && typeof data !== 'string') throw new Error('Invalid joint workout attempt resolution.');
+  return data;
+}
+export async function finishJointWorkoutAttempt(owner: string, attemptId: string, capturedWorkoutId: string, visibility: JointVisibility, completedWorkout: JointCompletedWorkout): Promise<void> {
+  const { error } = await client().rpc('finish_joint_workout_attempt', { owner_input: owner, attempt_id_input: attemptId, captured_workout_id: capturedWorkoutId, visibility_input: visibility, completed_workout_input: completedWorkout });
+  if (error) throw new Error(error.message);
+}
+export async function leaveJointWorkoutAttempt(owner: string, attemptId: string, capturedWorkoutId: string): Promise<void> {
+  const { error } = await client().rpc('leave_joint_workout_attempt', { owner_input: owner, attempt_id_input: attemptId, captured_workout_id: capturedWorkoutId });
+  if (error) throw new Error(error.message);
+}
