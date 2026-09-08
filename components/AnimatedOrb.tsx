@@ -1,6 +1,7 @@
 import React, { useEffect } from 'react';
 import { StyleSheet } from 'react-native';
 import Animated, {
+  cancelAnimation,
   Easing,
   interpolate,
   useAnimatedStyle,
@@ -12,6 +13,7 @@ import Animated, {
 } from 'react-native-reanimated';
 
 interface AnimatedOrbProps {
+  active?: boolean;
   color: string;
   size: number;
   left: number;
@@ -19,10 +21,15 @@ interface AnimatedOrbProps {
   delay?: number;
 }
 
-export function AnimatedOrb({ color, size, left, top, delay = 0 }: AnimatedOrbProps) {
+export function AnimatedOrb({ active = true, color, size, left, top, delay = 0 }: AnimatedOrbProps) {
   const drift = useSharedValue(0);
 
   useEffect(() => {
+    cancelAnimation(drift);
+    if (!active) {
+      drift.value = 0;
+      return;
+    }
     drift.value = withDelay(
       delay,
       withRepeat(
@@ -34,7 +41,8 @@ export function AnimatedOrb({ color, size, left, top, delay = 0 }: AnimatedOrbPr
         false,
       ),
     );
-  }, [delay, drift]);
+    return () => cancelAnimation(drift);
+  }, [active, delay, drift]);
 
   const style = useAnimatedStyle(() => ({
     transform: [

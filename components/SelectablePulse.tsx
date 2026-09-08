@@ -11,6 +11,7 @@ import Animated, {
   withTiming,
 } from 'react-native-reanimated';
 import { AppTheme } from '../types';
+import { useAnimationActivity } from '../hooks/useAnimationActivity';
 
 type PulseTheme = Pick<AppTheme, 'primary' | 'accent'>;
 
@@ -30,9 +31,11 @@ export function SelectablePulse({
   borderRadius = 20,
 }: SelectablePulseProps) {
   const pulse = useSharedValue(0);
+  const animationActive = useAnimationActivity(selected);
 
   useEffect(() => {
-    if (selected) {
+    cancelAnimation(pulse);
+    if (animationActive) {
       pulse.value = withRepeat(
         withSequence(
           withTiming(1, { duration: 900, easing: Easing.inOut(Easing.sin) }),
@@ -42,10 +45,10 @@ export function SelectablePulse({
         false,
       );
     } else {
-      cancelAnimation(pulse);
-      pulse.value = withTiming(0, { duration: 200 });
+      pulse.value = 0;
     }
-  }, [selected, pulse]);
+    return () => cancelAnimation(pulse);
+  }, [animationActive, pulse]);
 
   const animatedStyle = useAnimatedStyle(() => {
     if (!selected) {

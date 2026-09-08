@@ -1,25 +1,25 @@
 import { describe, expect, test } from 'vitest';
-import { BACKGROUND_PARALLAX_DEPTHS, mapAccelerometerToParallax, mapDeviceMotionToParallax, shouldActivateBackgroundParallax } from '../utils/backgroundParallax';
+import { BACKGROUND_PARALLAX_DEPTHS, BACKGROUND_PARALLAX_INTERVAL_MS, mapAccelerometerToParallax, mapDeviceMotionToParallax, shouldActivateBackgroundParallax } from '../utils/backgroundParallax';
 
 describe('background parallax', () => {
   const activeConditions = {
     backgroundActive: true,
-    appActive: true,
+    animationActive: true,
     enabled: true,
     preferencesReady: true,
-    reduceMotion: false,
     supportedPlatform: true,
   };
 
-  test('does not activate when disabled, reduced motion is requested, or the sensor platform is unavailable', () => {
+  test('does not activate when animation is inactive, disabled, or the sensor platform is unavailable', () => {
     expect(shouldActivateBackgroundParallax({ ...activeConditions, enabled: false })).toBe(false);
-    expect(shouldActivateBackgroundParallax({ ...activeConditions, reduceMotion: true })).toBe(false);
+    expect(shouldActivateBackgroundParallax({ ...activeConditions, animationActive: false })).toBe(false);
     expect(shouldActivateBackgroundParallax({ ...activeConditions, supportedPlatform: false })).toBe(false);
     expect(shouldActivateBackgroundParallax({ ...activeConditions, backgroundActive: false })).toBe(false);
     expect(shouldActivateBackgroundParallax(activeConditions)).toBe(true);
   });
 
   test('maps beta and gamma into clamped, smoothed tilt values with four distinct layer depths', () => {
+    expect(BACKGROUND_PARALLAX_INTERVAL_MS).toBe(120);
     expect(BACKGROUND_PARALLAX_DEPTHS).toEqual([4, 10, 20, 32]);
     expect(mapDeviceMotionToParallax({ beta: 0.7, gamma: -0.7 })).toEqual({ x: -0.18, y: 0.18 });
     expect(mapDeviceMotionToParallax({ beta: 0.35, gamma: 0 }, { x: 0.5, y: -0.5 })).toMatchObject({ x: expect.closeTo(0.41), y: expect.closeTo(-0.23) });

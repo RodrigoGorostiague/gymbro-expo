@@ -1,10 +1,11 @@
 import React, { useEffect } from 'react';
 import { Image, StyleSheet, View } from 'react-native';
-import Animated, { Easing, useAnimatedStyle, useSharedValue, withRepeat, withTiming } from 'react-native-reanimated';
+import Animated, { cancelAnimation, Easing, useAnimatedStyle, useSharedValue, withRepeat, withTiming } from 'react-native-reanimated';
 import { useAuth } from '../context/AuthContext';
 import { useData } from '../context/DataContext';
 import { useShop } from '../context/ShopContext';
 import { useTheme } from '../context/ThemeContext';
+import { useAnimationActivity } from '../hooks/useAnimationActivity';
 
 const gymbroIcon = process.env.NODE_ENV === 'test' ? 0 : require('../assets/gymbro-icon.png');
 
@@ -14,16 +15,20 @@ export function AppThemeLoadingOverlay() {
   const { hydratedUserId: shopHydratedUserId } = useShop();
   const { theme } = useTheme();
   const rotation = useSharedValue(0);
+  const visible = Boolean(user && (dataHydratedUserId !== user || shopHydratedUserId !== user));
+  const animationActive = useAnimationActivity(visible);
 
   useEffect(() => {
-    rotation.value = withRepeat(withTiming(360, { duration: 1_100, easing: Easing.linear }), -1, false);
-  }, [rotation]);
+    cancelAnimation(rotation);
+    rotation.value = animationActive ? withRepeat(withTiming(360, { duration: 1_100, easing: Easing.linear }), -1, false) : 0;
+    return () => cancelAnimation(rotation);
+  }, [animationActive, rotation]);
 
   const iconStyle = useAnimatedStyle(() => ({
     transform: [{ perspective: 900 }, { rotateY: `${rotation.value}deg` }],
   }));
 
-  if (!user || (dataHydratedUserId === user && shopHydratedUserId === user)) return null;
+  if (!visible) return null;
 
   return (
     <View

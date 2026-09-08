@@ -1,9 +1,11 @@
 import React from 'react';
 import TestRenderer, { act } from 'react-test-renderer';
 import { beforeEach, describe, expect, test, vi } from 'vitest';
+import { SHOP_BACKGROUNDS } from '../constants/backgrounds';
 
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
 
+const auth = vi.hoisted(() => ({ user: 'rodaja' as string | null }));
 const shop = vi.hoisted(() => ({
   gems: 800,
   purchasedThemeIds: [] as string[],
@@ -28,7 +30,7 @@ function host(name: string) {
   return ({ children, ...props }: any) => React.createElement(name, props, children);
 }
 
-vi.mock('../context/AuthContext', () => ({ useAuth: () => ({ user: 'rodaja' }) }));
+vi.mock('../context/AuthContext', () => ({ useAuth: () => auth }));
 vi.mock('../context/ShopContext', () => ({ useShop: () => shop }));
 vi.mock('../context/ThemeContext', () => ({ useTheme: () => ({ theme: {
   primary: '#7C3AED', accent: '#A855F7', text: '#FFFFFF', textMuted: '#94A3B8', onPrimary: '#111827',
@@ -51,6 +53,7 @@ describe('ShopScreen', () => {
   let scheduledFrame: FrameRequestCallback | null = null;
 
   beforeEach(() => {
+    auth.user = 'rodaja';
     scheduledFrame = null;
     vi.stubGlobal('requestAnimationFrame', (callback: FrameRequestCallback) => {
       scheduledFrame = callback;
@@ -83,5 +86,39 @@ describe('ShopScreen', () => {
     expect(list.props.initialNumToRender).toBe(6);
     expect(list.props.maxToRenderPerBatch).toBe(6);
     expect(list.props.windowSize).toBe(5);
+    expect(list.props.onViewableItemsChanged).toBeTypeOf('function');
+  });
+
+  test('preserves hook order across authentication transitions', () => {
+    auth.user = null;
+    let screen!: TestRenderer.ReactTestRenderer;
+    act(() => { screen = TestRenderer.create(React.createElement(ShopScreen)); });
+    expect(screen.toJSON()).toBeNull();
+
+    auth.user = 'rodaja';
+    expect(() => act(() => { screen.update(React.createElement(ShopScreen)); })).not.toThrow();
+    expect(screen.root.find((node) => (node.type as unknown) === 'FlatList')).toBeDefined();
+
+    auth.user = null;
+    expect(() => act(() => { screen.update(React.createElement(ShopScreen)); })).not.toThrow();
+    expect(screen.toJSON()).toBeNull();
+  });
+
+  test('animates only the selected visible background preview', () => {
+    let screen!: TestRenderer.ReactTestRenderer;
+    act(() => { screen = TestRenderer.create(React.createElement(ShopScreen)); });
+    act(() => { screen.root.findByProps({ testID: 'shop-tab-backgrounds' }).props.onPress(); });
+    act(() => { scheduledFrame?.(0); });
+    const list = screen.root.find((node) => (node.type as unknown) === 'FlatList');
+    const background = SHOP_BACKGROUNDS[0];
+    shop.previewBackgroundId = background.id;
+    act(() => {
+      list.props.onViewableItemsChanged({ viewableItems: [{ isViewable: true, item: { id: background.id, type: 'background', item: background } }] });
+      screen.update(React.createElement(ShopScreen));
+    });
+
+    const engines = screen.root.findAll((node) => (node.type as unknown) === 'BackgroundEngine');
+    expect(engines.filter((engine) => engine.props.animate)).toHaveLength(1);
+    expect(engines.find((engine) => engine.props.backgroundId === background.id)?.props.animate).toBe(true);
   });
 });

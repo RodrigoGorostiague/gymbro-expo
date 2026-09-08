@@ -3,6 +3,7 @@ import { Dimensions, StyleSheet, View, ViewStyle, StyleProp } from 'react-native
 import { BlurView } from 'expo-blur';
 import { LinearGradient } from 'expo-linear-gradient';
 import Animated, {
+  cancelAnimation,
   Easing,
   interpolate,
   useAnimatedStyle,
@@ -16,6 +17,7 @@ import { DualLoginBackground } from './login/DualLoginBackground';
 import { ThemeDecorations } from './ThemeDecorations';
 import { BackgroundEngine } from './BackgroundEngine';
 import type { AppTheme } from '../types';
+import { useAnimationActivity } from '../hooks/useAnimationActivity';
 
 const { width: W, height: H } = Dimensions.get('window');
 
@@ -28,14 +30,21 @@ function SingleThemeBackground({ children, theme: themeOverride }: ThemeBackgrou
   const { theme: activeTheme, backgroundId } = useTheme();
   const theme = themeOverride ?? activeTheme;
   const breath = useSharedValue(0);
+  const animationActive = useAnimationActivity();
 
   useEffect(() => {
+    cancelAnimation(breath);
+    if (!animationActive) {
+      breath.value = 0;
+      return;
+    }
     breath.value = withRepeat(
       withTiming(1, { duration: 5200, easing: Easing.inOut(Easing.quad) }),
       -1,
       true,
     );
-  }, [breath]);
+    return () => cancelAnimation(breath);
+  }, [animationActive, breath]);
 
   const gradientStyle = useAnimatedStyle(() => ({
     transform: [{ scale: interpolate(breath.value, [0, 1], [1, 1.04]) }],
@@ -56,9 +65,9 @@ function SingleThemeBackground({ children, theme: themeOverride }: ThemeBackgrou
       {!themeOverride ? <BackgroundEngine backgroundId={backgroundId} /> : null}
 
       <View style={styles.orbLayer} pointerEvents="none">
-        <AnimatedOrb color={theme.primary} size={W * 0.55} left={W * 0.45} top={-H * 0.06} delay={0} />
-        <AnimatedOrb color={theme.accent} size={W * 0.28} left={-W * 0.08} top={H * 0.22} delay={500} />
-        <AnimatedOrb color={theme.secondary} size={W * 0.18} left={W * 0.62} top={H * 0.58} delay={900} />
+        <AnimatedOrb active={animationActive} color={theme.primary} size={W * 0.55} left={W * 0.45} top={-H * 0.06} delay={0} />
+        <AnimatedOrb active={animationActive} color={theme.accent} size={W * 0.28} left={-W * 0.08} top={H * 0.22} delay={500} />
+        <AnimatedOrb active={animationActive} color={theme.secondary} size={W * 0.18} left={W * 0.62} top={H * 0.58} delay={900} />
       </View>
 
       {theme.decoration ? (

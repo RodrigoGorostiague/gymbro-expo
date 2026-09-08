@@ -1,4 +1,5 @@
 import React from 'react';
+import { vi } from 'vitest';
 
 const View = ({ children, ...props }: any) => React.createElement('AnimatedView', props, children);
 
@@ -21,7 +22,7 @@ export const useReducedMotion = () => false;
 export const ReduceMotion = { System: 'system' };
 export const cancelAnimation = () => undefined;
 export const withDelay = (_delay: number, value: any) => value;
-export const withRepeat = (value: any) => value;
+export const withRepeat = vi.fn((value: any) => value);
 export const withSequence = (...values: any[]) => values[0];
 export const withSpring = (value: any) => value;
 export const withTiming = (value: any, _config?: unknown, callback?: (finished: boolean) => void) => {

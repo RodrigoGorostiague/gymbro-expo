@@ -1,6 +1,7 @@
 import React from 'react';
 import TestRenderer, { act } from 'react-test-renderer';
 import { beforeEach, describe, expect, test, vi } from 'vitest';
+import { withRepeat } from 'react-native-reanimated';
 
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -17,6 +18,7 @@ import { AppThemeLoadingOverlay } from '../components/AppThemeLoadingOverlay';
 
 describe('AppThemeLoadingOverlay', () => {
   beforeEach(() => {
+    vi.clearAllMocks();
     auth.user = 'member-1';
     data.hydratedUserId = null;
     shop.hydratedUserId = null;
@@ -48,6 +50,7 @@ describe('AppThemeLoadingOverlay', () => {
     let tree: TestRenderer.ReactTestRenderer;
     act(() => { tree = TestRenderer.create(React.createElement(AppThemeLoadingOverlay)); });
     expect(tree!.toJSON()).toBeNull();
+    expect(withRepeat).not.toHaveBeenCalled();
 
     auth.user = 'member-1';
     data.hydratedUserId = 'member-1';

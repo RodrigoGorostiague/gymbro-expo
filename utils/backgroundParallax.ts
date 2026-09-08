@@ -1,5 +1,5 @@
 export const BACKGROUND_PARALLAX_DEPTHS = [4, 10, 20, 32] as const;
-export const BACKGROUND_PARALLAX_INTERVAL_MS = 60;
+export const BACKGROUND_PARALLAX_INTERVAL_MS = 120;
 
 const MAX_TILT_RADIANS = 0.35;
 const MAX_TILT_SINE = Math.sin(MAX_TILT_RADIANS);
@@ -17,20 +17,18 @@ export function clamp(value: number, minimum = -1, maximum = 1) {
 
 export function shouldActivateBackgroundParallax({
   backgroundActive,
-  appActive,
+  animationActive,
   enabled,
   preferencesReady,
-  reduceMotion,
   supportedPlatform,
 }: {
   backgroundActive: boolean;
-  appActive: boolean;
+  animationActive: boolean;
   enabled: boolean;
   preferencesReady: boolean;
-  reduceMotion: boolean;
   supportedPlatform: boolean;
 }) {
-  return backgroundActive && appActive && enabled && preferencesReady && !reduceMotion && supportedPlatform;
+  return backgroundActive && animationActive && enabled && preferencesReady && supportedPlatform;
 }
 
 export function mapDeviceMotionToParallax(

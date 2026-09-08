@@ -54,7 +54,8 @@ import { appendSessionExercise, hasCompletedSessionExerciseSet, moveWorkoutExerc
 import { getShopTheme } from '../../../constants/shopThemes';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
-import Animated, { Easing, FadeIn, ZoomIn, useAnimatedStyle, useSharedValue, withRepeat, withTiming } from 'react-native-reanimated';
+import Animated, { cancelAnimation, Easing, FadeIn, ZoomIn, useAnimatedStyle, useSharedValue, withRepeat, withTiming } from 'react-native-reanimated';
+import { useAnimationActivity } from '../../../hooks/useAnimationActivity';
 
 function readSingleParam(value: string | string[] | undefined): string | undefined {
   if (typeof value === 'string') {
@@ -138,10 +139,13 @@ function jointProgress(routine: Routine, completedSets: Record<SetKey, boolean>)
 
 function WorkoutSaveIndicator({ visible, color, textColor }: { visible: boolean; color: string; textColor: string }) {
   const rotation = useSharedValue(0);
+  const animationActive = useAnimationActivity(visible);
 
   useEffect(() => {
-    rotation.value = withRepeat(withTiming(360, { duration: 1_100, easing: Easing.linear }), -1, false);
-  }, [rotation]);
+    cancelAnimation(rotation);
+    rotation.value = animationActive ? withRepeat(withTiming(360, { duration: 1_100, easing: Easing.linear }), -1, false) : 0;
+    return () => cancelAnimation(rotation);
+  }, [animationActive, rotation]);
 
   const iconStyle = useAnimatedStyle(() => ({ transform: [{ rotate: `${rotation.value}deg` }] }));
 

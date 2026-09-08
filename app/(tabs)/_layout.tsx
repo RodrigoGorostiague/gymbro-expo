@@ -6,7 +6,7 @@ import { BlurView } from 'expo-blur';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import Svg, { Circle } from 'react-native-svg';
-import Animated, { Easing, interpolate, useAnimatedStyle, useSharedValue, withRepeat, withTiming } from 'react-native-reanimated';
+import Animated, { cancelAnimation, Easing, interpolate, useAnimatedStyle, useSharedValue, withRepeat, withTiming } from 'react-native-reanimated';
 import { ThemePreviewBar } from '../../components/ThemePreviewBar';
 import { useAuth } from '../../context/AuthContext';
 import { useTheme } from '../../context/ThemeContext';
@@ -15,6 +15,7 @@ import { getCommunityBadgeCounts } from '../../services/communityBadge';
 import { useData } from '../../context/DataContext';
 import { hasActiveWorkoutReentryIntegrity } from '../../utils/activeWorkoutReentry';
 import { deriveMesocycleDayGuidance } from '../../utils/mesocycles';
+import { useAnimationActivity } from '../../hooks/useAnimationActivity';
 
 type TabIconName = keyof typeof Ionicons.glyphMap;
 
@@ -78,12 +79,15 @@ function ActiveWorkoutTabButton() {
     : null;
   const onTrainTab = segments.at(-1) === 'train';
   const dailyRoutinePulse = useSharedValue(0);
+  const pulseActive = useAnimationActivity(Boolean(plannedRoutine && !resumableDraft));
 
   useEffect(() => {
-    dailyRoutinePulse.value = plannedRoutine && !resumableDraft
+    cancelAnimation(dailyRoutinePulse);
+    dailyRoutinePulse.value = pulseActive
       ? withRepeat(withTiming(1, { duration: 900, easing: Easing.inOut(Easing.sin) }), -1, true)
-      : withTiming(0, { duration: 180 });
-  }, [dailyRoutinePulse, plannedRoutine, resumableDraft]);
+      : 0;
+    return () => cancelAnimation(dailyRoutinePulse);
+  }, [dailyRoutinePulse, pulseActive]);
 
   const dailyRoutinePulseStyle = useAnimatedStyle(() => ({
     opacity: interpolate(dailyRoutinePulse.value, [0, 1], [0.4, 1]),

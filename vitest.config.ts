@@ -11,6 +11,7 @@ export default defineConfig({
   },
   resolve: {
     alias: {
+       'expo-router/react-navigation': resolve(rootDir, 'tests/helpers/navigationStub.ts'),
        'expo-router': resolve(rootDir, 'tests/helpers/expoRouterStub.ts'),
        'expo-image': resolve(rootDir, 'tests/helpers/expoImageStub.tsx'),
        'expo-sensors': resolve(rootDir, 'tests/helpers/expoSensorsStub.ts'),

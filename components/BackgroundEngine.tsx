@@ -1,13 +1,14 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { AppState, Platform, StyleSheet, View } from 'react-native';
+import React, { useCallback, useEffect, useMemo } from 'react';
+import { Platform, StyleSheet, View } from 'react-native';
 import { Image } from 'expo-image';
 import { Accelerometer, DeviceMotion } from 'expo-sensors';
-import Animated, { Easing, ReduceMotion, useAnimatedStyle, useReducedMotion, useSharedValue, withRepeat, withTiming } from 'react-native-reanimated';
+import Animated, { cancelAnimation, Easing, ReduceMotion, useAnimatedStyle, useSharedValue, withRepeat, withTiming } from 'react-native-reanimated';
 import { LinearGradient } from 'expo-linear-gradient';
 import { BackgroundRendererKind, getShopBackground } from '../constants/backgrounds';
 import { BackgroundLayerSource, BackgroundLoadError, useBackgroundLayers } from '../services/backgrounds';
 import { useBackgroundParallaxPreference } from '../context/BackgroundParallaxContext';
 import { BACKGROUND_PARALLAX_DEPTHS, BACKGROUND_PARALLAX_INTERVAL_MS, mapAccelerometerToParallax, mapDeviceMotionToParallax, shouldActivateBackgroundParallax } from '../utils/backgroundParallax';
+import { useAnimationActivity } from '../hooks/useAnimationActivity';
 
 type LayerSource = BackgroundLayerSource;
 
@@ -36,9 +37,11 @@ function MotionLayer({ backgroundId, source, index, animate, parallaxX, parallax
   }));
 
   useEffect(() => {
+    cancelAnimation(progress);
     progress.value = animate
       ? withRepeat(withTiming(1, { duration: 8500 + index * 1200, easing: Easing.inOut(Easing.sin), reduceMotion: ReduceMotion.System }), -1, true)
-      : withTiming(0, { duration: 180, reduceMotion: ReduceMotion.System });
+      : 0;
+    return () => cancelAnimation(progress);
   }, [animate, index, progress]);
 
   return <Animated.View pointerEvents="none" style={[styles.layer, style]}>
@@ -62,26 +65,19 @@ const renderers: Record<BackgroundRendererKind, BackgroundRenderer> = {
   'layered-image': layeredImageRenderer,
 };
 
-export function BackgroundEngine({ backgroundId, onError, parallax = true }: { backgroundId: string | null; onError?: (error: BackgroundLoadError) => void; parallax?: boolean }) {
+export function BackgroundEngine({ backgroundId, onError, parallax = true, animate = true }: { backgroundId: string | null; onError?: (error: BackgroundLoadError) => void; parallax?: boolean; animate?: boolean }) {
   const background = getShopBackground(backgroundId);
   const { layers: sources, error } = useBackgroundLayers(background?.id);
-  const reduceMotion = useReducedMotion();
-  const [active, setActive] = useState(AppState.currentState === 'active');
+  const animationActive = useAnimationActivity(animate);
   const { enabled, isReady } = useBackgroundParallaxPreference();
   const parallaxX = useSharedValue(0);
   const parallaxY = useSharedValue(0);
 
-  useEffect(() => {
-    const subscription = AppState.addEventListener('change', (state) => setActive(state === 'active'));
-    return () => subscription.remove();
-  }, []);
-
   const motionEnabled = shouldActivateBackgroundParallax({
     backgroundActive: Boolean(background) && parallax,
-    appActive: active,
+    animationActive,
     enabled,
     preferencesReady: isReady,
-    reduceMotion,
     supportedPlatform: Platform.OS === 'ios' || Platform.OS === 'android',
   });
 
@@ -139,8 +135,10 @@ export function BackgroundEngine({ backgroundId, onError, parallax = true }: { b
     return () => {
       mounted = false;
       subscription?.remove();
-      parallaxX.value = withTiming(0, { duration: 180, reduceMotion: ReduceMotion.System });
-      parallaxY.value = withTiming(0, { duration: 180, reduceMotion: ReduceMotion.System });
+      cancelAnimation(parallaxX);
+      cancelAnimation(parallaxY);
+      parallaxX.value = 0;
+      parallaxY.value = 0;
     };
   }, [motionEnabled, parallaxX, parallaxY]);
 
@@ -157,7 +155,7 @@ export function BackgroundEngine({ backgroundId, onError, parallax = true }: { b
   }, [error, reportError]);
 
   if (!background || !renderer) return null;
-  return <>{renderer({ backgroundId: background.id, layers, fallback: background.fallback, animate: active && !reduceMotion, parallaxX, parallaxY, onError: reportError })}</>;
+  return <>{renderer({ backgroundId: background.id, layers, fallback: background.fallback, animate: animationActive, parallaxX, parallaxY, onError: reportError })}</>;
 }
 
 const styles = StyleSheet.create({

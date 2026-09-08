@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useTransition } from 'react';
+import React, { useCallback, useEffect, useState, useTransition } from 'react';
 import { ActivityIndicator, Alert, FlatList, StyleSheet, Text, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -233,7 +233,7 @@ function FrameCard({ item, onBuy }: { item: Extract<(typeof PROFILE_FRAMES)[numb
   </GlassCard>;
 }
 
-function BackgroundCard({ item, previewing, onPreview, onAction }: { item: ShopBackground; previewing: boolean; onPreview: () => void; onAction: () => void }) {
+function BackgroundCard({ item, previewing, visible, onPreview, onAction }: { item: ShopBackground; previewing: boolean; visible: boolean; onPreview: () => void; onAction: () => void }) {
   const { theme } = useTheme();
   const { gems, purchasedBackgroundIds, equippedBackgroundId } = useShop();
   const owned = purchasedBackgroundIds.includes(item.id);
@@ -243,7 +243,7 @@ function BackgroundCard({ item, previewing, onPreview, onAction }: { item: ShopB
     <GlassCard style={styles.themeCardInner}>
       <HapticPressable onPress={onPreview}>
         <View style={styles.themeRow}>
-          <View style={styles.preview}><BackgroundEngine backgroundId={item.id} parallax={false} /></View>
+          <View style={styles.preview}><BackgroundEngine animate={previewing && visible} backgroundId={item.id} parallax={false} /></View>
           <View style={styles.themeInfo}>
             <View style={styles.themeTitleRow}><Text style={[styles.themeName, { color: theme.text }]}>{item.name}</Text><View style={[styles.rarityBadge, { backgroundColor: `${RARITY_COLORS[item.rarity]}30`, borderColor: RARITY_COLORS[item.rarity] }]}><Text style={[styles.rarityLabel, { color: RARITY_COLORS[item.rarity] }]}>{item.rarity}</Text></View></View>
             <Text style={[styles.themeDesc, { color: theme.textMuted }]}>{item.description}</Text>
@@ -283,7 +283,24 @@ export default function ShopScreen() {
   } = useShop();
   const [activeTab, setActiveTab] = useState<ShopTab>('themes');
   const [requestedTab, setRequestedTab] = useState<ShopTab | null>(null);
+  const [visibleItemIds, setVisibleItemIds] = useState<ReadonlySet<string>>(() => new Set());
   const [isTabTransitionPending, startTabTransition] = useTransition();
+
+  const handleViewableItemsChanged = useCallback(({ viewableItems }: { viewableItems: Array<{ isViewable?: boolean; item: ShopCatalogItem }> }) => {
+    setVisibleItemIds(new Set(viewableItems.filter(({ isViewable }) => isViewable).map(({ item }) => item.id)));
+  }, []);
+
+  useEffect(() => {
+    if (!requestedTab || requestedTab === activeTab) {
+      if (requestedTab === activeTab) setRequestedTab(null);
+      return;
+    }
+
+    const frame = requestAnimationFrame(() => {
+      startTabTransition(() => setActiveTab(requestedTab));
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [activeTab, requestedTab, startTabTransition]);
 
   if (!user) return null;
 
@@ -337,18 +354,6 @@ export default function ShopScreen() {
     }
     Alert.alert('Comprar fondo', `¿Comprar "${background.name}" por ${background.price} gema?`, [{ text: 'Cancelar', style: 'cancel' }, { text: 'Comprar', onPress: () => { void purchaseBackground(background.id); } }]);
   };
-
-  useEffect(() => {
-    if (!requestedTab || requestedTab === activeTab) {
-      if (requestedTab === activeTab) setRequestedTab(null);
-      return;
-    }
-
-    const frame = requestAnimationFrame(() => {
-      startTabTransition(() => setActiveTab(requestedTab));
-    });
-    return () => cancelAnimationFrame(frame);
-  }, [activeTab, requestedTab, startTabTransition]);
 
   const catalogItems = getCatalogItems(activeTab);
   const isSwitchingTab = requestedTab !== null && requestedTab !== activeTab;
@@ -412,6 +417,7 @@ export default function ShopScreen() {
           keyExtractor={(item) => item.id}
           initialNumToRender={6}
           maxToRenderPerBatch={6}
+          onViewableItemsChanged={handleViewableItemsChanged}
           windowSize={5}
           ListHeaderComponent={catalogHeader}
           ListFooterComponent={activeTab === 'themes' && hasCustomTheme ? <GlassButton title="Usar tema de perfil" onPress={unequipTheme} variant="secondary" /> : null}
@@ -432,7 +438,7 @@ export default function ShopScreen() {
             }
             if (item.type === 'theme') return <ThemeCard item={item.item} user={user} previewing={previewThemeId === item.item.id} onPreview={() => startPreview(item.item.id)} onAction={() => handleBuyOrEquip(item.item.id)} />;
             if (item.type === 'frame') return <FrameCard item={item.item} onBuy={() => Alert.alert('Comprar marco', `¿Comprar "${item.item.label}" por ${item.item.price} gemas?`, [{ text: 'Cancelar', style: 'cancel' }, { text: 'Comprar', onPress: () => { void purchaseFrame(item.item.id); } }])} />;
-            if (item.type === 'background') return <BackgroundCard item={item.item} previewing={previewBackgroundId === item.item.id} onPreview={() => startBackgroundPreview(item.item.id)} onAction={() => handleBuyOrEquipBackground(item.item)} />;
+            if (item.type === 'background') return <BackgroundCard item={item.item} previewing={previewBackgroundId === item.item.id} visible={visibleItemIds.has(item.id)} onPreview={() => startBackgroundPreview(item.item.id)} onAction={() => handleBuyOrEquipBackground(item.item)} />;
             return <GlassCard style={styles.comingSoon}><Text style={[styles.sectionTitle, { color: theme.text }]}>Títulos próximamente</Text><Text style={[styles.sectionSubtitle, { color: theme.textMuted }]}>La tienda de títulos llegará en una próxima actualización.</Text></GlassCard>;
           }}
         />
