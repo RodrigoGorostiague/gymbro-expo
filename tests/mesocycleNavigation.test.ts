@@ -13,6 +13,11 @@ const respondToJointInvite = vi.hoisted(() => vi.fn());
 vi.mock('../services/jointWorkouts', () => ({ listJointWorkouts, respondToJointInvite }));
 const subject = { id: 'mesocycle-1', name: 'Block', goal: '', status: 'active' as const, durationWeeks: 1, startDate: '2026-07-26', createdAt: '', weeks: [{ id: 'week-1', weekNumber: 1, entries: [{ id: 'entry-1', ref: { routineId: 'routine-1', routineName: 'Upper', source: 'local' as const }, order: 1 }, { id: 'rest-1', kind: 'rest' as const }] }] };
 const routine = { id: 'routine-1', name: 'Upper', muscleGroups: ['Pecho', 'Espalda'], exercises: [{ id: 'exercise-1', name: 'Press', sets: [] }, { id: 'exercise-2', name: 'Remo', sets: [] }], createdAt: '' };
+// The screens use the device locale; keep fixture dates fixed without assuming Spanish ICU defaults.
+const scheduleDateLabel = (year: number, month: number, day: number) => {
+  const date = new Date(year, month - 1, day, 12);
+  return `${new Intl.DateTimeFormat(undefined, { weekday: 'long' }).format(date)} · ${new Intl.DateTimeFormat(undefined, { month: 'long', day: 'numeric' }).format(date)}`;
+};
 beforeEach(() => { vi.clearAllMocks(); vi.setSystemTime(new Date(2026, 6, 26, 12)); resetRuntimeHarness(); setMockParams({ id: 'mesocycle-1' }); });
 describe('mesocycle entry navigation', () => {
   test('passes the planned routine reference and lineage to execution, not a resolved snapshot ID', () => { setMockData({ getMesocycle: vi.fn(() => subject), routines: [routine], attempts: [], resolvePlannedRoutine: vi.fn(() => ({ ...routine, id: 'snapshot-copy' })) }); const screen = render(React.createElement(MesocycleSummaryScreen)); const [play] = screen.root.findAll((node) => node.props.accessibilityLabel === 'Ejecutar Upper'); press(play); expect(mockRouter.push).toHaveBeenCalledWith({ pathname: '/routine/execute/[id]', params: { id: 'routine-1', mesocycleId: 'mesocycle-1', weekNumber: '1', plannedSessionId: 'entry-1' } }); });
@@ -199,7 +204,7 @@ describe('mesocycle schedule presentation', () => {
     const updateMesocycle = vi.fn();
     setMockData({ getMesocycle: vi.fn(() => subject), routines: [routine], attempts: [], updateMesocycle, resolvePlannedRoutine: vi.fn(() => routine) });
     const screen = render(React.createElement(MesocycleDetailScreen));
-    expect(findText(screen.root, 'domingo · 26 de julio')).toBeTruthy();
+    expect(findText(screen.root, scheduleDateLabel(2026, 7, 26))).toBeTruthy();
     expect(findText(screen.root, 'Pecho · Espalda · 2 ejercicios')).toBeTruthy();
     const remove = screen.root.find((node) => node.props.accessibilityLabel === 'Quitar Upper del plan');
     expect(remove.props.accessibilityHint).toBe('Elimina esta entrada sin cambiar el orden de las demás.');
@@ -226,7 +231,7 @@ describe('mesocycle schedule presentation', () => {
 
     const screen = render(React.createElement(MesocycleDetailScreen));
 
-    expect(findText(screen.root, 'domingo · 2 de agosto')).toBeTruthy();
+    expect(findText(screen.root, scheduleDateLabel(2026, 8, 2))).toBeTruthy();
   });
 
   test('renders routine progress and an accessible play action for a 70% partial attempt', () => {
@@ -280,7 +285,7 @@ describe('mesocycle schedule presentation', () => {
 
     const screen = render(React.createElement(MesocycleSummaryScreen));
 
-    expect(findText(screen.root, 'domingo · 26 de julio')).toBeTruthy();
+    expect(findText(screen.root, scheduleDateLabel(2026, 7, 26))).toBeTruthy();
     expect(findText(screen.root, 'Hoy es un día de recuperación.')).toBeTruthy();
     expect(screen.root.findAll((node) => node.props.accessibilityLabel === 'Ejecutar Upper')).toHaveLength(0);
   });

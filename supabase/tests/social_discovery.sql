@@ -1,6 +1,12 @@
 begin;
 select plan(20);
 
+-- The local clone may contain restored non-fixture accounts. Clean only this
+-- suite's reserved identities before rebuilding its deterministic fixture.
+delete from auth.users
+where id between '00000000-0000-0000-0000-000000000021'::uuid and '00000000-0000-0000-0000-000000000027'::uuid
+   or email between 'member21@example.com' and 'member27@example.com';
+
 insert into auth.users (id, instance_id, aud, role, email, encrypted_password, email_confirmed_at, raw_app_meta_data, raw_user_meta_data, created_at, updated_at)
 select format('00000000-0000-0000-0000-%s', lpad(value::text, 12, '0'))::uuid, '00000000-0000-0000-0000-000000000000', 'authenticated', 'authenticated', format('member%s@example.com', value), '', now(), '{}', '{}', now(), now()
 from generate_series(21, 27) as value;
@@ -12,7 +18,9 @@ insert into public.profiles (id, alias, categories, category_visibility) values
   ('00000000-0000-0000-0000-000000000025', 'Alpha Four', '{}', '{}'),
   ('00000000-0000-0000-0000-000000000026', 'Alpha Five', '{}', '{}'),
   ('00000000-0000-0000-0000-000000000027', 'Alpha Six', '{}', '{}');
-update public.public_profiles set directory_bucket = 1, directory_rank = id;
+update public.public_profiles
+set directory_bucket = 0, directory_rank = id
+where id between '00000000-0000-0000-0000-000000000021'::uuid and '00000000-0000-0000-0000-000000000027'::uuid;
 insert into public.relationships (member_low, member_high, kind) values ('00000000-0000-0000-0000-000000000021', '00000000-0000-0000-0000-000000000024', 'bro');
 insert into public.relationship_requests (requester_id, recipient_id, requested_kind) values ('00000000-0000-0000-0000-000000000025', '00000000-0000-0000-0000-000000000021', 'partner');
 insert into public.blocks (blocker_id, blocked_id) values
@@ -23,7 +31,7 @@ set local role authenticated;
 select set_config('request.jwt.claim.sub', '00000000-0000-0000-0000-000000000021', true);
 
 select is(
-  (select array_agg(value ->> 'id' order by n) from jsonb_array_elements(public.list_directory(null, 20) -> 'profiles') with ordinality as t(value, n)),
+  (select array_agg(value ->> 'id' order by n) from jsonb_array_elements(public.list_directory(encode(convert_to('{"b": 0, "r": "00000000-0000-0000-0000-000000000021", "u": "00000000-0000-0000-0000-000000000021"}', 'UTF8'), 'base64'), 2) -> 'profiles') with ordinality as t(value, n)),
   array['00000000-0000-0000-0000-000000000022', '00000000-0000-0000-0000-000000000023'],
   'directory excludes self, relationships, pending requests, and both block directions'
 );
@@ -33,17 +41,21 @@ select is(
   'hidden categories are never projected by the directory'
 );
 select is(
-  (select count(*)::int from jsonb_array_elements(public.list_directory(null, 1) -> 'profiles')),
+  (select count(*)::int from jsonb_array_elements(public.list_directory(encode(convert_to('{"b": 0, "r": "00000000-0000-0000-0000-000000000021", "u": "00000000-0000-0000-0000-000000000021"}', 'UTF8'), 'base64'), 1) -> 'profiles')),
   1,
   'the page size bounds directory results'
 );
-select ok(public.list_directory(null, 1) ->> 'next_cursor' is not null, 'a full page exposes an opaque continuation cursor');
+select ok(public.list_directory(encode(convert_to('{"b": 0, "r": "00000000-0000-0000-0000-000000000021", "u": "00000000-0000-0000-0000-000000000021"}', 'UTF8'), 'base64'), 1) ->> 'next_cursor' is not null, 'a full page exposes an opaque continuation cursor');
 select is(
-  (select array_agg(value ->> 'id' order by n) from jsonb_array_elements(public.list_directory(public.list_directory(null, 1) ->> 'next_cursor', 1) -> 'profiles') with ordinality as t(value, n)),
+  (select array_agg(value ->> 'id' order by n) from jsonb_array_elements(public.list_directory(public.list_directory(encode(convert_to('{"b": 0, "r": "00000000-0000-0000-0000-000000000021", "u": "00000000-0000-0000-0000-000000000021"}', 'UTF8'), 'base64'), 1) ->> 'next_cursor', 1) -> 'profiles') with ordinality as t(value, n)),
   array['00000000-0000-0000-0000-000000000023'],
   'the cursor continues with the next eligible profile without duplicates'
 );
-select is(public.list_directory(public.list_directory(null, 1) ->> 'next_cursor', 1) ->> 'next_cursor', null, 'the final directory page has no continuation cursor');
+select is(
+  public.list_directory(encode(convert_to('{"b": 127, "r": "ffffffff-ffff-ffff-ffff-ffffffffffff", "u": "ffffffff-ffff-ffff-ffff-ffffffffffff"}', 'UTF8'), 'base64'), 1) ->> 'next_cursor',
+  null,
+  'the terminal directory page has no continuation cursor'
+);
 select throws_like($$select public.list_directory('not-a-valid-cursor', 20)$$, 'invalid cursor', 'a malformed directory cursor is rejected');
 select throws_like($$select public.list_directory(encode(convert_to('{"x": 1}', 'UTF8'), 'base64'), 20)$$, 'invalid cursor', 'a well-formed cursor with the wrong shape is rejected');
 
