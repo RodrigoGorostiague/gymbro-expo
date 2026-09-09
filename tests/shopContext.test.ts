@@ -4,12 +4,13 @@ import { beforeEach, describe, expect, test, vi } from 'vitest';
 
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
 
+const auth = vi.hoisted(() => ({ user: 'uid-1' }));
 const data = vi.hoisted(() => ({ attempts: [] as any[] }));
 const wallet = vi.hoisted(() => ({ acknowledge: vi.fn(), claim: vi.fn(), claimUpdates: vi.fn(), load: vi.fn(), purchaseFrame: vi.fn(), purchaseBackground: vi.fn(), updateBackground: vi.fn() }));
 const themeSync = vi.hoisted(() => ({ subscribe: vi.fn(() => () => undefined), sync: vi.fn() }));
 const presentation = vi.hoisted(() => ({ sync: vi.fn(async () => undefined) }));
 
-vi.mock('../context/AuthContext', () => ({ useAuth: () => ({ user: 'uid-1' }) }));
+vi.mock('../context/AuthContext', () => ({ useAuth: () => auth }));
 vi.mock('../context/DataContext', () => ({ useData: () => ({ attempts: data.attempts }) }));
 vi.mock('../services/rewardWallet', () => ({
   claimWelcomeGemReward: wallet.claim,
@@ -40,6 +41,7 @@ const deferred = <T,>() => {
 describe('ShopProvider reward wallet refresh', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    auth.user = 'uid-1';
     data.attempts = [];
     wallet.claim.mockResolvedValue({ claimed: false, wallet: emptyWallet });
     wallet.claimUpdates.mockResolvedValue({ claimed: false, wallet: emptyWallet, releases: [] });
@@ -148,4 +150,29 @@ describe('ShopProvider reward wallet refresh', () => {
     expect(current?.equippedBackgroundId).toBe('banzai');
     expect(current?.equippedThemeId).toBeNull();
   });
+  test('background equip resolves only server-confirmed selection and ignores another account response', async () => {
+    const owned = { ...emptyWallet, purchasedBackgroundIds: ['banzai', 'sakura'], equippedBackgroundId: 'sakura' };
+    wallet.claimUpdates.mockResolvedValueOnce({ claimed: false, wallet: owned, releases: [] });
+    let current!: ReturnType<typeof useShop>;
+    const Probe = () => { current = useShop(); return null; };
+    const render = () => React.createElement(ShopProvider, null, React.createElement(Probe));
+    let renderer!: TestRenderer.ReactTestRenderer;
+    await act(async () => { renderer = TestRenderer.create(render()); });
+    wallet.updateBackground.mockRejectedValueOnce(new Error('offline'));
+    await act(async () => { expect(await current.equipBackground('banzai')).toBe(false); });
+    expect(current.equippedBackgroundId).toBe('sakura');
+    wallet.updateBackground.mockResolvedValueOnce({ ...owned, equippedBackgroundId: 'banzai' });
+    await act(async () => { expect(await current.equipBackground('banzai')).toBe(true); });
+    expect(current.equippedBackgroundId).toBe('banzai');
+    const pending = deferred<typeof owned>();
+    wallet.updateBackground.mockReturnValueOnce(pending.promise);
+    let result!: Promise<boolean>;
+    act(() => { result = current.equipBackground('sakura'); });
+    auth.user = 'uid-2';
+    await act(async () => { renderer.update(render()); });
+    await act(async () => { pending.resolve(owned); expect(await result).toBe(false); });
+    expect(current.equippedBackgroundId).toBeNull();
+    await act(async () => { renderer.unmount(); });
+  });
+
 });

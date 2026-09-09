@@ -1,6 +1,6 @@
 import React from 'react';
 import { FlatList, Platform, StyleProp, StyleSheet, Text, View, ViewStyle } from 'react-native';
-import * as Haptics from 'expo-haptics';
+import * as Haptics from '../utils/sensoryHaptics';
 import DraggableFlatList, { ScaleDecorator } from 'react-native-draggable-flatlist';
 
 type DraggableListProps<T extends { id: string }> = {

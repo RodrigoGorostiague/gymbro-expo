@@ -31,6 +31,6 @@ describe('SocialProfileCard', () => {
     await act(async () => { tree = TestRenderer.create(React.createElement(SocialProfileCard, { profile: { uid: 'member-2', alias: 'Moon athlete', avatarId: 'capigirl', frameId: 'avanzado', titleId: 'avanzado', categories: {}, presentationThemeId: 'moon', relationshipStatus: 'bro' }, insights: { progress: { level: 12, rank: 'Avanzado' }, muscleDistribution: [{ id: 'chest', label: 'Pecho', value: 3 }] }, onPress: vi.fn() })); });
     expect(tree!.root.find((node) => String(node.type) === 'LinearGradient').props.colors).toEqual(['#9FA8DA', '#C5CAE9', '#5C6BC0']);
     expect(tree!.root.findAll((node) => String(node.type) === 'Text').map((node) => node.children.join(''))).toContain('Nivel 12 · Avanzado');
-    expect(tree!.root.find((node) => String(node.type) === 'View' && node.props.accessibilityLabel === 'Distribución muscular resumida')).toBeDefined();
+    expect(tree!.root.find((node) => String(node.type) === 'View' && node.props.accessibilityLabel?.startsWith('Distribución muscular compartida:'))).toBeDefined();
   });
 });

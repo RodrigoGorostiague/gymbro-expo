@@ -1,6 +1,7 @@
+import { useAnimationActivity } from '../../hooks/useAnimationActivity';
 import React, { useEffect } from 'react';
 import { Image, StyleSheet, Text, View } from 'react-native';
-import Animated, { Easing, interpolate, useAnimatedStyle, useSharedValue, withRepeat, withSequence, withSpring, withTiming } from 'react-native-reanimated';
+import Animated, { cancelAnimation, Easing, interpolate, useAnimatedStyle, useSharedValue, withRepeat, withSequence, withSpring, withTiming } from 'react-native-reanimated';
 import type { AppTheme } from '../../types';
 
 interface DualLoginHeaderProps {
@@ -9,16 +10,25 @@ interface DualLoginHeaderProps {
 }
 
 export function DualLoginHeader({ rodaja, brisas }: DualLoginHeaderProps) {
-  const enter = useSharedValue(0);
+  const animationActive = useAnimationActivity();
+  const enter = useSharedValue(1);
   const glow = useSharedValue(0);
 
   useEffect(() => {
+    if (!animationActive) {
+      cancelAnimation(enter);
+      cancelAnimation(glow);
+      enter.value = 1;
+      glow.value = 0;
+      return;
+    }
     enter.value = withSpring(1, { damping: 14, stiffness: 90 });
     glow.value = withRepeat(withSequence(
       withTiming(1, { duration: 2200, easing: Easing.inOut(Easing.sin) }),
       withTiming(0, { duration: 2200, easing: Easing.inOut(Easing.sin) }),
     ), -1, false);
-  }, [enter, glow]);
+    return () => { cancelAnimation(enter); cancelAnimation(glow); };
+  }, [animationActive, enter, glow]);
 
   const headerStyle = useAnimatedStyle(() => ({
     opacity: enter.value,

@@ -10,6 +10,7 @@ import {
 import { LinearGradient } from 'expo-linear-gradient';
 import { HapticPressable } from './HapticPressable';
 import { useTheme } from '../context/ThemeContext';
+import { EXPERIENCE } from '../constants/experience';
 import type { AppTheme } from '../types';
 
 interface GlassButtonProps {
@@ -19,6 +20,7 @@ interface GlassButtonProps {
   disabled?: boolean;
   loading?: boolean;
   theme?: AppTheme;
+  accessibilityHint?: string;
 }
 
 export function GlassButton({
@@ -28,6 +30,7 @@ export function GlassButton({
   disabled,
   loading,
   theme: themeOverride,
+  accessibilityHint,
 }: GlassButtonProps) {
   const { theme: activeTheme, dualThemes, isCombined } = useTheme();
   const theme = themeOverride ?? activeTheme;
@@ -41,13 +44,17 @@ export function GlassButton({
 
     return (
       <HapticPressable
+        accessibilityRole="button"
+        accessibilityLabel={title}
+        accessibilityHint={accessibilityHint}
+        accessibilityState={{ disabled: !!(disabled || loading), busy: !!loading }}
         onPress={onPress}
         disabled={disabled || loading}
         style={({ pressed }) => [styles.gradientWrap, { opacity: pressed || disabled || loading ? 0.75 : 1 }]}
       >
         <LinearGradient colors={colors} start={{ x: 0, y: 0.5 }} end={{ x: 1, y: 0.5 }} style={styles.button}>
           {loading ? (
-            <ActivityIndicator color={theme.onPrimary} />
+            <View style={styles.busyRow}><ActivityIndicator color={theme.onPrimary} /><Text style={[styles.buttonText, { color: theme.onPrimary }]}>{title}</Text></View>
           ) : (
             <Text style={[styles.buttonText, { color: theme.onPrimary }]}>{title}</Text>
           )}
@@ -61,7 +68,11 @@ export function GlassButton({
 
   return (
     <HapticPressable
-      onPress={onPress}
+      accessibilityRole="button"
+        accessibilityLabel={title}
+        accessibilityHint={accessibilityHint}
+        accessibilityState={{ disabled: !!(disabled || loading), busy: !!loading }}
+        onPress={onPress}
       disabled={disabled || loading}
       style={({ pressed }) => [
         styles.button,
@@ -74,7 +85,7 @@ export function GlassButton({
       ]}
     >
       {loading ? (
-        <ActivityIndicator color={textColor} />
+        <View style={styles.busyRow}><ActivityIndicator color={textColor} /><Text style={[styles.buttonText, { color: textColor }]}>{title}</Text></View>
       ) : (
         <Text style={[styles.buttonText, { color: textColor }]}>{title}</Text>
       )}
@@ -107,8 +118,7 @@ export function SectionTitle({ title, subtitle }: { title: string; subtitle?: st
 
   return (
     <View style={styles.sectionHeader}>
-      <Text style={[styles.sectionEyebrow, { color: theme.primary }]}>Portal</Text>
-      <Text style={[styles.sectionTitle, { color: theme.text }]}>{title}</Text>
+      <Text accessibilityRole="header" style={[styles.sectionTitle, { color: theme.text }]}>{title}</Text>
       {subtitle ? (
         <Text style={[styles.sectionSubtitle, { color: theme.textMuted }]}>{subtitle}</Text>
       ) : null}
@@ -121,7 +131,9 @@ const styles = StyleSheet.create({
     borderRadius: 16,
     overflow: 'hidden',
   },
+  busyRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   button: {
+    minHeight: EXPERIENCE.target,
     borderRadius: 16,
     paddingVertical: 14,
     paddingHorizontal: 20,
@@ -137,6 +149,7 @@ const styles = StyleSheet.create({
     letterSpacing: 0.3,
   },
   input: {
+    minHeight: EXPERIENCE.target,
     borderRadius: 14,
     borderWidth: 1.5,
     paddingHorizontal: 16,

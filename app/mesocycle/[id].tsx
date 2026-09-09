@@ -40,7 +40,7 @@ import { muscleGroupLabels } from '../../utils/catalogMuscleGroups';
 import { deriveMesocycleDateRange, findOverlappingMesocycle } from '../../utils/mesocycleAnalytics';
 import { hasPlannedSessionAttempt, reorderWeekEntries } from '../../utils/mesocycleSchedule';
 import { NestableDraggableFlatList, NestableScrollContainer, ScaleDecorator } from 'react-native-draggable-flatlist';
-import * as Haptics from 'expo-haptics';
+import * as Haptics from '../../utils/sensoryHaptics';
 
 const routineRef = (routine: Routine) => ({
   routineId: routine.id,

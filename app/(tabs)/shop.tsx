@@ -1,4 +1,9 @@
-import React, { useCallback, useEffect, useState, useTransition } from 'react';
+import { AtmospherePicker } from '../../components/AtmospherePicker';
+import { getLocalAtmosphere, saveLocalAtmosphere, useLocalAtmosphere } from '../../hooks/useLocalAtmosphere';
+import { ThemeFamilyDiscovery } from '../../components/ThemeFamilyDiscovery';
+import { ThemeFamilyTexture } from '../../components/ThemeFamilyTexture';
+import { familyForThemeId } from '../../constants/themeFamilies';
+import React, { useCallback, useEffect, useRef, useState, useTransition } from 'react';
 import { ActivityIndicator, Alert, FlatList, StyleSheet, Text, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -44,7 +49,7 @@ type ShopCatalogItem =
   | { id: string; type: 'background'; item: ShopBackground }
   | { id: string; type: 'titles' };
 
-function getCatalogItems(tab: ShopTab): ShopCatalogItem[] {
+function getCatalogItems(tab: ShopTab, ownedIds: readonly string[] = [], showCollection = false): ShopCatalogItem[] {
   if (tab === 'frames') {
     return PROFILE_FRAMES
       .filter((frame): frame is ShopFrame => frame.kind === 'shop')
@@ -57,20 +62,7 @@ function getCatalogItems(tab: ShopTab): ShopCatalogItem[] {
 
   if (tab === 'titles') return [{ id: 'titles-coming-soon', type: 'titles' }];
 
-  const items: ShopCatalogItem[] = [{ id: 'profile-themes', type: 'theme-section', title: 'Temas de perfil' }];
-  items.push(...PROFILE_THEMES.map((item) => ({ id: item.id, type: 'theme' as const, item })));
-  for (const rarity of SHOP_RARITIES) {
-    const themes = getThemesByRarity(rarity.key);
-    if (!themes.length) continue;
-    items.push({
-      id: `rarity-${rarity.key}`,
-      type: 'theme-section',
-      title: rarity.label,
-      subtitle: rarity.description,
-      rarityColor: RARITY_COLORS[rarity.key],
-    });
-    items.push(...themes.map((item) => ({ id: item.id, type: 'theme' as const, item })));
-  }
+  const items: ShopCatalogItem[] = showCollection ? [...PROFILE_THEMES, ...ownedIds.map((id) => getShopTheme(id)).filter((item): item is ShopTheme => !!item && !isProfileThemeId(item.id))].map((item) => ({ id: item.id, type: 'theme', item })) : [];
   return items;
 }
 
@@ -106,18 +98,14 @@ function ThemeCard({
 
   return (
     <SelectablePulse selected={selected} theme={item} style={styles.themeCard}>
-      <GlassCard style={styles.themeCardInner}>
+      <GlassCard style={styles.themeCardInner} theme={item}>
         <HapticPressable onPress={onPreview}>
           <View style={styles.themeRow}>
             <LinearGradient
               colors={item.background as [string, string, ...string[]]}
               style={styles.preview}
             >
-              {item.decoration ? (
-                <ThemeDecorations decoration={item.decoration} theme={item} compact />
-              ) : (
-                <View style={[styles.previewDot, { backgroundColor: item.primary }]} />
-              )}
+              <ThemeFamilyTexture family={familyForThemeId(item.id)?.texture ?? 'essential'} color={item.accent} opacity={0.4} />
             </LinearGradient>
 
             <View style={styles.themeInfo}>
@@ -236,6 +224,7 @@ function FrameCard({ item, onBuy }: { item: Extract<(typeof PROFILE_FRAMES)[numb
 function BackgroundCard({ item, previewing, visible, onPreview, onAction }: { item: ShopBackground; previewing: boolean; visible: boolean; onPreview: () => void; onAction: () => void }) {
   const { theme } = useTheme();
   const { gems, purchasedBackgroundIds, equippedBackgroundId } = useShop();
+  const atmosphere = useLocalAtmosphere();
   const owned = purchasedBackgroundIds.includes(item.id);
   const equipped = equippedBackgroundId === item.id;
   const canAfford = gems >= item.price;
@@ -253,8 +242,8 @@ function BackgroundCard({ item, previewing, visible, onPreview, onAction }: { it
           </View>
         </View>
       </HapticPressable>
-      <HapticPressable onPress={onAction}>
-        <View style={[styles.actionBtn, { backgroundColor: owned && equipped || !owned && !canAfford ? theme.glass : theme.primary }]}><Text style={{ color: owned && equipped || !owned && !canAfford ? theme.textMuted : theme.onPrimary, fontWeight: '700' }}>{owned ? equipped ? 'Quitar fondo' : 'Equipar' : canAfford ? 'Comprar' : 'Sin gemas'}</Text></View>
+      <HapticPressable accessibilityRole="button" accessibilityLabel={`${owned && equipped && atmosphere ? 'Restaurar' : owned ? 'Usar' : 'Comprar'} fondo ${item.name}`} onPress={onAction}>
+        <View style={[styles.actionBtn, { backgroundColor: owned && equipped || !owned && !canAfford ? theme.glass : theme.primary }]}><Text style={{ color: owned && equipped || !owned && !canAfford ? theme.textMuted : theme.onPrimary, fontWeight: '700' }}>{owned ? equipped ? atmosphere ? 'Restaurar este fondo' : 'Quitar fondo' : 'Equipar' : canAfford ? 'Comprar' : 'Sin gemas'}</Text></View>
       </HapticPressable>
     </GlassCard>
   </SelectablePulse>;
@@ -281,6 +270,16 @@ export default function ShopScreen() {
     unequipTheme,
     startPreview,
   } = useShop();
+  const backgroundAccount = useRef({ user });
+  if (backgroundAccount.current.user !== user) backgroundAccount.current = { user };
+  const backgroundAction = useRef<object | null>(null);
+  const [backgroundBusy, setBackgroundBusy] = useState(false);
+  useEffect(() => {
+    backgroundAction.current = null;
+    setBackgroundBusy(false);
+  }, [user]);
+  useEffect(() => () => { backgroundAccount.current = { user: null }; }, []);
+  const [showCollection, setShowCollection] = useState(false);
   const [activeTab, setActiveTab] = useState<ShopTab>('themes');
   const [requestedTab, setRequestedTab] = useState<ShopTab | null>(null);
   const [visibleItemIds, setVisibleItemIds] = useState<ReadonlySet<string>>(() => new Set());
@@ -344,18 +343,53 @@ export default function ShopScreen() {
   const hasCustomTheme =
     equippedThemeId !== null && !isProfileThemeId(equippedThemeId);
 
-  const handleBuyOrEquipBackground = (background: ShopBackground) => {
+  const handleBuyOrEquipBackground = async (background: ShopBackground) => {
     const owned = purchasedBackgroundIds.includes(background.id);
     if (owned) {
-      if (equippedBackgroundId === background.id) {
+      if (backgroundAction.current) return;
+      const account = backgroundAccount.current;
+      const initialAtmosphere = getLocalAtmosphere();
+      if (equippedBackgroundId === background.id && !initialAtmosphere) {
         Alert.alert('Fondo activo', '¿Volver al fondo del tema?', [{ text: 'Cancelar', style: 'cancel' }, { text: 'Quitar fondo', onPress: unequipBackground }]);
-      } else equipBackground(background.id);
+        return;
+      }
+      backgroundAction.current = account;
+      setBackgroundBusy(true);
+      try {
+        if (equippedBackgroundId !== background.id) {
+          let confirmed = false;
+          try { confirmed = await equipBackground(background.id); } catch { /* Retain the local selection on remote failure. */ }
+          if (backgroundAccount.current !== account) return;
+          if (!confirmed) {
+            Alert.alert('No se confirmó el fondo', 'Tu atmósfera local sigue activa. Reintenta desde este fondo.');
+            return;
+          }
+        }
+        if (backgroundAccount.current !== account || getLocalAtmosphere() !== initialAtmosphere) return;
+        try { await saveLocalAtmosphere(null); }
+        catch {
+          if (backgroundAccount.current !== account) return;
+          Alert.alert('Fondo de cuenta confirmado', `${background.name} está seleccionado en tu cuenta, pero la atmósfera local sigue activa. Usa «Usar fondo de mi colección» para reintentar mostrarlo.`);
+        }
+      } finally {
+        if (backgroundAction.current === account) {
+          backgroundAction.current = null;
+          setBackgroundBusy(false);
+        }
+      }
       return;
     }
-    Alert.alert('Comprar fondo', `¿Comprar "${background.name}" por ${background.price} gema?`, [{ text: 'Cancelar', style: 'cancel' }, { text: 'Comprar', onPress: () => { void purchaseBackground(background.id); } }]);
+    Alert.alert('Comprar fondo', `¿Comprar "${background.name}" por ${background.price} gema?`, [{ text: 'Cancelar', style: 'cancel' }, { text: 'Comprar', onPress: async () => {
+      let purchased = false;
+      try { purchased = await purchaseBackground(background.id); }
+      catch { Alert.alert('No se confirmó la compra', 'Revisa tu colección antes de volver a intentarlo.'); return; }
+      if (!purchased) return;
+      try { await saveLocalAtmosphere(null); }
+      catch { Alert.alert('Fondo comprado', 'Desactiva la atmósfera local con Usar fondo de mi colección para ver el fondo comprado.'); }
+    } }]);
   };
 
-  const catalogItems = getCatalogItems(activeTab);
+  const catalogItems = getCatalogItems(activeTab, purchasedThemeIds, showCollection);
   const isSwitchingTab = requestedTab !== null && requestedTab !== activeTab;
   const tabLabels: Readonly<Record<ShopTab, string>> = {
     themes: 'Temas',
@@ -371,11 +405,16 @@ export default function ShopScreen() {
   const catalogHeader = (
     <>
       <CombineWithPartnerCard />
+      {activeTab === 'themes' ? <View style={{ gap: 16 }}>
+        <ThemeFamilyDiscovery equippedId={equippedThemeId} renderTheme={(item) => <ThemeCard item={item} user={user} previewing={previewThemeId === item.id} onPreview={() => startPreview(item.id)} onAction={() => handleBuyOrEquip(item.id)} />} />
+        <GlassButton title={showCollection ? 'Ocultar mi colección' : 'Ver mi colección y temas anteriores'} variant="secondary" onPress={() => setShowCollection((current) => !current)} />
+      </View> : null}
       {activeTab === 'frames' ? <View style={styles.sectionHeaderOnly}>
         <Text style={[styles.sectionTitle, { color: theme.text }]}>Marcos de perfil</Text>
         <Text style={[styles.sectionSubtitle, { color: theme.textMuted }]}>Compralos con gemas y elegilos después desde tu perfil.</Text>
       </View> : null}
       {activeTab === 'backgrounds' ? <View style={styles.sectionHeaderOnly}>
+        <AtmospherePicker />
         <Text style={[styles.sectionTitle, { color: theme.text }]}>Fondos animados</Text>
         <Text style={[styles.sectionSubtitle, { color: theme.textMuted }]}>Se equipan por separado de los temas.</Text>
       </View> : null}
@@ -438,7 +477,7 @@ export default function ShopScreen() {
             }
             if (item.type === 'theme') return <ThemeCard item={item.item} user={user} previewing={previewThemeId === item.item.id} onPreview={() => startPreview(item.item.id)} onAction={() => handleBuyOrEquip(item.item.id)} />;
             if (item.type === 'frame') return <FrameCard item={item.item} onBuy={() => Alert.alert('Comprar marco', `¿Comprar "${item.item.label}" por ${item.item.price} gemas?`, [{ text: 'Cancelar', style: 'cancel' }, { text: 'Comprar', onPress: () => { void purchaseFrame(item.item.id); } }])} />;
-            if (item.type === 'background') return <BackgroundCard item={item.item} previewing={previewBackgroundId === item.item.id} visible={visibleItemIds.has(item.id)} onPreview={() => startBackgroundPreview(item.item.id)} onAction={() => handleBuyOrEquipBackground(item.item)} />;
+            if (item.type === 'background') return <BackgroundCard item={item.item} previewing={previewBackgroundId === item.item.id} visible={visibleItemIds.has(item.id)} onPreview={() => startBackgroundPreview(item.item.id)} onAction={() => { if (!backgroundBusy) void handleBuyOrEquipBackground(item.item); }} />;
             return <GlassCard style={styles.comingSoon}><Text style={[styles.sectionTitle, { color: theme.text }]}>Títulos próximamente</Text><Text style={[styles.sectionSubtitle, { color: theme.textMuted }]}>La tienda de títulos llegará en una próxima actualización.</Text></GlassCard>;
           }}
         />

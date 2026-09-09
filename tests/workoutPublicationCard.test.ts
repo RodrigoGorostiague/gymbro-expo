@@ -27,11 +27,16 @@ describe('WorkoutPublicationCard', () => {
 
   test('uses a separate star action without changing the summary navigation surface', () => {
     const onToggleReaction = vi.fn();
+    const onPress = vi.fn();
     let tree: TestRenderer.ReactTestRenderer;
-    act(() => { tree = TestRenderer.create(React.createElement(WorkoutPublicationCard, { recap: { id: 'recap-1', authorAlias: 'Alex', authorAvatarId: 'capigirl', authorThemeId: null, routineName: 'Upper', completedAt: '2026-08-08T10:00:00Z', durationSeconds: 3600, exerciseCount: 1, muscleGroupIds: [], metrics: {}, caption: null, createdAt: '2026-08-08T10:00:00Z', templateAvailable: false, mesocycleAvailable: false, isAuthor: false, reactionCount: 2, viewerHasReacted: false }, onToggleReaction })); });
+    act(() => { tree = TestRenderer.create(React.createElement(WorkoutPublicationCard, { recap: { id: 'recap-1', authorAlias: 'Alex', authorAvatarId: 'capigirl', authorThemeId: null, routineName: 'Upper', completedAt: '2026-08-08T10:00:00Z', durationSeconds: 3600, exerciseCount: 1, muscleGroupIds: [], metrics: {}, caption: null, createdAt: '2026-08-08T10:00:00Z', templateAvailable: false, mesocycleAvailable: false, isAuthor: false, reactionCount: 2, viewerHasReacted: false }, onToggleReaction, onPress })); });
     const star = tree!.root.find((node) => node.props.accessibilityLabel === 'Dar estrella');
     act(() => { star.props.onPress(); });
     expect(onToggleReaction).toHaveBeenCalledOnce();
+    expect(onPress).not.toHaveBeenCalled();
+    let ancestor = star.parent;
+    while (ancestor) { if (String(ancestor.type) === 'Pressable') expect(ancestor.props.onPress).not.toBe(onPress); ancestor = ancestor.parent; }
+    act(() => { tree!.unmount(); });
   });
 
   test('shows the comment counter alongside reactions in the feed summary', () => {

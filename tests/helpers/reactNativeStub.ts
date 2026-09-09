@@ -12,9 +12,11 @@ export const Alert = {
 };
 export const ActivityIndicator = createHost('ActivityIndicator');
 export const Image = createHost('Image');
+export const Switch = createHost('Switch');
 class AnimatedValue {
   constructor(public value: number) {}
   interpolate() { return this; }
+  setValue(value: number) { this.value = value; }
 }
 const animation = () => ({ start: (callback?: (result: { finished: boolean }) => void) => callback?.({ finished: true }), stop: vi.fn() });
 export const Animated = {
@@ -91,3 +93,6 @@ export const Text = createHost('Text');
 export const TextInput = ({ children, ...props }: any) => React.createElement('TextInput', props, children);
 export const Vibration = { vibrate: vi.fn() };
 export const View = createHost('View');
+
+export const Share = { share: vi.fn(async () => ({ action: 'sharedAction' })) };
+export const AccessibilityInfo = { isReduceMotionEnabled: vi.fn(async () => false), addEventListener: vi.fn(() => ({ remove: vi.fn() })) };

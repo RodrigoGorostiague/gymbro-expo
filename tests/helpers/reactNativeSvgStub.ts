@@ -9,3 +9,6 @@ export const Circle = createHost('Circle');
 export const Line = createHost('Line');
 export const Path = createHost('Path');
 export const Polygon = createHost('Polygon');
+
+export const Rect = createHost('Rect');
+export const Ellipse = createHost('Ellipse');

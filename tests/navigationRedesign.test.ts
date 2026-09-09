@@ -10,11 +10,11 @@ import TrainEntryScreen from '../app/(tabs)/train';
 describe('Train entry ownership', () => {
   beforeEach(() => resetRuntimeHarness());
 
-  test('renders mesocycles when routines exist without navigating away from Train', () => {
+  test('renders routines when no active block exists without navigating away from Train', () => {
     setMockData({ dataState: 'ready', routines: [{ id: 'routine-1', name: 'Rutina', exercises: [], muscleGroups: [] }], mesocycles: [] });
     const tree = render(React.createElement(TrainEntryScreen));
 
-    expect(findText(tree.root, 'Mesociclos')).toBeDefined();
+    expect(findText(tree.root, 'Biblioteca de rutinas')).toBeDefined();
     expect(mockRouter.replace).not.toHaveBeenCalled();
     expect(mockRouter.push).not.toHaveBeenCalled();
   });
@@ -38,15 +38,22 @@ describe('Train entry ownership', () => {
     expect(mockRouter.push).not.toHaveBeenCalled();
   });
 
+  test('the first-session briefing opens creation without requiring a block', () => {
+    setMockData({ dataState: 'ready', routines: [], mesocycles: [] });
+    const tree = render(React.createElement(TrainEntryScreen));
+    press(findButton(tree.root, 'Crear mi primera rutina'));
+    expect(mockRouter.push).toHaveBeenCalledWith('/routine/create');
+  });
+
   test('keeps the loading screen until the data lifecycle is ready', () => {
     setMockData({ dataState: 'loading', routines: [] });
     const tree = render(React.createElement(TrainEntryScreen));
     expect(mockRouter.replace).not.toHaveBeenCalled();
     expect(mockRouter.push).not.toHaveBeenCalled();
 
-    setMockData({ dataState: 'ready', routines: [{ id: 'routine-1' }], mesocycles: [] });
+    setMockData({ dataState: 'ready', routines: [{ id: 'routine-1', name: 'Rutina', exercises: [], muscleGroups: [] }], mesocycles: [] });
     act(() => { tree.update(React.createElement(TrainEntryScreen)); });
-    expect(findText(tree.root, 'Mesociclos')).toBeDefined();
+    expect(findText(tree.root, 'Biblioteca de rutinas')).toBeDefined();
     expect(mockRouter.replace).not.toHaveBeenCalled();
     expect(mockRouter.push).not.toHaveBeenCalled();
   });

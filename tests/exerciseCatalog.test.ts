@@ -1,3 +1,4 @@
+import { act } from 'react-test-renderer';
 import React from 'react';
 import { beforeEach, describe, expect, test, vi } from 'vitest';
 import {
@@ -456,7 +457,7 @@ describe('global exercise variant catalog', () => {
     denseScreen.unmount();
   });
 
-  test('collapses the exercises tab filters until requested and keeps the active state visible', () => {
+  test('collapses the exercises tab filters until requested and keeps the active state visible', async () => {
     const deleteExercise = vi.fn();
     const renderScreen = (exercises: Exercise[]) => {
       setMockData({
@@ -521,6 +522,7 @@ describe('global exercise variant catalog', () => {
     press(pechoChip);
 
     expect(findTextsContaining(denseScreen.root, 'Activo: Pecho')).toHaveLength(1);
+    await act(async () => { await Promise.resolve(); });
     expect(findTextsContaining(denseScreen.root, 'Exercise 8')).toHaveLength(1);
 
     const denseCollapseTrigger = findByTestId(denseScreen.root, 'exercise-filter-trigger');

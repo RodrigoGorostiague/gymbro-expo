@@ -1,7 +1,8 @@
+import { getSensoryPreferences } from '../utils/sensoryPreferences';
 import React, { useEffect, useRef, useState } from 'react';
 import { Alert, Pressable, StyleSheet, Text, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import * as Haptics from 'expo-haptics';
+import * as Haptics from '../utils/sensoryHaptics';
 import Animated, { cancelAnimation, useAnimatedProps, useSharedValue, withTiming } from 'react-native-reanimated';
 import Svg, { Circle } from 'react-native-svg';
 import { ActiveWorkoutDraft } from '../types';
@@ -78,7 +79,7 @@ export function ActiveWorkoutCard({ draft, onContinue, onCancel }: {
     suppressNextPress.current = true;
     cancelAnimation(holdProgress);
     holdProgress.value = 1;
-    void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => undefined);
+    if (getSensoryPreferences().haptics) void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => undefined);
     Alert.alert(
       '¿Cancelar entrenamiento?',
       'Vas a descartar el progreso de este entrenamiento activo.',

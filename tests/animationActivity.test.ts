@@ -7,6 +7,7 @@ import { shouldRunAnimations } from '../utils/animationActivity';
 import { useAnimationActivity } from '../hooks/useAnimationActivity';
 
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
+vi.mock('@react-native-async-storage/async-storage', () => ({ default: { getItem: vi.fn(async () => null) } }));
 
 function ActivityProbe({ enabled = true }: { enabled?: boolean }) {
   return React.createElement('ActivityProbe', { active: useAnimationActivity(enabled) });
@@ -24,11 +25,11 @@ describe('animation activity', () => {
     expect(shouldRunAnimations({ ...active, enabled: false })).toBe(false);
   });
 
-  test('is safe outside navigation and stops for hidden or inactive surfaces', () => {
+  test('is safe outside navigation and stops for hidden or inactive surfaces', async () => {
     __resetAppState();
     let tree!: TestRenderer.ReactTestRenderer;
-    act(() => { tree = TestRenderer.create(React.createElement(ActivityProbe)); });
-    expect(activityNode(tree).props.active).toBe(true);
+    await act(async () => { tree = TestRenderer.create(React.createElement(ActivityProbe)); });
+    await act(async () => { await vi.waitFor(() => expect(activityNode(tree).props.active).toBe(true)); });
 
     act(() => { tree.update(React.createElement(ActivityProbe, { enabled: false })); });
     expect(activityNode(tree).props.active).toBe(false);
@@ -37,7 +38,7 @@ describe('animation activity', () => {
     act(() => { tree.unmount(); });
   });
 
-  test('tracks route focus when navigation is available', () => {
+  test('tracks route focus when navigation is available', async () => {
     let focused = true;
     const listeners = new Map<string, () => void>();
     const navigation = {
@@ -48,7 +49,7 @@ describe('animation activity', () => {
       }),
     };
     let tree!: TestRenderer.ReactTestRenderer;
-    act(() => {
+    await act(async () => {
       tree = TestRenderer.create(React.createElement(NavigationContext.Provider, { value: navigation as unknown as React.ContextType<typeof NavigationContext> }, React.createElement(ActivityProbe)));
     });
     expect(activityNode(tree).props.active).toBe(true);

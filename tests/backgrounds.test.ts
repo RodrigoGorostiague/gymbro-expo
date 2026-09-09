@@ -60,6 +60,7 @@ describe('background cosmetics', () => {
     ]);
     expect(layers.every((layer) => layer.props.cachePolicy === 'memory-disk')).toBe(true);
     expect(getShopBackground('missing')).toBeUndefined();
+    await act(async () => { renderer.unmount(); });
   });
 
   test('reports an individual remote layer failure through the error callback', async () => {
@@ -72,6 +73,7 @@ describe('background cosmetics', () => {
       backgroundId: 'banzai',
       message: 'Background layer failed to load: network request failed',
     }));
+    await act(async () => { renderer.unmount(); });
   });
 
   test('subscribes to the accelerometer on Android without using device motion permissions', async () => {

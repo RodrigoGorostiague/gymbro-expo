@@ -1,3 +1,4 @@
+import { useLocalAtmosphere } from '../hooks/useLocalAtmosphere';
 import React, { createContext, useContext, useMemo } from 'react';
 import { AppTheme, LegacyAlias } from '../types';
 import { getShopTheme } from '../constants/shopThemes';
@@ -23,6 +24,7 @@ const ThemeContext = createContext<ThemeContextValue | null>(null);
 
 export function ThemeProvider({ children }: { children: React.ReactNode }) {
   const { user } = useAuth();
+  const atmosphere = useLocalAtmosphere();
   const {
     equippedThemeId,
     previewThemeId,
@@ -61,7 +63,7 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
 
   return (
     <ThemeContext.Provider
-      value={{ theme, dualThemes, isCombined, isShopTheme, isPreview: !!previewThemeId, backgroundId: previewBackgroundId ?? equippedBackgroundId }}
+      value={{ theme, dualThemes, isCombined, isShopTheme, isPreview: !!previewThemeId, backgroundId: previewBackgroundId ?? atmosphere ?? equippedBackgroundId }}
     >
       {children}
     </ThemeContext.Provider>

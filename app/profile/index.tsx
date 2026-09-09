@@ -1,5 +1,6 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { Alert, ScrollView, StyleSheet, Switch, Text, View } from 'react-native';
+import { useDirtyExitGuard } from '../../hooks/useDirtyExitGuard';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Alert, BackHandler, ScrollView, StyleSheet, Switch, Text, View } from 'react-native';
 import { router, useFocusEffect } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -68,6 +69,8 @@ function ProfileSetting({ label, value, onValueChange, primaryColor }: {
 
 export default function ProfileScreen() {
   const { theme } = useTheme();
+  const [section, setSection] = useState<'athlete' | 'identity' | 'privacy' | 'appearance'>('athlete');
+  const scrollRef = useRef<ScrollView>(null);
   const { experienceProgress, attempts, catalogMuscleGroups = [] } = useData();
   const { ownProfile, refreshOwnProfile, saveProfile } = useSocial();
   const [alias, setAlias] = useState('');
@@ -99,6 +102,26 @@ export default function ProfileScreen() {
   const muscleDistribution = useMemo(() => ownMuscleDistribution(attempts ?? [], catalogMuscleGroups), [attempts, catalogMuscleGroups]);
   const muscleBalanceTarget = useMemo(() => muscleBalanceTargetEntries(catalogMuscleGroups, muscleBalanceTargetId), [catalogMuscleGroups, muscleBalanceTargetId]);
   const displayedFrameId = previewFrameId ?? frameId;
+  const [baselineProfile, setBaselineProfile] = useState<Record<string, unknown> | null>(null);
+  const dirty = !!baselineProfile && (
+    alias !== stringOrEmpty(baselineProfile.alias) || about !== (stringRecord(baselineProfile.categories).about ?? '')
+    || avatarId !== avatarIdOrDefault(baselineProfile.avatarId) || frameId !== profileFrameIdOrDefault(baselineProfile.frameId)
+    || titleId !== (baselineProfile.titleId === null ? null : profileTitleIdOrDefault(baselineProfile.titleId))
+    || JSON.stringify(visibility) !== JSON.stringify(booleanRecord(baselineProfile.categoryVisibility))
+    || autoShare !== booleanOrDefault(baselineProfile.autoShareCompletedWorkouts)
+    || shareRoutine !== booleanOrDefault(baselineProfile.shareRoutineTemplate) || shareMesocycle !== booleanOrDefault(baselineProfile.shareMesocycleTemplate)
+    || shareSets !== booleanOrDefault(baselineProfile.sharePerformedSetDetails) || shareSocialActivity !== booleanOrDefault(baselineProfile.shareSocialActivity)
+    || shareSocialProgress !== booleanOrDefault(baselineProfile.shareSocialProgress) || shareSocialConsistency !== booleanOrDefault(baselineProfile.shareSocialConsistency)
+    || shareSocialStatistics !== booleanOrDefault(baselineProfile.shareSocialStatistics) || shareSocialMuscleDistribution !== booleanOrDefault(baselineProfile.shareSocialMuscleDistribution)
+    || muscleBalanceTargetId !== muscleBalanceTargetForId(baselineProfile.muscleBalanceTargetId)
+  );
+  useDirtyExitGuard(dirty, saving);
+  const draftSnapshot = { alias, about, avatarId, frameId, titleId, visibility, autoShare, shareRoutine, shareMesocycle, shareSets, shareSocialActivity, shareSocialProgress, shareSocialConsistency, shareSocialStatistics, shareSocialMuscleDistribution, muscleBalanceTargetId };
+  const latestDraft = useRef(draftSnapshot);
+  latestDraft.current = draftSnapshot;
+  const dirtyDraft = useRef(dirty);
+  dirtyDraft.current = dirty;
+
 
   useEffect(() => {
     if (!previewFrameId || !previewEndsAt) return undefined;
@@ -133,26 +156,34 @@ export default function ProfileScreen() {
     ]);
   };
 
-  useEffect(() => {
-    if (!profile) return;
+  const applyProfile = (profile: Record<string, unknown>, submitted?: typeof draftSnapshot) => {
+    // Reconcile only fields untouched since this save began; newer edits remain dirty.
+    const unchanged = (key: keyof typeof draftSnapshot) => !submitted
+      || JSON.stringify(latestDraft.current[key]) === JSON.stringify(submitted[key]);
+    setBaselineProfile(profile);
     const nextCategories = stringRecord(profile.categories);
-    setAlias(stringOrEmpty(profile.alias));
-    setAvatarId(avatarIdOrDefault(profile.avatarId));
-    setFrameId(profileFrameIdOrDefault(profile.frameId));
-    setTitleId(profile.titleId === null ? null : profileTitleIdOrDefault(profile.titleId));
+    if (unchanged('alias')) setAlias(stringOrEmpty(profile.alias));
+    if (unchanged('avatarId')) setAvatarId(avatarIdOrDefault(profile.avatarId));
+    if (unchanged('frameId')) setFrameId(profileFrameIdOrDefault(profile.frameId));
+    if (unchanged('titleId')) setTitleId(profile.titleId === null ? null : profileTitleIdOrDefault(profile.titleId));
     setCategories(nextCategories);
-    setAbout(nextCategories.about ?? '');
-    setVisibility(booleanRecord(profile.categoryVisibility));
-    setAutoShare(booleanOrDefault(profile.autoShareCompletedWorkouts));
-    setShareRoutine(booleanOrDefault(profile.shareRoutineTemplate));
-    setShareMesocycle(booleanOrDefault(profile.shareMesocycleTemplate));
-    setShareSets(booleanOrDefault(profile.sharePerformedSetDetails));
-    setShareSocialActivity(booleanOrDefault(profile.shareSocialActivity));
-    setShareSocialProgress(booleanOrDefault(profile.shareSocialProgress));
-    setShareSocialConsistency(booleanOrDefault(profile.shareSocialConsistency));
-    setShareSocialStatistics(booleanOrDefault(profile.shareSocialStatistics));
-    setShareSocialMuscleDistribution(booleanOrDefault(profile.shareSocialMuscleDistribution));
-    setMuscleBalanceTargetId(muscleBalanceTargetForId(profile.muscleBalanceTargetId));
+    if (unchanged('about')) setAbout(nextCategories.about ?? '');
+    if (unchanged('visibility')) setVisibility(booleanRecord(profile.categoryVisibility));
+    if (unchanged('autoShare')) setAutoShare(booleanOrDefault(profile.autoShareCompletedWorkouts));
+    if (unchanged('shareRoutine')) setShareRoutine(booleanOrDefault(profile.shareRoutineTemplate));
+    if (unchanged('shareMesocycle')) setShareMesocycle(booleanOrDefault(profile.shareMesocycleTemplate));
+    if (unchanged('shareSets')) setShareSets(booleanOrDefault(profile.sharePerformedSetDetails));
+    if (unchanged('shareSocialActivity')) setShareSocialActivity(booleanOrDefault(profile.shareSocialActivity));
+    if (unchanged('shareSocialProgress')) setShareSocialProgress(booleanOrDefault(profile.shareSocialProgress));
+    if (unchanged('shareSocialConsistency')) setShareSocialConsistency(booleanOrDefault(profile.shareSocialConsistency));
+    if (unchanged('shareSocialStatistics')) setShareSocialStatistics(booleanOrDefault(profile.shareSocialStatistics));
+    if (unchanged('shareSocialMuscleDistribution')) setShareSocialMuscleDistribution(booleanOrDefault(profile.shareSocialMuscleDistribution));
+    if (unchanged('muscleBalanceTargetId')) setMuscleBalanceTargetId(muscleBalanceTargetForId(profile.muscleBalanceTargetId));
+  };
+
+  useEffect(() => {
+    if (!profile || dirtyDraft.current || saving) return;
+    applyProfile(profile);
   }, [profile]);
 
   useFocusEffect(useCallback(() => {
@@ -168,6 +199,8 @@ export default function ProfileScreen() {
   }, [refreshOwnProfile]));
 
   const save = async () => {
+    if (saving) return;
+    const submitted = latestDraft.current;
     const nextCategories = { ...categories };
     delete nextCategories.trainingStyle;
     if (about) nextCategories.about = about;
@@ -175,7 +208,7 @@ export default function ProfileScreen() {
 
     setSaving(true);
     try {
-      await saveProfile({
+      const accepted = await saveProfile({
         alias,
         avatarId,
         frameId,
@@ -193,6 +226,8 @@ export default function ProfileScreen() {
         shareSocialMuscleDistribution,
         muscleBalanceTargetId,
       });
+      if (!accepted) throw new Error('No se pudo confirmar el perfil actualizado. Tus cambios siguen disponibles.');
+      applyProfile(accepted, submitted);
       Alert.alert('Perfil guardado', 'Tus ajustes de privacidad se actualizaron.');
     } catch (reason) {
       Alert.alert('No se pudo guardar', reason instanceof Error ? reason.message : 'Revisa el alias e inténtalo de nuevo.');
@@ -204,9 +239,12 @@ export default function ProfileScreen() {
   return (
     <ThemeBackground>
       <SafeAreaView style={styles.safe}>
-        <ScrollView contentContainerStyle={styles.scroll} keyboardShouldPersistTaps="handled">
+        <ScrollView ref={scrollRef} contentContainerStyle={styles.scroll} keyboardShouldPersistTaps="handled">
            <AppScreenHeader title="Perfil" subtitle="Tu identidad y privacidad" />
-           <GlassCard>
+           {dirty ? <View style={{ gap: 8 }}><Text accessibilityLiveRegion="polite" style={{ color: theme.primary }}>Cambios pendientes de guardar</Text><GlassButton title="Guardar cambios" loading={saving} onPress={() => void save()} /></View> : null}
+           <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>{([['athlete', 'Atleta'], ['identity', 'Identidad'], ['privacy', 'Privacidad'], ['appearance', 'Apariencia']] as const).map(([key, label]) => <HapticPressable key={key} accessibilityRole="tab" accessibilityLabel={label} accessibilityState={{ selected: section === key }} onPress={() => { setSection(key); scrollRef.current?.scrollTo({ y: 0, animated: false }); }} style={{ padding: 14, borderRadius: 16, borderWidth: 1, borderColor: theme.glassBorder, backgroundColor: section === key ? theme.primary : theme.glass }}><Text style={{ color: section === key ? theme.onPrimary : theme.text, fontWeight: '800' }}>{label}</Text></HapticPressable>)}</View>
+           <GlassButton title="Preferencias de entrenamiento" variant="secondary" onPress={() => router.push('/profile/preferences')} />
+           {section === 'athlete' ? <><GlassCard>
             <Text accessibilityRole="header" style={[styles.title, { color: theme.text }]}>Así te ve la comunidad</Text>
             <View style={[styles.preview, { backgroundColor: theme.glass, borderColor: theme.glassBorder }]}>
               <ProfileAvatar avatarId={avatarId} frameId={displayedFrameId} level={experienceProgress?.level} size={78} borderColor={theme.primary} />
@@ -226,7 +264,9 @@ export default function ProfileScreen() {
              <View style={styles.targetHeader}><View style={styles.targetCopy}><Text style={[styles.targetTitle, { color: theme.text }]}>Objetivo de distribución</Text><Text style={[styles.identityHint, { color: theme.textMuted }]}>{MUSCLE_BALANCE_TARGETS.find((target) => target.id === muscleBalanceTargetId)?.description}</Text></View><HapticPressable accessibilityRole="button" accessibilityLabel="Elegir objetivo muscular" onPress={() => setCustomizationSection((current) => current === 'target' ? null : 'target')} style={[styles.targetButton, { borderColor: theme.primary }]}><Text style={[styles.editAvatarText, { color: theme.primary }]}>Cambiar</Text></HapticPressable></View>
              {customizationSection === 'target' ? <View accessibilityRole="radiogroup" style={styles.targetOptions}>{MUSCLE_BALANCE_TARGETS.map((target) => <HapticPressable key={target.id} accessibilityRole="radio" accessibilityLabel={target.label} accessibilityState={{ selected: muscleBalanceTargetId === target.id }} onPress={() => { setMuscleBalanceTargetId(target.id); setCustomizationSection(null); }} style={[styles.targetOption, { borderColor: muscleBalanceTargetId === target.id ? theme.primary : theme.glassBorder, backgroundColor: muscleBalanceTargetId === target.id ? theme.glass : 'transparent' }]}><Text style={[styles.avatarOptionLabel, { color: theme.text }]}>{target.label}</Text><Text style={[styles.identityHint, { color: theme.textMuted }]}>{target.description}</Text></HapticPressable>)}</View> : null}
            </GlassCard>
-           <GlassCard>
+           </> : null}
+           {section === 'appearance' ? <GlassCard>
+            {previewFrameId ? <View style={{ alignItems: 'center', gap: 8, marginBottom: 16 }}><ProfileAvatar avatarId={avatarId} frameId={displayedFrameId} level={experienceProgress?.level} size={96} borderColor={theme.primary} /><Text accessibilityLiveRegion="polite" style={{ color: theme.primary }}>Previsualización: {previewSeconds}s</Text></View> : null}
             <View style={styles.identityRow}>
               <ProfileAvatar avatarId={avatarId} frameId={frameId} level={experienceProgress?.level} size={88} borderColor={theme.primary} />
               <View style={styles.identityCopy}>
@@ -257,7 +297,8 @@ export default function ProfileScreen() {
              })}</View> : null}
             <Text style={[styles.identityHint, { color: theme.textMuted }]}>Los cambios se ven arriba al instante y se aplican al guardar el perfil.</Text>
           </GlassCard>
-          <GlassCard>
+          : null}
+          {section === 'identity' ? <GlassCard>
             <Text accessibilityRole="header" style={[styles.title, { color: theme.text }]}>Perfil público</Text>
             <GlassInput placeholder="Alias público" value={alias} onChangeText={setAlias} autoCapitalize="none" />
             <GlassInput placeholder="Sobre ti" value={about} onChangeText={setAbout} style={styles.input} multiline />
@@ -271,7 +312,8 @@ export default function ProfileScreen() {
               />
             ))}
           </GlassCard>
-          <GlassCard>
+          : null}
+          {section === 'privacy' ? <GlassCard>
             <Text accessibilityRole="header" style={[styles.title, { color: theme.text }]}>Compartir entrenamientos</Text>
             <ProfileSetting label="Publicar resúmenes automáticamente" value={autoShare} onValueChange={setAutoShare} primaryColor={theme.primary} />
             <ProfileSetting label="Incluir plantilla de rutina" value={shareRoutine} onValueChange={setShareRoutine} primaryColor={theme.primary} />
@@ -279,12 +321,14 @@ export default function ProfileScreen() {
             <ProfileSetting label="Incluir detalle de series realizadas" value={shareSets} onValueChange={setShareSets} primaryColor={theme.primary} />
             <Text style={{ color: theme.textMuted }}>Estos controles aplican solo a publicaciones futuras. Las publicaciones existentes conservan su privacidad original.</Text>
           </GlassCard>
-          <GlassCard>
+          : null}
+          {section === 'appearance' ? <GlassCard>
             <Text accessibilityRole="header" style={[styles.title, { color: theme.text }]}>Fondos</Text>
             <ProfileSetting label="Parallax de fondos" value={backgroundParallaxEnabled} onValueChange={setBackgroundParallaxEnabled} primaryColor={theme.primary} />
-            <Text style={{ color: theme.textMuted }}>Usa el movimiento del dispositivo cuando haya un fondo equipado.</Text>
+            <Text style={{ color: theme.textMuted }}>Usa el movimiento del dispositivo cuando haya un fondo equipado. Este ajuste se guarda al cambiar, sin usar Guardar perfil.</Text>
           </GlassCard>
-          <GlassCard>
+          : null}
+          {section === 'privacy' ? <GlassCard>
             <Text accessibilityRole="header" style={[styles.title, { color: theme.text }]}>Perfil en tu círculo</Text>
             <Text style={[styles.identityHint, { color: theme.textMuted }]}>Tus conexiones aceptadas ven estos resúmenes sólo cuando estén habilitados.</Text>
             <ProfileSetting label="Actividad reciente" value={shareSocialActivity} onValueChange={setShareSocialActivity} primaryColor={theme.primary} />
@@ -293,15 +337,19 @@ export default function ProfileScreen() {
             <ProfileSetting label="Estadísticas resumidas" value={shareSocialStatistics} onValueChange={setShareSocialStatistics} primaryColor={theme.primary} />
             <ProfileSetting label="Distribución muscular" value={shareSocialMuscleDistribution} onValueChange={setShareSocialMuscleDistribution} primaryColor={theme.primary} />
           </GlassCard>
-          <GlassCard>
+          : null}
+          {section === 'athlete' ? <GlassCard>
             <Text accessibilityRole="header" style={[styles.title, { color: theme.text }]}>Mediciones</Text>
             <Text style={{ color: theme.textMuted }}>Actualizá peso, talla y perímetros de forma privada para seguir tu evolución.</Text>
             <GlassButton title="Actualizar antropometrías" variant="secondary" onPress={() => router.push('/profile/measurements')} />
           </GlassCard>
-          <GlassCard>
+          : null}
+          {section === 'privacy' ? <GlassCard>
             <Text accessibilityRole="header" style={[styles.title, { color: theme.text }]}>Privacidad</Text>
             <GlassButton title="Usuarios bloqueados" variant="secondary" onPress={() => router.push('/profile/blocked')} />
           </GlassCard>
+          : null}
+          <Text style={{ color: theme.textMuted }}>Los cambios de identidad, apariencia y privacidad se aplican al guardar. Si hay un error, tus cambios permanecen aquí.</Text>
           <GlassButton title={profile ? 'Guardar perfil' : 'Crear perfil'} loading={saving} disabled={saving} onPress={() => void save()} />
         </ScrollView>
       </SafeAreaView>

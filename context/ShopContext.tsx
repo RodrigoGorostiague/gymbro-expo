@@ -51,7 +51,7 @@ interface ShopContextValue {
   setCombineWithPartner: (value: boolean) => void;
   startPreview: (themeId: string) => void;
   stopPreview: () => void;
-  equipBackground: (backgroundId: string) => void;
+  equipBackground: (backgroundId: string) => Promise<boolean>;
   unequipBackground: () => void;
   startBackgroundPreview: (backgroundId: string) => void;
   stopBackgroundPreview: () => void;
@@ -68,6 +68,9 @@ const ShopContext = createContext<ShopContextValue | null>(null);
 export function ShopProvider({ children }: { children: React.ReactNode }) {
   const { user } = useAuth();
   const { attempts } = useData();
+  const backgroundAccount = useRef({ user });
+  if (backgroundAccount.current.user !== user) backgroundAccount.current = { user };
+
   const [shop, setShop] = useState<RewardWallet>(DEFAULT_SHOP);
   const [partnerEquippedThemeId, setPartnerEquippedThemeId] = useState<string | null>(null);
   const [previewThemeId, setPreviewThemeId] = useState<string | null>(null);
@@ -171,8 +174,13 @@ export function ShopProvider({ children }: { children: React.ReactNode }) {
     });
   }, [user]);
   const persistBackgroundPreferences = useCallback((equippedBackgroundId: string | null) => {
-    if (!user) return Promise.resolve();
-    return updateRewardBackgroundPreferences(equippedBackgroundId).then(setShop);
+    const account = backgroundAccount.current;
+    if (!user) return Promise.resolve(false);
+    return updateRewardBackgroundPreferences(equippedBackgroundId).then((next) => {
+      if (backgroundAccount.current !== account) return false;
+      setShop(next);
+      return next.equippedBackgroundId === equippedBackgroundId;
+    });
   }, [user]);
 
   const equipTheme = useCallback(
@@ -212,15 +220,18 @@ export function ShopProvider({ children }: { children: React.ReactNode }) {
     endPreview(false);
   }, [endPreview]);
 
-  const equipBackground = useCallback((backgroundId: string) => {
-    if (!shop.purchasedBackgroundIds.includes(backgroundId)) return;
+  const equipBackground = useCallback(async (backgroundId: string): Promise<boolean> => {
+    if (!shop.purchasedBackgroundIds.includes(backgroundId)) return false;
     clearBackgroundPreviewTimer();
     setPreviewBackgroundId(null);
-    void persistBackgroundPreferences(backgroundId);
+    try { return await persistBackgroundPreferences(backgroundId); }
+    catch { return false; }
   }, [clearBackgroundPreviewTimer, persistBackgroundPreferences, shop.purchasedBackgroundIds]);
 
   const unequipBackground = useCallback(() => {
-    void persistBackgroundPreferences(null);
+    void persistBackgroundPreferences(null).catch(() => {
+      Alert.alert('No se pudo quitar el fondo', 'Inténtalo nuevamente.');
+    });
   }, [persistBackgroundPreferences]);
 
   const startBackgroundPreview = useCallback((backgroundId: string) => {
@@ -284,8 +295,7 @@ export function ShopProvider({ children }: { children: React.ReactNode }) {
     const background = getShopBackground(backgroundId);
     if (!background) return false;
     if (shop.purchasedBackgroundIds.includes(backgroundId)) {
-      equipBackground(backgroundId);
-      return true;
+      return equipBackground(backgroundId);
     }
     try {
       const next = await purchaseRewardBackground(backgroundId);

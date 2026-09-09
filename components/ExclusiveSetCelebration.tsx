@@ -1,3 +1,4 @@
+import { useAnimationActivity } from '../hooks/useAnimationActivity';
 import { forwardRef, useImperativeHandle } from 'react';
 import { StyleSheet, View } from 'react-native';
 import Animated, {
@@ -44,6 +45,7 @@ export type SetCelebrationHandle = {
 
 export const ExclusiveSetCelebration = forwardRef<SetCelebrationHandle, { theme: AppTheme }>(function ExclusiveSetCelebration({ theme }, ref) {
   const progress = useSharedValue(1);
+  const animate = useAnimationActivity();
   const celebration = theme.celebration ?? DEFAULT_CELEBRATION;
   const particles = Array.from({ length: celebration.particleCount }, (_, index) => {
     const angle = (Math.PI * 2 * index) / celebration.particleCount - Math.PI / 2;
@@ -57,10 +59,11 @@ export const ExclusiveSetCelebration = forwardRef<SetCelebrationHandle, { theme:
 
   useImperativeHandle(ref, () => ({
     play: () => {
+      if (!animate) return;
       progress.value = 0;
       progress.value = withTiming(1, { duration: celebration.duration, easing: Easing.out(Easing.cubic) });
     },
-  }), [celebration.duration, progress]);
+  }), [celebration.duration, progress, animate]);
 
   const flashStyle = useAnimatedStyle(() => ({
     opacity: interpolate(progress.value, [0, 0.1, 0.55, 1], [0, 0.82, 0.12, 0]),

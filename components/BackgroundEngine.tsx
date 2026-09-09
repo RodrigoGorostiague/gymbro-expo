@@ -1,3 +1,5 @@
+import { isAtmosphereId } from '../hooks/useLocalAtmosphere';
+import { ProceduralAtmosphere } from './ProceduralAtmosphere';
 import React, { useCallback, useEffect, useMemo } from 'react';
 import { Platform, StyleSheet, View } from 'react-native';
 import { Image } from 'expo-image';
@@ -154,6 +156,7 @@ export function BackgroundEngine({ backgroundId, onError, parallax = true, anima
     reportError(error);
   }, [error, reportError]);
 
+  if (isAtmosphereId(backgroundId)) return <ProceduralAtmosphere id={backgroundId} animate={animate} />;
   if (!background || !renderer) return null;
   return <>{renderer({ backgroundId: background.id, layers, fallback: background.fallback, animate: animationActive, parallaxX, parallaxY, onError: reportError })}</>;
 }

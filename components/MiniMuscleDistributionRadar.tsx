@@ -13,5 +13,5 @@ export function MiniMuscleDistributionRadar({ data, color, fill }: { data: reado
   if (!max || !data.length) return null;
   const grid = svgPoints(data.map((_, index) => radarPoint(index, data.length, RADIUS, CENTER)));
   const shape = svgPoints(radarPoints(data.map((entry) => entry.value), max, RADIUS, CENTER, 3));
-  return <View accessible accessibilityRole="image" accessibilityLabel="Distribución muscular resumida"><Svg width={SIZE} height={SIZE} viewBox={`0 0 ${SIZE} ${SIZE}`}><Polygon points={grid} fill="none" stroke={color} strokeOpacity={0.35} strokeWidth={1} /><Polygon points={shape} fill={fill} fillOpacity={0.55} stroke={color} strokeWidth={1.5} /></Svg></View>;
+  return <View accessible accessibilityRole="image" accessibilityLabel={`Distribución muscular compartida: ${data.map((entry) => `${entry.label}: ${entry.value.toFixed(2)} puntos`).join('; ')}`}><Svg width={SIZE} height={SIZE} viewBox={`0 0 ${SIZE} ${SIZE}`}><Polygon points={grid} fill="none" stroke={color} strokeOpacity={0.35} strokeWidth={1} /><Polygon points={shape} fill={fill} fillOpacity={0.55} stroke={color} strokeWidth={1.5} /></Svg></View>;
 }

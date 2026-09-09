@@ -1,3 +1,5 @@
+import { familyForTheme } from '../constants/themeFamilies';
+import { ThemeFamilyTexture } from './ThemeFamilyTexture';
 import React, { useEffect } from 'react';
 import { Dimensions, StyleSheet, View, ViewStyle, StyleProp } from 'react-native';
 import { BlurView } from 'expo-blur';
@@ -24,13 +26,15 @@ const { width: W, height: H } = Dimensions.get('window');
 interface ThemeBackgroundProps {
   children: React.ReactNode;
   theme?: AppTheme;
+  calm?: boolean;
 }
 
-function SingleThemeBackground({ children, theme: themeOverride }: ThemeBackgroundProps) {
+function SingleThemeBackground({ children, theme: themeOverride, calm = false }: ThemeBackgroundProps) {
   const { theme: activeTheme, backgroundId } = useTheme();
   const theme = themeOverride ?? activeTheme;
+  const family = familyForTheme(theme);
   const breath = useSharedValue(0);
-  const animationActive = useAnimationActivity();
+  const animationActive = useAnimationActivity(!calm);
 
   useEffect(() => {
     cancelAnimation(breath);
@@ -62,15 +66,16 @@ function SingleThemeBackground({ children, theme: themeOverride }: ThemeBackgrou
         />
       </Animated.View>
 
-      {!themeOverride ? <BackgroundEngine backgroundId={backgroundId} /> : null}
+      {!themeOverride ? <BackgroundEngine backgroundId={backgroundId} animate={!calm} parallax={!calm} /> : null}
 
       <View style={styles.orbLayer} pointerEvents="none">
+        <ThemeFamilyTexture family={family.texture} color={theme.accent} opacity={0.1} />
         <AnimatedOrb active={animationActive} color={theme.primary} size={W * 0.55} left={W * 0.45} top={-H * 0.06} delay={0} />
         <AnimatedOrb active={animationActive} color={theme.accent} size={W * 0.28} left={-W * 0.08} top={H * 0.22} delay={500} />
         <AnimatedOrb active={animationActive} color={theme.secondary} size={W * 0.18} left={W * 0.62} top={H * 0.58} delay={900} />
       </View>
 
-      {theme.decoration ? (
+      {!calm && theme.decoration ? (
         <ThemeDecorations decoration={theme.decoration} theme={theme} />
       ) : null}
 
@@ -79,20 +84,20 @@ function SingleThemeBackground({ children, theme: themeOverride }: ThemeBackgrou
   );
 }
 
-export function ThemeBackground({ children, theme }: ThemeBackgroundProps) {
+export function ThemeBackground({ children, theme, calm = false }: ThemeBackgroundProps) {
   const { dualThemes, isCombined, backgroundId } = useTheme();
 
-  if (!theme && isCombined && dualThemes) {
+  if (!calm && !theme && isCombined && dualThemes) {
     return (
       <View style={styles.fill}>
         <DualLoginBackground rodaja={dualThemes.rodaja} brisas={dualThemes.brisas} />
-        <BackgroundEngine backgroundId={backgroundId} />
+        <BackgroundEngine backgroundId={backgroundId} animate={!calm} parallax={!calm} />
         {children}
       </View>
     );
   }
 
-  return <SingleThemeBackground theme={theme}>{children}</SingleThemeBackground>;
+  return <SingleThemeBackground theme={theme} calm={calm}>{children}</SingleThemeBackground>;
 }
 
 interface GlassCardProps {
@@ -108,6 +113,7 @@ interface GlassCardProps {
 export function GlassCard({ children, style, intensity = 50, noPadding, fill = false, blur = true, theme: themeOverride }: GlassCardProps) {
   const { theme: activeTheme, dualThemes, isCombined } = useTheme();
   const theme = themeOverride ?? activeTheme;
+  const family = familyForTheme(theme);
 
   const innerGlass =
     theme.blurTint === 'light' ? 'rgba(255,255,255,0.55)' : 'rgba(8,8,14,0.55)';
@@ -119,9 +125,10 @@ export function GlassCard({ children, style, intensity = 50, noPadding, fill = f
   ) as [string, string, ...string[]];
 
   return (
-    <View style={[styles.cardOuter, style]}>
-      <LinearGradient colors={borderColors} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={[styles.cardBorder, fill && styles.fill]}>
-        <View style={[styles.cardInner, fill && styles.fill]}>
+    <View style={[styles.cardOuter, { borderRadius: family.radius }, style]}>
+      <LinearGradient colors={borderColors} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={[styles.cardBorder, { borderRadius: family.radius, padding: family.border }, fill && styles.fill]}>
+        <View style={[styles.cardInner, { borderRadius: Math.max(2, family.radius - family.border) }, fill && styles.fill]}>
+          <ThemeFamilyTexture family={family.texture} color={theme.accent} opacity={0.07} />
           {blur ? <BlurView intensity={intensity} tint={theme.blurTint} style={[styles.cardBlur, fill && styles.fill]}>
             <View style={[noPadding ? undefined : styles.cardContent, fill && styles.fill, { backgroundColor: innerGlass }]}>
               {children}

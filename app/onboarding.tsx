@@ -63,7 +63,7 @@ export default function OnboardingScreen() {
       <Image source={require('../assets/gymbro-icon.png')} style={styles.logo} />
       <Text style={[styles.eyebrow, { color: theme.primary }]}>GYMBRO · {step}/2</Text>
       <Text style={[styles.title, { color: theme.text }]}>{step === 1 ? 'Tu punto de partida' : 'Medí tu progreso'}</Text>
-      <Text style={[styles.subtitle, { color: theme.textMuted }]}>{step === 1 ? 'Armemos tu identidad de atleta. Estos datos son privados.' : 'Podés cargar estas medidas ahora o actualizarlas cuando quieras desde tu perfil.'}</Text>
+      <Text style={[styles.subtitle, { color: theme.textMuted }]}>{step === 1 ? 'Tu alias es público. Tu nombre real, fecha de nacimiento, sexo y medidas pertenecen a tu perfil privado.' : 'Podés cargar estas medidas ahora o actualizarlas cuando quieras desde tu perfil.'}</Text>
     </LinearGradient>
     {step === 1 ? <View style={styles.form}>
       <GlassInput value={realName} onChangeText={setRealName} placeholder="Nombre real" autoCapitalize="words" accessibilityLabel="Nombre real" />
@@ -74,6 +74,7 @@ export default function OnboardingScreen() {
       <View style={styles.sexRow}>{(['male', 'female'] as const).map((candidate) => <GlassButton key={candidate} title={candidate === 'male' ? 'Masculino' : 'Femenino'} variant={sex === candidate ? 'primary' : 'secondary'} onPress={() => setSex(candidate)} />)}</View>
       <GlassButton title="Continuar" onPress={continueToMeasurements} />
     </View> : <View style={styles.form}>
+<Text style={{ color: theme.text, fontSize: 18, fontWeight: '800' }}>Después, elige tu primera rutina</Text><Text style={{ color: theme.textMuted }}>Puedes entrenar sin registrar medidas. Tu biblioteca y los planes que recibas estarán en Entrenar.</Text>
       <AnthropometricFields values={measurements} onChange={(type, value) => setMeasurements((current) => ({ ...current, [type]: value }))} theme={theme} />
       <GlassButton title="Finalizar" loading={saving} disabled={saving} onPress={() => void complete(true)} />
       <GlassButton title="Omitir por ahora" variant="secondary" disabled={saving} onPress={() => void complete(false)} />

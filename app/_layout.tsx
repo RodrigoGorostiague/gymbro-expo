@@ -1,3 +1,5 @@
+import { ReducedMotionConfig, ReduceMotion } from 'react-native-reanimated';
+import { useMotionPreference } from '../hooks/useSensoryPreferences';
 import 'react-native-gesture-handler';
 import 'react-native-reanimated';
 import React from 'react';
@@ -67,8 +69,10 @@ function ReleaseUpdatesNotice() {
 }
 
 export default function RootLayout() {
+  const motion = useMotionPreference();
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>
+    <ReducedMotionConfig mode={motion ? ReduceMotion.System : ReduceMotion.Always} />
     <SafeAreaProvider>
       <AuthProvider>
         <DataProvider>
@@ -81,53 +85,53 @@ export default function RootLayout() {
                 <NotificationRuntime />
                 <WelcomeGemRewardNotice />
                 <ReleaseUpdatesNotice />
-                <Stack screenOptions={{ headerShown: false, animation: 'fade' }}>
+                <Stack screenOptions={{ headerShown: false, animation: motion ? 'fade' : 'none' }}>
                 <Stack.Screen name="index" />
-                <Stack.Screen name="onboarding" options={{ animation: 'fade', gestureEnabled: false }} />
-                <Stack.Screen name="auth/update-password" options={{ animation: 'slide_from_bottom', presentation: 'modal' }} />
+                <Stack.Screen name="onboarding" options={{ animation: motion ? 'fade' : 'none', gestureEnabled: false }} />
+                <Stack.Screen name="auth/update-password" options={{ animation: motion ? 'slide_from_bottom' : 'none', presentation: 'modal' }} />
                 <Stack.Screen name="(tabs)" />
-                <Stack.Screen name="community/discover" options={{ animation: 'slide_from_right', presentation: 'card' }} />
-                <Stack.Screen name="community/circle" options={{ animation: 'slide_from_right', presentation: 'card' }} />
-                <Stack.Screen name="community/requests" options={{ animation: 'slide_from_right', presentation: 'card' }} />
-                <Stack.Screen name="community/plan-inbox" options={{ animation: 'slide_from_right', presentation: 'card' }} />
-                <Stack.Screen name="community/notifications" options={{ animation: 'slide_from_right', presentation: 'card' }} />
-                <Stack.Screen name="community/share-plan" options={{ animation: 'slide_from_bottom', presentation: 'modal' }} />
-                <Stack.Screen name="community/joint-workout" options={{ animation: 'slide_from_right', presentation: 'card' }} />
-                <Stack.Screen name="community/joint/[id]" options={{ animation: 'slide_from_right', presentation: 'card' }} />
-                <Stack.Screen name="profile/blocked" options={{ animation: 'slide_from_right', presentation: 'card' }} />
-                <Stack.Screen name="social/[uid]" options={{ animation: 'slide_from_right', presentation: 'card' }} />
-                <Stack.Screen name="social/recap/[id]" options={{ animation: 'slide_from_bottom', presentation: 'modal' }} />
+                <Stack.Screen name="community/discover" options={{ animation: motion ? 'slide_from_right' : 'none', presentation: 'card' }} />
+                <Stack.Screen name="community/circle" options={{ animation: motion ? 'slide_from_right' : 'none', presentation: 'card' }} />
+                <Stack.Screen name="community/requests" options={{ animation: motion ? 'slide_from_right' : 'none', presentation: 'card' }} />
+                <Stack.Screen name="community/plan-inbox" options={{ animation: motion ? 'slide_from_right' : 'none', presentation: 'card' }} />
+                <Stack.Screen name="community/notifications" options={{ animation: motion ? 'slide_from_right' : 'none', presentation: 'card' }} />
+                <Stack.Screen name="community/share-plan" options={{ animation: motion ? 'slide_from_bottom' : 'none', presentation: 'modal' }} />
+                <Stack.Screen name="community/joint-workout" options={{ animation: motion ? 'slide_from_right' : 'none', presentation: 'card' }} />
+                <Stack.Screen name="community/joint/[id]" options={{ animation: motion ? 'slide_from_right' : 'none', presentation: 'card' }} />
+                <Stack.Screen name="profile/blocked" options={{ animation: motion ? 'slide_from_right' : 'none', presentation: 'card' }} />
+                <Stack.Screen name="social/[uid]" options={{ animation: motion ? 'slide_from_right' : 'none', presentation: 'card' }} />
+                <Stack.Screen name="social/recap/[id]" options={{ animation: motion ? 'slide_from_bottom' : 'none', presentation: 'modal' }} />
                 <Stack.Screen
                   name="routine/[id]"
-                  options={{ animation: 'slide_from_right', presentation: 'card' }}
+                  options={{ animation: motion ? 'slide_from_right' : 'none', presentation: 'card' }}
                 />
                 <Stack.Screen
                   name="routine/create"
-                  options={{ animation: 'slide_from_bottom', presentation: 'modal' }}
+                  options={{ animation: motion ? 'slide_from_bottom' : 'none', presentation: 'modal' }}
                 />
                 <Stack.Screen
                   name="exercise/[id]"
-                  options={{ animation: 'slide_from_right', presentation: 'card' }}
+                  options={{ animation: motion ? 'slide_from_right' : 'none', presentation: 'card' }}
                 />
                 <Stack.Screen
                   name="mesocycle/create"
-                  options={{ animation: 'slide_from_bottom', presentation: 'modal' }}
+                  options={{ animation: motion ? 'slide_from_bottom' : 'none', presentation: 'modal' }}
                 />
                 <Stack.Screen
                   name="mesocycle/summary/[id]"
-                  options={{ animation: 'slide_from_right', presentation: 'card' }}
+                  options={{ animation: motion ? 'slide_from_right' : 'none', presentation: 'card' }}
                 />
                 <Stack.Screen
                   name="mesocycle/[id]"
-                  options={{ animation: 'slide_from_right', presentation: 'card' }}
+                  options={{ animation: motion ? 'slide_from_right' : 'none', presentation: 'card' }}
                 />
                 <Stack.Screen
                   name="routine/execute/[id]"
-                  options={{ animation: 'slide_from_right', presentation: 'fullScreenModal' }}
+                  options={{ animation: motion ? 'slide_from_right' : 'none', presentation: 'fullScreenModal' }}
                 />
                 <Stack.Screen
                   name="session/[id]"
-                  options={{ animation: 'slide_from_right', presentation: 'card' }}
+                  options={{ animation: motion ? 'slide_from_right' : 'none', presentation: 'card' }}
                 />
                 </Stack>
               </ThemeProvider>

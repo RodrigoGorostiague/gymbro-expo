@@ -1,10 +1,13 @@
 import React from 'react';
 import TestRenderer, { act } from 'react-test-renderer';
 import { beforeEach, describe, expect, test, vi } from 'vitest';
+import { Alert } from 'react-native';
 import { SHOP_BACKGROUNDS } from '../constants/backgrounds';
 
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
 
+const atmosphere = vi.hoisted(() => ({ selected: 'local-forge' as string | null, save: vi.fn(async (_value: unknown) => undefined) }));
+vi.mock('../hooks/useLocalAtmosphere', () => ({ ATMOSPHERES: [], useLocalAtmosphere: () => atmosphere.selected, getLocalAtmosphere: () => atmosphere.selected, saveLocalAtmosphere: atmosphere.save }));
 const auth = vi.hoisted(() => ({ user: 'rodaja' as string | null }));
 const shop = vi.hoisted(() => ({
   gems: 800,
@@ -121,4 +124,69 @@ describe('ShopScreen', () => {
     expect(engines.filter((engine) => engine.props.animate)).toHaveLength(1);
     expect(engines.find((engine) => engine.props.backgroundId === background.id)?.props.animate).toBe(true);
   });
+  test('restores an equipped paid background from local ambience without a purchase or unequip', async () => {
+    shop.purchasedBackgroundIds = ['banzai'];
+    shop.equippedBackgroundId = 'banzai';
+    atmosphere.selected = 'local-forge';
+    atmosphere.save.mockClear();
+    shop.purchaseBackground.mockClear();
+    shop.unequipBackground.mockClear();
+    let screen!: TestRenderer.ReactTestRenderer;
+    act(() => { screen = TestRenderer.create(React.createElement(ShopScreen)); });
+    act(() => { screen.root.findByProps({ testID: 'shop-tab-backgrounds' }).props.onPress(); });
+    act(() => { scheduledFrame?.(0); });
+    await act(async () => {
+      screen.root.find((node) => String(node.type) === 'HapticPressable' && node.props.accessibilityLabel === 'Restaurar fondo Banzai').props.onPress();
+    });
+    expect(atmosphere.save).toHaveBeenCalledWith(null);
+    expect(shop.purchaseBackground).not.toHaveBeenCalled();
+    expect(shop.unequipBackground).not.toHaveBeenCalled();
+    expect(shop.equippedBackgroundId).toBe('banzai');
+    act(() => screen.unmount());
+    shop.purchasedBackgroundIds = [];
+    shop.equippedBackgroundId = null;
+    atmosphere.selected = null;
+  });
+
+  test('waits for remote confirmation, blocks duplicate taps and preserves local choice on rejection', async () => {
+    shop.purchasedBackgroundIds = ['banzai']; shop.equippedBackgroundId = 'sakura';
+    atmosphere.selected = 'local-forge'; atmosphere.save.mockClear();
+    const alert = vi.spyOn(Alert, 'alert');
+    let finish!: (value: boolean) => void;
+    shop.equipBackground.mockImplementation(() => new Promise<boolean>((resolve) => { finish = resolve; }));
+    shop.equipBackground.mockClear();
+    let screen!: TestRenderer.ReactTestRenderer;
+    act(() => { screen = TestRenderer.create(React.createElement(ShopScreen)); });
+    act(() => { screen.root.findByProps({ testID: 'shop-tab-backgrounds' }).props.onPress(); });
+    act(() => { scheduledFrame?.(0); });
+    const action = () => screen.root.find((node) => String(node.type) === 'HapticPressable' && node.props.accessibilityLabel === 'Usar fondo Banzai').props.onPress();
+    act(() => { action(); action(); });
+    expect(shop.equipBackground).toHaveBeenCalledOnce();
+    expect(atmosphere.save).not.toHaveBeenCalled();
+    await act(async () => { finish(false); });
+    expect(atmosphere.save).not.toHaveBeenCalled();
+    expect(atmosphere.selected).toBe('local-forge');
+    expect(alert).toHaveBeenCalledWith('No se confirmó el fondo', expect.stringContaining('sigue activa'));
+    act(() => action());
+    await act(async () => { finish(true); });
+    expect(atmosphere.save).toHaveBeenCalledWith(null);
+    atmosphere.save.mockClear();
+    atmosphere.save.mockRejectedValueOnce(new Error('disk full'));
+    act(() => action());
+    await act(async () => { finish(true); });
+    expect(alert).toHaveBeenCalledWith('Fondo de cuenta confirmado', expect.stringContaining('Banzai está seleccionado en tu cuenta'));
+    expect(atmosphere.selected).toBe('local-forge');
+    atmosphere.save.mockClear();
+    act(() => action());
+    auth.user = 'brisas';
+    act(() => screen.update(React.createElement(ShopScreen)));
+    await act(async () => { finish(true); });
+    expect(atmosphere.save).not.toHaveBeenCalled();
+    act(() => screen.unmount());
+    shop.purchasedBackgroundIds = []; shop.equippedBackgroundId = null;
+    atmosphere.selected = null;
+    shop.equipBackground.mockReset();
+    alert.mockRestore();
+  });
+
 });

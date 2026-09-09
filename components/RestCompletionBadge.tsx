@@ -1,3 +1,4 @@
+import { useMotionPreference } from '../hooks/useSensoryPreferences';
 import React, { useEffect, useRef } from 'react';
 import { Animated as RNAnimated, StyleSheet, Text, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
@@ -16,6 +17,7 @@ export function RestCompletionBadge({ visible, onDismiss }: {
   onDismiss: () => void;
 }) {
   const { theme } = useTheme();
+  const motion = useMotionPreference();
   const entrance = useRef(new RNAnimated.Value(84)).current;
   const translateX = useSharedValue(0);
   const swipeStyle = useAnimatedStyle(() => ({ transform: [{ translateX: translateX.value }] }));
@@ -34,9 +36,14 @@ export function RestCompletionBadge({ visible, onDismiss }: {
 
   useEffect(() => {
     if (!visible) return;
-    RNAnimated.spring(entrance, { toValue: 0, useNativeDriver: true, friction: 9, tension: 75 }).start();
+    if (motion) RNAnimated.spring(entrance, { toValue: 0, useNativeDriver: true, friction: 9, tension: 75 }).start();
+    else entrance.setValue(0);
+  }, [entrance, visible, motion]);
+
+  useEffect(() => {
+    if (!visible) return;
     void import('../utils/restNotificationSound').then(({ playRestNotificationSound }) => playRestNotificationSound()).catch(() => undefined);
-  }, [entrance, visible]);
+  }, [visible]);
 
   if (!visible) return null;
 

@@ -1,12 +1,12 @@
 import { useContext, useEffect, useState } from 'react';
 import { AppState } from 'react-native';
 import { NavigationContext } from 'expo-router/react-navigation';
-import { useReducedMotion } from 'react-native-reanimated';
+import { useMotionPreference } from './useSensoryPreferences';
 import { shouldRunAnimations } from '../utils/animationActivity';
 
 export function useAnimationActivity(enabled = true) {
   const navigation = useContext(NavigationContext);
-  const reduceMotion = useReducedMotion();
+  const reduceMotion = !useMotionPreference();
   const [appActive, setAppActive] = useState(AppState.currentState === 'active');
   const [navigationFocused, setNavigationFocused] = useState(() => navigation?.isFocused() ?? true);
 

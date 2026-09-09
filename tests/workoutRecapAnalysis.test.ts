@@ -20,7 +20,8 @@ describe('WorkoutRecapAnalysis', () => {
     let tree: TestRenderer.ReactTestRenderer | undefined;
     await act(async () => { tree = TestRenderer.create(React.createElement(WorkoutRecapAnalysis, { recap: { id: 'recap-1', authorAlias: 'Alex', authorAvatarId: 'capigirl', authorThemeId: null, routineName: 'Upper', completedAt: '2026-08-08T10:00:00Z', durationSeconds: 3600, exerciseCount: 1, muscleGroupIds: [], metrics: { volume: 800 }, caption: null, createdAt: '2026-08-08T10:00:00Z', templateAvailable: false, mesocycleAvailable: false, isAuthor: false, reactionCount: 0, viewerHasReacted: false, comments: [], sharePayload: null, previousComparable: { id: 'recap-0', completedAt: '2026-08-01T10:00:00Z', durationSeconds: 3000, exerciseCount: 1, metrics: { volume: 700 } }, exercises: [{ name: 'Row', muscleGroupIds: ['back'], sets: [{ weight: 80, reps: 10, completed: true }, { weight: 80, reps: 8, completed: false }] }] } })); });
     const text = tree!.root.findAll((node) => String(node.type) === 'Text').map((node) => node.children.join(''));
-    expect(text).toEqual(expect.arrayContaining(['60 min', '1/2', '800 kg', 'Vs. último entrenamiento igual', '50 min · 1 ejercicios · +100 kg de volumen', 'Análisis por ejercicio', '80 kg × 10', 'Hecha', 'No realizada']));
+    expect(text).toEqual(expect.arrayContaining(['60 min', '1/2', 'Vs. último entrenamiento igual', '50 min · 1 ejercicios', 'Análisis por ejercicio', '80 de carga registrada × 10 reps', 'Hecha', 'No realizada']));
+    expect(text.join(' ')).not.toMatch(/\bkg\b|\+100/);
     const exercise = tree!.root.find((node) => String(node.type) === 'HapticPressable');
     await act(async () => { exercise.props.onPress(); });
     expect(exercise.props.accessibilityState.expanded).toBe(false);

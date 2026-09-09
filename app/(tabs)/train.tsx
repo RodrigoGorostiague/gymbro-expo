@@ -1,3 +1,4 @@
+import { TodayBriefing } from '../../components/TodayBriefing';
 import React, { useState } from 'react';
 import { Alert, Text } from 'react-native';
 import { router } from 'expo-router';
@@ -13,7 +14,7 @@ import { ActiveWorkoutCard } from '../../components/ActiveWorkoutCard';
 import { hasActiveWorkoutReentryIntegrity } from '../../utils/activeWorkoutReentry';
 
 export default function TrainEntryScreen() {
-  const { routines, mesocycles = [], dataState, dataError, retryData, activeWorkoutDraft, cancelActiveWorkout } = useData();
+  const { routines, attempts = [], mesocycles = [], dataState, dataError, retryData, activeWorkoutDraft, cancelActiveWorkout } = useData();
   const { theme } = useTheme();
   const [selectedView, setSelectedView] = useState<TrainView | null>(null);
 
@@ -24,7 +25,7 @@ export default function TrainEntryScreen() {
       ? activeWorkoutDraft
       : null;
     const activeMesocycle = mesocycles.find((mesocycle) => mesocycle.status === 'active');
-    const view = selectedView ?? (activeMesocycle || routines.length ? 'mesocycles' : 'routines');
+    const view = selectedView ?? (activeMesocycle ? 'mesocycles' : 'routines');
     const continueActiveWorkout = () => {
       if (!resumableDraft) return;
       const params: Record<string, string> = { id: resumableDraft.routineId };
@@ -37,6 +38,7 @@ export default function TrainEntryScreen() {
       router.push({ pathname: '/routine/execute/[id]', params });
     };
     const navigation = <>
+      <TodayBriefing mesocycle={activeMesocycle} routines={routines} attempts={attempts} active={!!resumableDraft} onRoutines={() => setSelectedView('routines')} />
       {resumableDraft ? <ActiveWorkoutCard draft={resumableDraft} onContinue={continueActiveWorkout} onCancel={() => Alert.alert('Cancelar entrenamiento', 'Se perderá el progreso de la sesión en curso.', [
         { text: 'Volver', style: 'cancel' },
         { text: 'Cancelar entrenamiento', style: 'destructive', onPress: () => void cancelActiveWorkout().catch((error) => Alert.alert('No se pudo cancelar el entrenamiento', error instanceof Error ? error.message : 'Inténtalo nuevamente.')) },

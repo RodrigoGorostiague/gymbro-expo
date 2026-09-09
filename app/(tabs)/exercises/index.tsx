@@ -3,6 +3,7 @@ import { FlatList, ScrollView, StyleSheet, Text, TextInput, View } from 'react-n
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
 import { AppScreenHeader } from '../../../components/AppScreenHeader';
+import { GlassButton } from '../../../components/UI';
 import { GlassCard, ThemeBackground } from '../../../components/GlassCard';
 import { HapticPressable } from '../../../components/HapticPressable';
 import { useData } from '../../../context/DataContext';
@@ -13,6 +14,9 @@ import { isSelectableMuscleParent, muscleGroupLabel } from '../../../utils/catal
 export default function ExercisesScreen() {
   const { theme } = useTheme();
   const { exercises, catalogMuscleGroups = [], filterCatalogExercises } = useData();
+  const [filterError, setFilterError] = useState('');
+  const [filterLoading, setFilterLoading] = useState(false);
+  const [filterRevision, setFilterRevision] = useState(0);
   const [filter, setFilter] = useState<string | null>(null);
   const [mode, setMode] = useState<CatalogParticipationMode>('all_roles');
   const [filtersExpanded, setFiltersExpanded] = useState(false);
@@ -30,17 +34,20 @@ export default function ExercisesScreen() {
 
   useEffect(() => {
     let active = true;
+    setFilterError('');
+    setFilterLoading(!!filter);
     if (!filter) {
       setFilteredExercises(exercises);
       return () => { active = false; };
     }
+    setFilteredExercises([]);
     void filterCatalogExercises(filter, mode).then((next) => {
       if (!active) return;
       const canonicalById = new Map(exercises.map((exercise) => [exercise.id, exercise]));
       setFilteredExercises(next.map((exercise) => canonicalById.get(exercise.id) ?? exercise));
-    });
+    }).catch(() => { if (active) setFilterError('No se pudo actualizar la selección.'); }).finally(() => { if (active) setFilterLoading(false); });
     return () => { active = false; };
-  }, [exercises, filter, filterCatalogExercises, mode]);
+  }, [exercises, filter, filterCatalogExercises, mode, filterRevision]);
 
   return (
     <ThemeBackground>
@@ -51,6 +58,7 @@ export default function ExercisesScreen() {
         />
 
         <TextInput
+          accessibilityLabel="Buscar ejercicio por nombre"
           value={exerciseQuery}
           onChangeText={setExerciseQuery}
           placeholder="Buscar ejercicio"
@@ -117,9 +125,13 @@ export default function ExercisesScreen() {
           ) : null}
         </View>
 
-        {visibleExercises.length === 0 ? (
+        {filterLoading ? <Text accessibilityLiveRegion="polite" style={{ color: theme.textMuted, padding: 16 }}>Buscando ejercicios…</Text> : null}
+        {filterError ? <GlassCard><Text accessibilityRole="alert" style={{ color: theme.text }}>{filterError}</Text><GlassButton title="Reintentar filtro" onPress={() => setFilterRevision((value) => value + 1)} /></GlassCard> : null}
+        {filter || exerciseQuery ? <GlassButton title="Limpiar búsqueda y filtros" variant="secondary" onPress={() => { setFilter(null); setExerciseQuery(''); setQuery(''); setMode('all_roles'); }} /> : null}
+        <Text style={{ color: theme.textMuted, paddingVertical: 10 }}>{filterLoading ? 'Actualizando selección' : `${visibleExercises.length} ejercicios disponibles`}</Text>
+        {!filterLoading && !filterError && visibleExercises.length === 0 ? (
           <GlassCard style={styles.emptyCard}>
-            <Text style={[styles.emptyTitle, { color: theme.text }]}>No hay ejercicios todavía</Text>
+            <Text style={[styles.emptyTitle, { color: theme.text }]}>{filter || exerciseQuery ? 'No encontramos coincidencias' : 'No hay ejercicios todavía'}</Text>
             <Text style={[styles.emptyText, { color: theme.textMuted }]}>No hay ejercicios para la selección actual.</Text>
           </GlassCard>
         ) : (

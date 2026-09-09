@@ -19,7 +19,7 @@ export const useAnimatedStyle = (factory: () => Record<string, unknown>) => fact
 export const useAnimatedProps = (factory: () => Record<string, unknown>) => factory();
 export const useSharedValue = (value: number) => ({ value });
 export const useReducedMotion = () => false;
-export const ReduceMotion = { System: 'system' };
+export const ReduceMotion = { System: 'system', Always: 'always' };
 export const cancelAnimation = () => undefined;
 export const withDelay = (_delay: number, value: any) => value;
 export const withRepeat = vi.fn((value: any) => value);
@@ -30,3 +30,9 @@ export const withTiming = (value: any, _config?: unknown, callback?: (finished: 
   return value;
 };
 export const runOnJS = (fn: any) => fn;
+
+const entrance: any = { duration: () => entrance, delay: () => entrance, reduceMotion: () => entrance };
+export const FadeInDown = entrance;
+export const FadeIn = entrance;
+export const ZoomIn = entrance;
+export const ReducedMotionConfig = () => null;

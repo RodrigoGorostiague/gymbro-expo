@@ -1,3 +1,4 @@
+import { useMotionPreference } from '../hooks/useSensoryPreferences';
 import { useLatestRequest } from '../hooks/useLatestRequest';
 import { useSocial } from '../context/SocialContext';
 import { publishWorkoutStartActivity } from '../services/workoutStartActivity';
@@ -37,6 +38,7 @@ function InAppNotificationBadge({ item, busy, canInviteWorkoutStart, onAct, onDi
   onDismiss: () => void;
 }) {
   const { theme } = useTheme();
+  const motion = useMotionPreference();
   const entrance = useRef(new RNAnimated.Value(84)).current;
   const translateX = useSharedValue(0);
   const isDismissing = useSharedValue(false);
@@ -67,9 +69,11 @@ function InAppNotificationBadge({ item, busy, canInviteWorkoutStart, onAct, onDi
     });
 
   useEffect(() => {
-    RNAnimated.spring(entrance, { toValue: 0, useNativeDriver: true, friction: 9, tension: 75 }).start();
-    playSocialNotificationSound();
-  }, [entrance]);
+    if (motion) RNAnimated.spring(entrance, { toValue: 0, useNativeDriver: true, friction: 9, tension: 75 }).start();
+    else entrance.setValue(0);
+  }, [entrance, motion]);
+
+  useEffect(() => { playSocialNotificationSound(); }, []);
 
   useEffect(() => {
     expiryTimeout.current = setTimeout(() => dismissWithSwipe(-1), 15_000);

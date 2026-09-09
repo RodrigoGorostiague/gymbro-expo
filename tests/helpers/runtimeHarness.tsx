@@ -1,6 +1,6 @@
 import React from 'react';
 import TestRenderer, { act, type ReactTestInstance, type ReactTestRenderer } from 'react-test-renderer';
-import { vi } from 'vitest';
+import { afterEach, vi } from 'vitest';
 import { __blurFocus, __setParams, router as expoRouter } from './expoRouterStub';
 import { Alert as nativeAlert, __resetAppState, __resetBackHandler } from './reactNativeStub';
 
@@ -159,7 +159,11 @@ vi.mock('../../../components/UI', uiMock);
 vi.mock('../../components/ProfileAvatar', () => ({ ProfileAvatar: createHost('ProfileAvatar') }));
 vi.mock('../../context/SocialContext', () => ({ useSocial: () => ({ circle: vi.fn(async () => ({ profiles: [], nextCursor: null })) }) }));
 
+const mountedRenderers = new Set<ReactTestRenderer>();
+
 export function resetRuntimeHarness() {
+  act(() => { mountedRenderers.forEach((renderer) => renderer.unmount()); });
+  mountedRenderers.clear();
   __blurFocus();
   __resetAppState();
   __resetBackHandler();
@@ -188,6 +192,7 @@ export function render(element: React.ReactElement): ReactTestRenderer {
   act(() => {
     renderer = TestRenderer.create(element);
   });
+  mountedRenderers.add(renderer);
   return renderer;
 }
 
@@ -230,3 +235,6 @@ export function findButtons(root: ReactTestInstance, title: string): ReactTestIn
 export function findInputs(root: ReactTestInstance, predicate: (node: ReactTestInstance) => boolean) {
   return root.findAll((node) => (node.type as any) === 'GlassInput' && predicate(node));
 }
+
+// Finish pending test-owned trees before async state updates can see the next test's mocks.
+afterEach(() => resetRuntimeHarness());

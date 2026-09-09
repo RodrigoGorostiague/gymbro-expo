@@ -1,3 +1,5 @@
+import { buildGuidedWeeks, REST_DAY } from '../../utils/planningPreview';
+import { deriveScheduleDateLabel } from '../../utils/mesocycles';
 import React, { useMemo, useState } from 'react';
 import { Alert, KeyboardAvoidingView, Platform, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { router } from 'expo-router';
@@ -19,12 +21,6 @@ const STATUS_OPTIONS: { value: MesocycleStatus; label: string }[] = [
   { value: 'active', label: 'Activo' },
 ];
 
-const buildWeeks = (durationWeeks: number): Mesocycle['weeks'] => Array.from({ length: durationWeeks }, (_, index) => ({
-  id: generateId(),
-  weekNumber: index + 1,
-  entries: [],
-}));
-
 const normalizeStartDate = (value: string) => {
   const trimmed = value.trim();
   if (!trimmed) return undefined;
@@ -36,7 +32,9 @@ const normalizeStartDate = (value: string) => {
 
 export default function CreateMesocycleScreen() {
   const { theme } = useTheme();
-  const { addMesocycle, mesocycles } = useData();
+  const { addMesocycle, mesocycles, routines = [] } = useData();
+  const [planningDays, setPlanningDays] = useState<Array<string | null>>(Array(7).fill(null));
+  const [selectedDay, setSelectedDay] = useState(0);
   const [name, setName] = useState('');
   const [goal, setGoal] = useState('');
   const [status, setStatus] = useState<MesocycleStatus>('draft');
@@ -65,7 +63,7 @@ export default function CreateMesocycleScreen() {
         status,
         durationWeeks: parsedWeeks,
         startDate: normalizedStartDate,
-        weeks: buildWeeks(parsedWeeks),
+        weeks: buildGuidedWeeks(parsedWeeks, planningDays, routines, generateId),
       };
       const overlap = findOverlappingMesocycle<Mesocycle>({ ...candidate, id: '__new_mesocycle__', createdAt: '' }, mesocycles);
       if (overlap) {
@@ -147,6 +145,20 @@ export default function CreateMesocycleScreen() {
               <Text style={[styles.hint, { color: theme.textMuted }]}>Elegí la fecha desde el selector. Al guardar validaremos que no se superponga con otro bloque vigente.</Text>
             </GlassCard>
 
+            <GlassCard style={styles.section}>
+              <Text accessibilityRole="header" style={{ color: theme.text, fontSize: 22, fontWeight: '900' }}>Diseña tu semana base</Text>
+              <Text style={{ color: theme.textMuted }}>Opcional. Elige cada día; se repetirá durante el bloque y podrás ajustar el calendario después. Los días sin asignar no son descansos implícitos.</Text>
+              <View style={{ gap: 8 }}>{planningDays.map((day, index) => <HapticPressable key={index} accessibilityRole="radio" accessibilityState={{ selected: selectedDay === index }} accessibilityLabel={`Día ${index + 1}, ${day === REST_DAY ? 'Descanso' : routines.find((routine) => routine.id === day)?.name ?? 'Sin asignar'}`} onPress={() => setSelectedDay(index)} style={{ minHeight: 48, borderRadius: 14, padding: 12, borderWidth: 1, borderColor: selectedDay === index ? theme.primary : theme.glassBorder }}><Text style={{ color: theme.text, fontWeight: '800' }}>{deriveScheduleDateLabel(startDate, index, 'es')?.weekday ?? `Día ${index + 1}`} · {day === REST_DAY ? 'Descanso' : routines.find((routine) => routine.id === day)?.name ?? 'Sin asignar'}</Text></HapticPressable>)}</View>
+              <Text style={{ color: theme.primary, fontWeight: '800' }}>Asignar al día {selectedDay + 1}</Text>
+              <View style={{ gap: 8 }}>{[[REST_DAY, 'Descanso'], ...routines.map((routine) => [routine.id, routine.name])].map(([id, label]) => <GlassButton key={id} title={label} variant="secondary" onPress={() => setPlanningDays((current) => current.map((day, index) => index === selectedDay ? id : day))} />)}<GlassButton title="Dejar sin asignar" variant="secondary" onPress={() => setPlanningDays((current) => current.map((day, index) => index === selectedDay ? null : day))} /></View>
+            </GlassCard>
+            <GlassCard style={styles.section}>
+              <Text accessibilityRole="header" style={{ color: theme.text, fontSize: 22, fontWeight: '900' }}>Vista previa de tu bloque</Text>
+              <Text style={{ color: theme.textMuted }}>{name.trim() || 'Tu próximo bloque'} · {Number.isInteger(parsedWeeks) && parsedWeeks > 0 && parsedWeeks <= 52 ? `${parsedWeeks} semanas` : 'Revisa la duración'} · {startDate || 'Inicio por definir'}</Text>
+              <Text style={{ color: theme.textMuted }}>{routines.length ? `${planningDays.filter((day) => day && day !== REST_DAY).length} días de entrenamiento · ${planningDays.filter((day) => day === REST_DAY).length} descansos explícitos por semana. Puedes ajustar cada semana después.` : 'Primero puedes crear una rutina; no necesitas un mesociclo para empezar a entrenar.'}</Text>
+              {!routines.length ? <GlassButton title="Crear una rutina primero" variant="secondary" onPress={() => router.push('/routine/create')} /> : null}
+              <Text style={{ color: theme.textMuted }}>1. Define el bloque · 2. Distribuye rutinas y descansos · 3. Revisa el calendario antes de entrenar.</Text>
+            </GlassCard>
             <GlassButton title="Crear mesociclo" onPress={save} disabled={isSaving} loading={isSaving} />
             <View style={styles.spacer} />
             <GlassButton title="Cancelar" onPress={() => router.back()} variant="secondary" disabled={isSaving} />

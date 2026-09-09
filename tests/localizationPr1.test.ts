@@ -35,7 +35,7 @@ describe('PR1 Spanish progress and history copy', () => {
     for (const value of [
       "'overview'", "'external-load'", "'bodyweight'",
       "resolveQuarantine('assign')", "resolveQuarantine('delete')",
-      "pathname: '/session/[id]'", 'YYYY-MM-DD', 'HH:MM',
+      "pathname: '/session/recap/[id]'", 'YYYY-MM-DD', 'HH:MM',
     ]) expect(sources).toContain(value);
   });
 });

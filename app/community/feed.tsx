@@ -1,7 +1,7 @@
 import { useLatestRequest } from '../../hooks/useLatestRequest';
 import { useAuth } from '../../context/AuthContext';
 import React, { useCallback, useEffect, useState } from 'react';
-import { Alert, RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Alert, FlatList, RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { router, useFocusEffect } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { AppScreenHeader } from '../../components/AppScreenHeader';
@@ -94,7 +94,7 @@ export default function CommunityFeedScreen() {
        setActivityCursor(activities.nextCursor);
     } catch (reason) {
       if (!currentRequest()) return;
-      if (!append) setRecaps([]);
+      // Preserve the last successful feed while clearly showing refresh failure.
       setError(reason instanceof Error ? reason.message : 'No se pudo actualizar el feed.');
     } finally {
       if (currentRequest()) setLoading(false);
@@ -137,7 +137,7 @@ export default function CommunityFeedScreen() {
 
   const recapCard = (recap: WorkoutRecap) => <View>
     <WorkoutPublicationCard recap={recap} now={now} onPress={() => router.push({ pathname: '/social/recap/[id]', params: { id: recap.id } })} onProfilePress={recap.authorId && !recap.isAuthor ? () => router.push({ pathname: '/social/[uid]', params: { uid: recap.authorId! } }) : undefined} onToggleReaction={!recap.isAuthor ? () => void toggleReaction(recap) : undefined} />
-    {recap.isAuthor ? <GlassButton title="Eliminar publicación" variant="secondary" onPress={() => void remove(recap)} /> : null}
+    {recap.isAuthor ? <GlassButton title="Eliminar publicación" variant="secondary" onPress={() => Alert.alert('Eliminar publicación', 'Esta acción elimina la publicación, no tu entrenamiento guardado.', [{ text: 'Conservar', style: 'cancel' }, { text: 'Eliminar', style: 'destructive', onPress: () => void remove(recap) }])} /> : null}
   </View>;
 
   const feed: FeedItem[] = [
@@ -155,25 +155,23 @@ export default function CommunityFeedScreen() {
     return <GlassCard style={styles.startCard}><View style={[styles.liveDot, { backgroundColor: theme.primary }]} /><ProfileAvatar avatarId={activity.authorAvatarId} frameId={activity.authorFrameId} size={38} borderColor={theme.primary} /><View style={styles.startCopy}><Text style={[styles.startTitle, { color: theme.text }]}>{activity.isAuthor ? 'Comenzaste' : `${activity.authorAlias} comenzó`} {activity.jointWorkoutId ? 'a entrenar juntos' : 'un entrenamiento'}</Text><ProfileTitleBadge titleId={activity.authorTitleId} /><Text style={{ color: theme.textMuted }}>{activity.routineName} · En vivo para tu círculo</Text></View><Text style={[styles.startTime, { color: theme.textMuted }]}>{formatRelativeTime(activity.startedAt, now)}</Text></GlassCard>;
   };
 
-  return <ThemeBackground><SafeAreaView style={styles.safe}><ScrollView testID="community-feed" contentContainerStyle={styles.scroll} keyboardShouldPersistTaps="handled" refreshControl={<RefreshControl refreshing={loading} onRefresh={() => void load()} tintColor={theme.primary} />}>
+  return <ThemeBackground><SafeAreaView style={styles.safe}><FlatList data={feed} keyExtractor={(item) => `${item.kind}-${item.id}`} initialNumToRender={8} testID="community-feed" contentContainerStyle={styles.scroll} keyboardShouldPersistTaps="handled" refreshControl={<RefreshControl refreshing={loading} onRefresh={() => void load()} tintColor={theme.primary} />} ListHeaderComponent={<View style={{ gap: 16 }}>
     <AppScreenHeader title="Comunidad" subtitle="Tu círculo se entrena con vos" />
     <View accessibilityRole="tablist" style={styles.destinations}>{primaryDestinations.map(({ label, href, badgeKey }) => {
       const count = badgeKey ? badges?.[badgeKey] ?? 0 : 0;
       return <HapticPressable key={href} accessibilityRole="tab" accessibilityLabel={`Abrir ${label}${count ? `, ${count} pendientes` : ''}`} onPress={() => router.push(href)} style={[styles.destination, { backgroundColor: theme.glass, borderColor: theme.glassBorder }]}><Text style={{ color: theme.text, fontWeight: '700' }}>{label}</Text>{badgeLabel(count) ? <View style={[styles.count, { backgroundColor: theme.primary }]}><Text style={styles.countText}>{badgeLabel(count)}</Text></View> : null}</HapticPressable>;
     })}</View>
-    <View style={[styles.pending, { borderColor: theme.glassBorder }]}><Text style={[styles.pendingTitle, { color: theme.textMuted }]}>PENDIENTES</Text><View style={styles.pendingActions}>{pendingDestinations.map(([label, href, key]) => {
-      const count = badges?.[key] ?? 0;
-      return <HapticPressable key={`${href}-${key}`} accessibilityRole="button" accessibilityLabel={`${label}${count ? `, ${count} nuevos` : ''}`} onPress={() => router.push(href)} style={styles.pendingAction}><Text style={{ color: theme.text }}>{label}</Text>{badgeLabel(count) ? <View style={[styles.count, { backgroundColor: theme.primary }]}><Text style={styles.countText}>{badgeLabel(count)}</Text></View> : null}</HapticPressable>;
-    })}</View></View>
-    <Text accessibilityRole="header" style={[styles.title, { color: theme.text }]}>Feed</Text>
-    {error ? <GlassCard><Text accessibilityRole="alert" style={{ color: theme.text }}>{error}</Text><GlassButton title="Reintentar" variant="secondary" onPress={() => void load()} /></GlassCard> : null}
+    <GlassButton title={badges?.total ? `Bandeja · ${badges.total} pendientes` : 'Abrir bandeja unificada'} variant="secondary" onPress={() => router.push('/community/inbox')} />
+    <Text accessibilityRole="header" style={[styles.title, { color: theme.text }]}>Tu círculo en movimiento</Text>
+    {error ? <GlassCard><Text accessibilityRole="alert" style={{ color: theme.text }}>{error}{feed.length ? ' Mostrando la última actualización disponible.' : ''}</Text><GlassButton title="Reintentar" variant="secondary" onPress={() => void load()} /></GlassCard> : null}
     {!loading && !error && !feed.length ? <GlassCard><Text style={{ color: theme.textMuted }}>Todavía no hay actividad de tus conexiones. Cuando alguien entrene, aparecerá acá.</Text></GlassCard> : null}
-    {feed.map((item, index) => <React.Fragment key={`${item.kind}-${item.id}`}>
+    </View>}
+    renderItem={({ item, index }) => <React.Fragment>
       {index === 0 || feedDayKey(feed[index - 1].publishedAt) !== feedDayKey(item.publishedAt) ? <View accessibilityRole="header" style={[styles.dateDivider, { borderColor: theme.glassBorder }]}><Text style={[styles.dateLabel, { color: theme.textMuted }]}>{formatFeedDay(item.publishedAt, now)}</Text></View> : null}
       {feedCard(item)}
-    </React.Fragment>)}
-    {recapCursor || activityCursor ? <GlassButton title={loading ? 'Cargando…' : 'Ver más'} disabled={loading} variant="secondary" onPress={() => void load(recapCursor, activityCursor, true)} /> : null}
-  </ScrollView></SafeAreaView></ThemeBackground>;
+    </React.Fragment>}
+    ListFooterComponent={recapCursor || activityCursor ? <GlassButton title={loading ? 'Cargando…' : 'Ver más'} disabled={loading} variant="secondary" onPress={() => void load(recapCursor, activityCursor, true)} /> : null}
+  /></SafeAreaView></ThemeBackground>;
 }
 
 const styles = StyleSheet.create({

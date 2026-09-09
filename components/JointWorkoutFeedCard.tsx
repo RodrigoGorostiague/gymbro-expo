@@ -38,7 +38,7 @@ function participantRecap(participant: JointParticipant, publishedAt: string): W
     routineName: participant.workout.routineName,
     durationSeconds: participant.workout.durationSeconds,
     exerciseCount: participant.workout.exercises.length,
-    metrics: { volume: participant.workout.exercises.reduce((total, exercise) => total + exercise.sets.reduce((sets, set) => sets + (set.completed ? set.weight * set.reps : 0), 0), 0) },
+    metrics: {},
     muscleGroupIds: [...counts.keys()] as WorkoutRecap['muscleGroupIds'],
     muscleDistribution: [...counts].map(([id, value]) => ({ id: id as WorkoutRecap['muscleGroupIds'][number], value })),
     caption: null,
@@ -82,6 +82,12 @@ export function JointWorkoutFeedCard({ workoutId, participants: previewParticipa
   };
 
   return <GlassCard style={styles.card}>
+    <View style={[styles.groupHero, { backgroundColor: theme.glass, borderColor: theme.primary }]}>
+      <Text style={[styles.groupEyebrow, { color: theme.primary }]}>CÍRCULO EN ACCIÓN</Text>
+      <Text style={[styles.groupHeadline, { color: theme.text }]}>Cada atleta.
+Un mismo impulso.</Text>
+      <View style={styles.groupScore}><Text style={[styles.groupNumber, { color: theme.primary }]}>{participants.length}</Text><Text style={{ color: theme.textMuted }}>participantes · sin comparar sus cargas</Text></View>
+    </View>
     <HapticPressable accessibilityRole="button" accessibilityLabel="Expandir entrenamiento conjunto" accessibilityState={{ expanded }} onPress={() => setExpanded((value) => !value)} style={styles.trigger}>
       <View style={styles.heading}><View><Text style={[styles.title, { color: theme.text }]}>Entrenamiento conjunto</Text><Text style={{ color: theme.textMuted }}>{expanded ? 'Ocultar participantes' : 'Ver participantes y resultados'}</Text></View><View style={styles.headingMeta}><Text style={[styles.publishedAt, { color: theme.textMuted }]}>{formatRelativeTime(publishedAt, now)}</Text><Ionicons name={expanded ? 'chevron-up' : 'chevron-down'} size={22} color={theme.primary} /></View></View>
       <View style={styles.people}>{participants.map((participant) => <View key={participant.id} style={styles.person}><ProfileAvatar avatarId={participant.avatarId} frameId={participant.frameId} size={30} borderColor={theme.primary} /><View style={styles.personCopy}><Text numberOfLines={1} style={{ color: theme.text }}>{participant.alias}</Text>{participant.titleId ? <ProfileTitleBadge titleId={participant.titleId} /> : null}</View></View>)}</View>
@@ -95,7 +101,12 @@ export function JointWorkoutFeedCard({ workoutId, participants: previewParticipa
 }
 
 const styles = StyleSheet.create({
-  card: { gap: 12, paddingVertical: 16 },
+  card: { gap: 16, paddingVertical: 16 },
+  groupHero: { padding: 22, borderWidth: 1, borderRadius: 28, borderBottomRightRadius: 6, gap: 14 },
+  groupEyebrow: { fontSize: 11, fontWeight: '900', letterSpacing: 1.3 },
+  groupHeadline: { fontSize: 29, fontWeight: '900', lineHeight: 34 },
+  groupScore: { flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', gap: 12 },
+  groupNumber: { fontSize: 52, fontWeight: '900' },
   trigger: { gap: 10 },
   heading: { alignItems: 'center', flexDirection: 'row', justifyContent: 'space-between' },
   headingMeta: { alignItems: 'flex-end' },

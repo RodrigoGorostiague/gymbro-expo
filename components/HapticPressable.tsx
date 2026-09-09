@@ -5,6 +5,7 @@ import { vibrateButtonPress } from '../utils/haptics';
 export function HapticPressable({ onPress, disabled, ...rest }: PressableProps) {
   return (
     <Pressable
+      accessibilityRole="button"
       {...rest}
       disabled={disabled}
       onPress={(event) => {

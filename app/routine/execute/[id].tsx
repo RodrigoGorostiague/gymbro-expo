@@ -11,6 +11,7 @@ import {
   NativeSyntheticEvent,
   Pressable,
   StyleSheet,
+  ScrollView,
   Text,
   View,
 } from 'react-native';
@@ -40,7 +41,7 @@ import { generateId } from '../../../utils/storage';
 import { classifyTrainingFinalizationError, isDefinitelyRejectedFinalization } from '../../../services/trainingState';
 import { createWorkoutAttempt } from '../../../utils/workoutAttempts';
 import { receiptTotal } from '../../../services/rewardWallet';
-import * as Haptics from 'expo-haptics';
+import * as Haptics from '../../../utils/sensoryHaptics';
 import { RewardReceipt } from '../../../types';
 import { matchesActiveWorkout } from '../../../utils/activeWorkoutReentry';
 import { reconcileActiveWorkoutTiming } from '../../../utils/activeWorkoutTiming';
@@ -56,6 +57,9 @@ import { getShopTheme } from '../../../constants/shopThemes';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import Animated, { cancelAnimation, Easing, FadeIn, ZoomIn, useAnimatedStyle, useSharedValue, withRepeat, withTiming } from 'react-native-reanimated';
+import { WorkoutVictory } from '../../../components/WorkoutVictory';
+import { nextWorkoutSet } from '../../../utils/workoutExperience';
+import { getSensoryPreferences } from '../../../utils/sensoryPreferences';
 import { useAnimationActivity } from '../../../hooks/useAnimationActivity';
 
 function readSingleParam(value: string | string[] | undefined): string | undefined {
@@ -211,6 +215,7 @@ export default function ExecuteRoutineScreen() {
   const [isJointBusy, setJointBusy] = useState(false);
   const [isJointExpanded, setJointExpanded] = useState(false);
   const [workoutRoutine, setWorkoutRoutine] = useState<Routine | null>(null);
+  const [focusMode, setFocusMode] = useState(false);
   const [pickerVisible, setPickerVisible] = useState(false);
   const [positionMenuExerciseId, setPositionMenuExerciseId] = useState<string | null>(null);
   const [pauseMenuVisible, setPauseMenuVisible] = useState(false);
@@ -683,7 +688,7 @@ export default function ExecuteRoutineScreen() {
   const finishFromPauseMenu = () => {
     if (jointCancellationStartedRef.current) return;
     setPauseMenuVisible(false);
-    void finishWorkout(jointWorkoutId ? 'circle' : undefined);
+    requestFinish('pause');
   };
 
   const cancelFromPauseMenu = async () => {
@@ -813,7 +818,7 @@ export default function ExecuteRoutineScreen() {
     const offset = Math.max(0, event.nativeEvent.contentOffset.y);
     const delta = offset - lastExerciseScrollOffsetRef.current;
     const shouldShow = offset < 12 || delta < -8;
-    const shouldHide = offset >= 12 && delta > 8;
+    const shouldHide = false;
 
     if ((shouldShow && !workoutControlsVisible) || (shouldHide && workoutControlsVisible)) {
       const visible = shouldShow;
@@ -851,8 +856,14 @@ export default function ExecuteRoutineScreen() {
     try {
       const next = { ...completedSets, [setKey]: true };
       setCompletedSets(next);
-      startRestTimer(next);
-      if (theme.interaction === 'set-celebration') setCelebrationRef.current?.play();
+      if (routine && nextWorkoutSet(routine, next)) startRestTimer(next);
+      else {
+        if (restRef.current) clearInterval(restRef.current);
+        restEndsAtMsRef.current = null;
+        setIsResting(false); setRestRemaining(0);
+        void updateCurrentActiveWorkout((draft) => ({ ...draft, completedSets: next, setValues: setValuesRef.current, restEndsAtMs: undefined }), true);
+      }
+      if (getSensoryPreferences().motion && theme.interaction === 'set-celebration') setCelebrationRef.current?.play();
     } finally {
       completingSetsRef.current.delete(setKey);
     }
@@ -965,7 +976,7 @@ export default function ExecuteRoutineScreen() {
       setRewardReceipt(finalized.receipt);
       setExperienceReceipt(finalized.experienceReceipt);
       setEarnedGems(receiptTotal(finalized.receipt));
-      void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => undefined);
+      if (getSensoryPreferences().haptics) void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => undefined);
       setPhase('done');
       if (jointCompletion) {
         setPendingJointCompletion(jointCompletion);
@@ -1054,7 +1065,7 @@ export default function ExecuteRoutineScreen() {
   };
 
   if (!routine) {
-    return <ThemeBackground><SafeAreaView style={[styles.safe, styles.center]}><GlassCard style={styles.doneCard}><Text style={[styles.doneTitle, { color: theme.text }]}>Entrenamiento no disponible</Text><Text style={[styles.doneMeta, { color: theme.textMuted }]}>Este entrenamiento ya no está disponible. Volvé a Entrenar para elegir una rutina vigente.</Text><View style={styles.spacer} /><GlassButton title="Volver a entrenar" onPress={() => router.replace('/(tabs)/train')} /></GlassCard></SafeAreaView></ThemeBackground>;
+    return <ThemeBackground calm><SafeAreaView style={[styles.safe, styles.center]}><GlassCard style={styles.doneCard}><Text style={[styles.doneTitle, { color: theme.text }]}>Entrenamiento no disponible</Text><Text style={[styles.doneMeta, { color: theme.textMuted }]}>Este entrenamiento ya no está disponible. Volvé a Entrenar para elegir una rutina vigente.</Text><View style={styles.spacer} /><GlassButton title="Volver a entrenar" onPress={() => router.replace('/(tabs)/train')} /></GlassCard></SafeAreaView></ThemeBackground>;
   }
 
   if (!lineageValidation.valid && !pendingFinalizationRef.current) {
@@ -1065,18 +1076,20 @@ export default function ExecuteRoutineScreen() {
       : lineageValidation.reason === 'non-executable-planned-session'
       ? 'Esta sesión está omitida, reprogramada o cancelada y no se puede ejecutar.'
       : 'La sesión programada ya no está disponible. Actualizá o reabrí el mesociclo antes de entrenar.';
-    return <ThemeBackground><SafeAreaView style={[styles.safe, styles.center]}><GlassCard style={styles.doneCard}><Text style={[styles.doneTitle, { color: theme.text }]}>Sesión desactualizada</Text><Text style={[styles.doneMeta, { color: theme.textMuted }]}>{message}</Text><View style={styles.spacer} /><GlassButton title={lineageValidation.mesocycleId ? 'Volver al mesociclo' : 'Volver a rutinas'} onPress={() => lineageValidation.mesocycleId ? router.replace(`/mesocycle/summary/${lineageValidation.mesocycleId}`) : router.replace('/(tabs)/routines')} /></GlassCard></SafeAreaView></ThemeBackground>;
+    return <ThemeBackground calm><SafeAreaView style={[styles.safe, styles.center]}><GlassCard style={styles.doneCard}><Text style={[styles.doneTitle, { color: theme.text }]}>Sesión desactualizada</Text><Text style={[styles.doneMeta, { color: theme.textMuted }]}>{message}</Text><View style={styles.spacer} /><GlassButton title={lineageValidation.mesocycleId ? 'Volver al mesociclo' : 'Volver a rutinas'} onPress={() => lineageValidation.mesocycleId ? router.replace(`/mesocycle/summary/${lineageValidation.mesocycleId}`) : router.replace('/(tabs)/routines')} /></GlassCard></SafeAreaView></ThemeBackground>;
   }
 
   if (phase === 'setup') {
     const hasDifferentActiveWorkout = !!activeWorkoutDraft
       && !matchesActiveWorkout(activeWorkoutDraft, { owner: user, routineId: routine.id, ...(lineage ? { lineage } : {}) });
     return (
-      <ThemeBackground>
+      <ThemeBackground calm>
         <SafeAreaView style={styles.safe}>
           <AppNavBar onBack={() => router.back()} backLabel="Cancelar" />
           <AppScreenHeader title={routine.name} subtitle="Configura el entrenamiento antes de iniciar" />
           <GlassCard>
+            <Text style={{ color: theme.text, fontSize: 22, fontWeight: '900', marginBottom: 8 }}>Tu sesión, a tu ritmo</Text>
+            <Text style={{ color: theme.textMuted, marginBottom: 16 }}>{routine.exercises.length} ejercicios · {routine.exercises.reduce((sum, exercise) => sum + exercise.sets.length, 0)} series planificadas</Text>
             <Text style={[styles.label, { color: theme.textMuted }]}>
               Temporizador de descanso (segundos)
             </Text>
@@ -1103,59 +1116,19 @@ export default function ExecuteRoutineScreen() {
     );
   }
 
-  if (phase === 'done') {
-    return (
-      <ThemeBackground>
-        <SafeAreaView style={[styles.safe, styles.center]}>
-          <GlassCard style={styles.doneCard}>
-            <Text style={styles.doneEmoji}>🎉</Text>
-            <Text style={[styles.doneTitle, { color: theme.text }]}>¡Entrenamiento completado!</Text>
-            <Text style={[styles.doneMeta, { color: theme.textMuted }]}>
-              Tiempo: {formatTime(elapsed)}
-            </Text>
-            <Text style={[styles.doneGems, { color: theme.primary }]}>
-              +{earnedGems} gemas
-            </Text>
-            {experienceReceipt ? <Animated.View entering={FadeIn.duration(220)} style={styles.experienceReceipt}>
-              <Animated.Text entering={ZoomIn.duration(360)} style={[styles.doneXp, { color: theme.secondary }]}>+{experienceReceipt.earnedXp} XP</Animated.Text>
-              <Text style={[styles.receiptLine, { color: theme.textMuted }]}>Nivel {experienceReceipt.progress.level} · {experienceReceipt.progress.rank}</Text>
-              <View style={[styles.xpTrack, { backgroundColor: theme.glassBorder }]}><View style={[styles.xpFill, { width: `${Math.min(100, experienceReceipt.progress.xpIntoLevel / experienceReceipt.progress.xpForNextLevel * 100)}%`, backgroundColor: theme.secondary }]} /></View>
-              {experienceReceipt.entries.some((entry) => entry.kind === 'personal_record') ? <Text style={[styles.receiptLine, { color: theme.secondary }]}>Nuevo récord personal</Text> : null}
-            </Animated.View> : null}
-            {rewardReceipt && (
-              <View style={styles.receipt}>
-                {rewardReceipt.entries.map((entry, index) => (
-                  <Text key={`${entry.kind}-${index}`} style={[styles.receiptLine, { color: theme.textMuted }]}>
-                    {entry.kind.replaceAll('_', ' ')}: +{entry.amount}
-                  </Text>
-                ))}
-                <Text style={[styles.receiptBalance, { color: theme.text }]}>Saldo: {rewardReceipt.balance} gemas</Text>
-                {rewardReceipt.weekly.target !== undefined && (
-                  <Text style={[styles.receiptLine, { color: theme.textMuted }]}>Semana: {rewardReceipt.weekly.completed ?? 0}/{rewardReceipt.weekly.target} rutinas</Text>
-                )}
-                {rewardReceipt.mesocycle?.next && (
-                  <Text style={[styles.receiptLine, { color: theme.textMuted }]}>{rewardReceipt.mesocycle.next}</Text>
-                )}
-              </View>
-            )}
-            {pendingJointCompletion ? <View style={[styles.jointPublicationStatus, { borderColor: theme.glassBorder, backgroundColor: theme.glass }]}>
-              <Text style={[styles.jointPublicationTitle, { color: theme.text }]}>Tu resultado conjunto todavía no se publicó</Text>
-              <Text style={[styles.jointPublicationCopy, { color: theme.textMuted }]}>{jointPublicationError ?? 'Sincronizando tu resultado con el entrenamiento conjunto...'}</Text>
-              <GlassButton title="Reintentar publicación" variant="secondary" disabled={isSyncingJointCompletion} onPress={() => void syncJointCompletion(pendingJointCompletion)} />
-              <WorkoutSaveIndicator visible={isSyncingJointCompletion} color={theme.glassBorder} textColor={theme.textMuted} />
-            </View> : null}
-            <View style={styles.spacer} />
-            <GlassButton
-              title="Volver a rutinas"
-              onPress={() => router.replace('/(tabs)/routines')}
-            />
-          </GlassCard>
-        </SafeAreaView>
-      </ThemeBackground>
-    );
+  if (phase === 'done' && attemptRef.current) {
+    const savedSession = attemptToSession(attemptRef.current);
+    return <ThemeBackground calm><SafeAreaView style={styles.safe}>
+      <ScrollView contentContainerStyle={{ paddingVertical: 24, paddingBottom: 32, gap: 16 }}>
+        <WorkoutVictory session={savedSession} experience={experienceReceipt} rewards={rewardReceipt} celebrate
+          onDetails={() => router.push(`/session/recap/${savedSession.id}`)} />
+        {pendingJointCompletion ? <GlassCard><Text accessibilityRole="alert" style={{ color: theme.text }}>Entrenamiento guardado. Publicación conjunta pendiente.</Text><Text style={{ color: theme.textMuted }}>{jointPublicationError ?? 'Sincronizando el resultado conjunto…'}</Text><GlassButton title="Reintentar publicación" variant="secondary" loading={isSyncingJointCompletion} onPress={() => void syncJointCompletion(pendingJointCompletion)} /></GlassCard> : null}
+      </ScrollView>
+      <View style={{ paddingVertical: 12 }}><GlassButton title="Listo · volver a entrenar" onPress={() => router.replace('/(tabs)/train')} /></View>
+    </SafeAreaView></ThemeBackground>;
   }
 
-  if (finalizationLocked) return <ThemeBackground><SafeAreaView style={[styles.safe, styles.center]}><GlassCard style={styles.doneCard}>
+  if (finalizationLocked) return <ThemeBackground calm><SafeAreaView style={[styles.safe, styles.center]}><GlassCard style={styles.doneCard}>
     <Text style={[styles.doneTitle, { color: theme.text }]}>Guardado pendiente</Text>
     <Text style={{ color: theme.textMuted }}>El resultado está pendiente de confirmación. Reintentá guardarlo antes de modificar o cancelar el entrenamiento.</Text>
     <GlassButton title="Reintentar guardado" disabled={isFinishing} onPress={() => void finishWorkout()} />
@@ -1165,6 +1138,33 @@ export default function ExecuteRoutineScreen() {
 
   const totalSets = routine.exercises.reduce((acc, e) => acc + e.sets.length, 0);
   const doneSets = Object.values(completedSets).filter(Boolean).length;
+  const nextSet = nextWorkoutSet(routine, completedSets);
+  const requestFinish = (origin: 'active' | 'pause' = 'active') => {
+    if (jointCancellationStartedRef.current || isFinishing) return;
+    if (doneSets >= totalSets) {
+      void finishWorkout(jointWorkoutId ? 'circle' : undefined);
+      return;
+    }
+    let decided = false;
+    const cancelIntent = () => {
+      if (decided) return;
+      decided = true;
+      if (origin === 'pause') setPauseMenuVisible(true);
+    };
+    Alert.alert('Guardar lo realizado', `${doneSets}/${totalSets} series realizadas. Las pendientes no se marcarán como completas.`, [
+      { text: origin === 'pause' ? 'Volver a la pausa' : 'Seguir entrenando', style: 'cancel', onPress: cancelIntent },
+      { text: 'Guardar sesión', onPress: () => {
+        decided = true;
+        void finishWorkout(jointWorkoutId ? 'circle' : undefined);
+      } },
+    ], origin === 'pause' ? { cancelable: true, onDismiss: cancelIntent } : undefined);
+  };
+  const changeRest = (seconds: number) => {
+    const restEndsAtMs = Date.now() + seconds * 1000;
+    if (seconds <= 0) { handleRestComplete(); void updateCurrentActiveWorkout((draft) => ({ ...draft, restEndsAtMs: undefined })); return; }
+    restEndsAtMsRef.current = restEndsAtMs; setRestRemaining(seconds);
+    void updateCurrentActiveWorkout((draft) => ({ ...draft, restEndsAtMs })); startRestCountdown(restEndsAtMs);
+  };
   const jointInviteLimit = jointWorkoutId ? jointParticipantInviteCapacity(jointTargets) : 3;
   const selectedJointInviteCount = selectedJointInviteIds.length;
   const selectedJointInviteMembers = selectedJointInviteIds.reduce((count, id) => count + (jointInviteCandidates.find((candidate) => candidate.id === id)?.groupMemberCount ?? 1), 0);
@@ -1172,7 +1172,7 @@ export default function ExecuteRoutineScreen() {
   const positionMenuExerciseIndex = positionMenuExercise ? routine.exercises.indexOf(positionMenuExercise) : -1;
 
   return (
-      <ThemeBackground>
+      <ThemeBackground calm>
       <SafeAreaView style={styles.safe}>
         <Animated.View pointerEvents={workoutControlsVisible ? 'auto' : 'none'} style={[styles.floatingWorkoutControls, floatingWorkoutControlsStyle]}>
           <GlassCard style={styles.workoutControlsGlass} noPadding>
@@ -1190,17 +1190,25 @@ export default function ExecuteRoutineScreen() {
               <Ionicons name="hourglass-outline" size={16} color={isResting ? theme.accent : theme.textMuted} />
               <Text style={[styles.fixedTimerValue, { color: isResting ? theme.accent : theme.textMuted }]}>{isResting ? formatTime(restRemaining) : formatTime(restTimerConfig)}</Text>
             </View>
+            {!pauseMenuVisible ? <HapticPressable accessibilityLabel="Finalizar sesión" accessibilityState={{ disabled: isFinishing }} disabled={isFinishing} onPress={() => requestFinish()} style={{ minWidth: 56, minHeight: 48, alignItems: 'center', justifyContent: 'center', gap: 2 }}><Ionicons name="checkmark-circle-outline" size={24} color={theme.primary} /><Text style={{ color: theme.text, fontSize: 10, fontWeight: '800' }}>Finalizar</Text></HapticPressable> : null}
             </View>
           </GlassCard>
           <WorkoutSaveIndicator visible={pendingSaveCount > 0 || isJointBusy} color={theme.glassBorder} textColor={theme.textMuted} />
         </Animated.View>
         <FlatList
-            data={routine.exercises}
+            data={focusMode && nextSet ? routine.exercises.filter((exercise) => exercise.id === nextSet.exerciseId) : routine.exercises}
             keyExtractor={(exercise) => exercise.id}
             style={styles.exerciseList}
             contentContainerStyle={styles.exerciseListContent}
             onScroll={handleExerciseScroll}
             scrollEventThrottle={16}
+            ListHeaderComponent={<View style={{ gap: 12, marginBottom: 16 }}>
+              <Text accessibilityRole="header" style={{ color: theme.text, fontSize: 26, fontWeight: '900' }}>{nextSet ? nextSet.exerciseName : 'Sesión lista para guardar'}</Text>
+              <Text style={{ color: theme.textMuted }}>{doneSets}/{totalSets} series realizadas{nextSet ? ` · Sigue: serie ${nextSet.setIndex + 1}` : ''}</Text>
+              <GlassButton title={focusMode ? 'Ver rutina completa' : 'Enfocar serie actual'} variant="secondary" onPress={() => setFocusMode(!focusMode)} />
+              {isResting ? <GlassCard blur={false}><Text accessibilityRole="header" style={{ color: theme.accent, fontSize: 28, fontWeight: '900', fontVariant: ['tabular-nums'] }}>{formatTime(restRemaining)} · Descanso</Text><Text style={{ color: theme.textMuted }}>{nextSet ? `Después: ${nextSet.exerciseName}, serie ${nextSet.setIndex + 1}` : 'Terminaste las series'}</Text><View style={{ flexDirection: 'row', gap: 12, marginTop: 12 }}><GlassButton title="+30 s" variant="secondary" onPress={() => changeRest(restRemaining + 30)} /><GlassButton title="Omitir descanso" variant="secondary" onPress={() => changeRest(0)} /></View></GlassCard> : null}
+              {!pauseMenuVisible ? <GlassButton title="Finalizar entrenamiento" loading={isFinishing} variant={nextSet ? 'secondary' : 'primary'} onPress={() => requestFinish()} /> : null}
+            </View>}
             ListFooterComponent={<GlassCard style={styles.addExerciseCard}>
              <HapticPressable
                accessibilityRole="button"
@@ -1215,7 +1223,7 @@ export default function ExecuteRoutineScreen() {
             renderItem={({ item: exercise, index: exIndex }) => <>
             <GlassCard style={styles.exerciseCard} blur={false}>
                 <Text style={[styles.exerciseName, { color: theme.text }]}>
-                  {exIndex + 1}. {exercise.name || 'Sin nombre'}
+                  {routine.exercises.findIndex((candidate) => candidate.id === exercise.id) + 1}. {exercise.name || 'Sin nombre'}
                 </Text>
                 {(() => {
                   const exerciseStarted = hasCompletedSessionExerciseSet(exercise, completedSets);
@@ -1250,6 +1258,7 @@ export default function ExecuteRoutineScreen() {
                 })()}
 
                 {exercise.sets.map((set, setIndex) => {
+                  if (focusMode && nextSet && set.id !== nextSet.setId) return null;
                  const setKey = `${exercise.id}-${set.id}`;
                   const completed = !!completedSets[setKey];
                   const values = setValues[setKey] ?? { weight: '', reps: '' };
@@ -1307,6 +1316,7 @@ export default function ExecuteRoutineScreen() {
                           {exercise.loadMode === 'bodyweight' ? 'Peso corporal' : exercise.loadMode === 'assisted' ? 'Asistencia' : 'Carga externa'} ({exercise.loadUnit ?? 'kg'})
                         </Text>
                         <GlassInput
+                          accessibilityLabel={`${exercise.name}, serie ${setIndex + 1}, carga en ${exercise.loadUnit ?? 'kg'}`}
                           style={styles.setInput}
                           keyboardType="decimal-pad"
                           value={values.weight}
@@ -1330,6 +1340,7 @@ export default function ExecuteRoutineScreen() {
                         <View style={styles.inputGroup}>
                           <Text style={[styles.fieldLabel, { color: theme.textMuted }]}>Repeticiones</Text>
                           <GlassInput
+                            accessibilityLabel={`${exercise.name}, serie ${setIndex + 1}, repeticiones`}
                             style={styles.setInput}
                             keyboardType="number-pad"
                             value={values.reps}
@@ -1361,6 +1372,8 @@ export default function ExecuteRoutineScreen() {
                       </HapticPressable>
                     ) : (
                       <HapticPressable
+                        accessibilityRole="button"
+                        accessibilityLabel={`Finalizar serie ${setIndex + 1} de ${exercise.name}`}
                         onPress={() => completeSet(setKey, set.tipo)}
                         style={({ pressed }) => [styles.completeBtn, { backgroundColor: theme.primary }, pressed && styles.completeBtnPressed]}
                       >
@@ -1434,7 +1447,7 @@ export default function ExecuteRoutineScreen() {
           </View>
         </Modal> : null}
 
-        <Modal
+        {pauseMenuVisible ? <Modal
           transparent
           animationType="fade"
           visible={pauseMenuVisible}
@@ -1459,7 +1472,7 @@ export default function ExecuteRoutineScreen() {
               </HapticPressable>
             </GlassCard>
           </View>
-        </Modal>
+        </Modal> : null}
 
         <ExercisePicker exercises={catalogExercises} routineMuscleGroups={[]} catalogMode visible={pickerVisible} onClose={() => setPickerVisible(false)} onSelect={addSessionExercise} />
 

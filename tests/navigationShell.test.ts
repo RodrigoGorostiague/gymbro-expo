@@ -178,16 +178,16 @@ describe('navigation shell', () => {
     expect(tree!.root.find((node) => node.props.testID === 'community-feed')).toBeDefined();
   });
 
-  test('keeps the shop, theme help, and logout surface under More', async () => {
+  test('organizes profile, preferences, inbox and optional rewards under More', async () => {
     let tree: TestRenderer.ReactTestRenderer;
     await act(async () => { tree = TestRenderer.create(React.createElement(MoreScreen)); });
 
-    expect(tree!.root.find((node) => String(node.type) === 'AppScreenHeader').props).toMatchObject({ title: 'Más', subtitle: 'Tienda, temas y ayuda' });
-    expect(tree!.root.findAll((node) => String(node.type) === 'LogoutButton')).toHaveLength(1);
+    expect(tree!.root.find((node) => String(node.type) === 'AppScreenHeader').props).toMatchObject({ title: 'Más', subtitle: 'Tu espacio, a tu manera' });
+    expect(tree!.root.findAll((node) => node.props.accessibilityLabel === 'Apariencia y recompensas').length).toBeGreaterThan(0);
   });
 
   test('presents the plan recipient picker as a full modal', () => {
-    expect(rootLayout).toContain('name="community/share-plan" options={{ animation: \'slide_from_bottom\', presentation: \'modal\' }}');
+    expect(rootLayout).toContain('name="community/share-plan" options={{ animation: motion ? \'slide_from_bottom\' : \'none\', presentation: \'modal\' }}');
     expect(rootLayout).not.toContain('presentation: \'formSheet\'');
   });
 });

@@ -22,8 +22,8 @@ import { subscribeToWorkoutStartActivityChanges } from '../services/workoutStart
 
 type SocialContextValue = {
   ownProfile: OwnProfile | null;
-  refreshOwnProfile: () => Promise<void>;
-  saveProfile: (profile: OwnProfileSave) => Promise<void>;
+  refreshOwnProfile: () => Promise<OwnProfile | null>;
+  saveProfile: (profile: OwnProfileSave) => Promise<OwnProfile | null>;
   discover: typeof getDiscoveryPage;
   search: typeof searchProfiles;
   circle: typeof getCirclePage;
@@ -64,7 +64,11 @@ export function SocialProvider({ children }: { children: React.ReactNode }) {
   const refreshOwnProfile = useCallback(async () => {
     const owner = user; const revision = ++profileRevision.current;
     const profile = await getOwnProfile();
-    if (account.current === owner && revision === profileRevision.current) setOwnProfile(profile);
+    if (account.current === owner && revision === profileRevision.current) {
+      setOwnProfile(profile);
+      return profile;
+    }
+    return null;
   }, [user]);
   const clearFailedAutoRecapSession = useCallback((sessionId: string) => setFailedAutoRecapSessionIds((current) => {
     if (!current.has(sessionId)) return current;
@@ -72,7 +76,7 @@ export function SocialProvider({ children }: { children: React.ReactNode }) {
   }), []);
   const saveProfile = useCallback(async (profile: OwnProfileSave) => {
     await saveOwnProfile(profile);
-    await refreshOwnProfile();
+    return refreshOwnProfile();
   }, [refreshOwnProfile]);
   useEffect(() => {
     let mounted = true;

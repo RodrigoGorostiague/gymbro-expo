@@ -299,10 +299,12 @@ describe('active workout re-entry', () => {
     press(screen.root.find((node) => node.props.accessibilityLabel === 'Pausar entrenamiento'));
     await vi.waitFor(() => expect(findText(screen.root, 'Entrenamiento pausado')).toBeTruthy());
     press(findButton(screen.root, 'Finalizar entrenamiento'));
+    const intent = mockAlert.alert.mock.calls.at(-1);
+    if (intent?.[0] === 'Guardar lo realizado') act(() => { intent[2]?.find((action: { text: string; onPress?: () => void }) => action.text === 'Guardar sesión')?.onPress?.(); });
 
-    await vi.waitFor(() => expect(findText(screen.root, '¡Entrenamiento completado!')).toBeTruthy());
-    expect(findText(screen.root, '+1 gemas')).toBeTruthy();
-    expect(findText(screen.root, 'Tu resultado conjunto todavía no se publicó')).toBeTruthy();
+    await vi.waitFor(() => expect(findText(screen.root, 'ENTRENAMIENTO GUARDADO')).toBeTruthy());
+    expect(findText(screen.root, 'Recompensas: +1 gemas · Saldo 12')).toBeTruthy();
+    expect(findText(screen.root, 'Entrenamiento guardado. Publicación conjunta pendiente.')).toBeTruthy();
     expect(queueJointWorkoutPublication).toHaveBeenCalledWith('rodaja', expect.objectContaining({ workoutId: 'joint-1' }));
     expect(finishJointWorkout).toHaveBeenCalledWith('rodaja', 'attempt-a', 'joint-1', 'circle', expect.objectContaining({ exercises: [expect.objectContaining({ muscleGroupIds: ['GM-101', 'GM-102'] })] }));
     expect(prepareJointWorkoutPublication.mock.invocationCallOrder[0]).toBeLessThan(addAttempt.mock.invocationCallOrder[0]);
@@ -310,7 +312,7 @@ describe('active workout re-entry', () => {
 
     press(findButton(screen.root, 'Reintentar publicación'));
     await vi.waitFor(() => expect(finishJointWorkout).toHaveBeenCalledTimes(2));
-    await vi.waitFor(() => expect(findText(screen.root, 'Tu resultado conjunto todavía no se publicó')).toBeUndefined());
+    await vi.waitFor(() => expect(findText(screen.root, 'Entrenamiento guardado. Publicación conjunta pendiente.')).toBeUndefined());
     expect(removePendingJointWorkoutPublication).toHaveBeenCalledWith('rodaja', 'joint-1');
     expect(addAttempt).toHaveBeenCalledTimes(1);
   });
@@ -332,6 +334,8 @@ describe('active workout re-entry', () => {
     press(screen.root.find((node) => node.props.accessibilityLabel === 'Pausar entrenamiento'));
     await vi.waitFor(() => expect(findText(screen.root, 'Entrenamiento pausado')).toBeTruthy());
     press(findButton(screen.root, 'Finalizar entrenamiento'));
+    const intent = mockAlert.alert.mock.calls.at(-1);
+    if (intent?.[0] === 'Guardar lo realizado') act(() => { intent[2]?.find((action: { text: string; onPress?: () => void }) => action.text === 'Guardar sesión')?.onPress?.(); });
 
     await vi.waitFor(() => expect(mockAlert.alert).toHaveBeenCalledWith(expect.any(String), expect.any(String)));
     expect(prepareJointWorkoutPublication.mock.invocationCallOrder[0]).toBeLessThan(addAttempt.mock.invocationCallOrder[0]);
@@ -356,6 +360,8 @@ describe('active workout re-entry', () => {
     press(screen.root.find((node) => node.props.accessibilityLabel === 'Pausar entrenamiento'));
     await act(async () => { await Promise.resolve(); });
     press(findButton(screen.root, 'Finalizar entrenamiento'));
+    const intent = mockAlert.alert.mock.calls.at(-1);
+    if (intent?.[0] === 'Guardar lo realizado') act(() => { intent[2]?.find((action: { text: string; onPress?: () => void }) => action.text === 'Guardar sesión')?.onPress?.(); });
     await act(async () => { await vi.advanceTimersByTimeAsync(12_000); });
 
     expect(prepareJointWorkoutPublication).toHaveBeenCalledWith('rodaja', expect.objectContaining({ attemptId: 'attempt-a', workoutId: 'joint-1' }));
@@ -512,7 +518,7 @@ describe('active workout re-entry', () => {
      expect(screen.root.findAll((node) => (node.type as any) === 'ScrollView')).toHaveLength(0);
     });
 
-    test('persists a completed set and its rest before hardware back leaves the session', async () => {
+    test('persists the final completed set without rest before hardware back leaves the session', async () => {
       const routineWithSet = {
         ...routineA,
         exercises: [{ id: 'exercise-1', name: 'Press', muscleGroups: ['pecho'], variant: 'bar', sets: [{ id: 'set-1', tipo: 1 as const, weight: 10, reps: 8 }] }],
@@ -526,13 +532,13 @@ describe('active workout re-entry', () => {
       });
 
       const screen = render(React.createElement(ExecuteRoutineScreen));
-      press(screen.root.findAll((node) => (node.type as any) === 'HapticPressable').find((node) => node.props.accessibilityLabel === undefined)!);
+      press(screen.root.findAll((node) => (node.type as any) === 'HapticPressable').find((node) => String(node.props.accessibilityLabel).startsWith('Finalizar serie '))!);
 
       await act(async () => { expect(__emitHardwareBackPress()).toBe(true); await Promise.resolve(); });
 
       expect(updateActiveWorkout).toHaveBeenCalledWith(expect.objectContaining({
         completedSets: { 'exercise-1-set-1': true },
-        restEndsAtMs: expect.any(Number),
+        restEndsAtMs: undefined,
       }));
       expect(mockRouter.back).toHaveBeenCalled();
     });
@@ -619,7 +625,7 @@ describe('active workout re-entry', () => {
         name: 'Press',
         loadMode: 'external' as const,
         loadUnit: 'kg' as const,
-        sets: [{ id: 'set-1', tipo: 1 as const, weight: 10, reps: 8 }],
+        sets: [{ id: 'set-1', tipo: 1 as const, weight: 10, reps: 8 }, { id: 'pending-set', tipo: 2 as const, weight: 10, reps: 8 }],
       }],
     };
     const updateActiveWorkout = vi.fn(() => new Promise<void>(() => undefined));
@@ -639,7 +645,7 @@ describe('active workout re-entry', () => {
      changeText(inputs[0], '10');
      changeText(inputs[1], '8');
      mockAlert.alert.mockClear();
-     press(screen.root.findAll((node) => (node.type as any) === 'HapticPressable').find((node) => node.props.accessibilityLabel === undefined)!);
+     press(screen.root.findAll((node) => (node.type as any) === 'HapticPressable').find((node) => String(node.props.accessibilityLabel).startsWith('Finalizar serie '))!);
      expect(mockAlert.alert).not.toHaveBeenCalled();
      expect(findText(screen.root, '00:03')).toBeTruthy();
     expect(vi.getTimerCount()).toBeGreaterThan(0);
@@ -667,6 +673,7 @@ describe('active workout re-entry', () => {
          sets: [
            { id: 'set-1', tipo: 1 as const, weight: 10, reps: 8 },
            { id: 'set-2', tipo: 2 as const, weight: 10, reps: 8 },
+           { id: 'pending-set', tipo: 3 as const, weight: 10, reps: 8 },
          ],
        }],
      };
@@ -681,7 +688,7 @@ describe('active workout re-entry', () => {
      const inputs = screen.root.findAll((node) => (node.type as any) === 'GlassInput');
      ['10', '8', '10', '8'].forEach((value, index) => changeText(inputs[index], value));
      const completeNextSet = () => press(screen.root.findAll((node) => (node.type as any) === 'HapticPressable')
-       .find((node) => node.props.accessibilityLabel === undefined)!);
+       .find((node) => String(node.props.accessibilityLabel).startsWith('Finalizar serie '))!);
 
      completeNextSet();
      act(() => { vi.advanceTimersByTime(2_000); });
@@ -722,7 +729,7 @@ describe('active workout re-entry', () => {
     const inputs = screen.root.findAll((node) => (node.type as any) === 'GlassInput');
     changeText(inputs[0], '10');
     changeText(inputs[1], '8');
-    press(screen.root.findAll((node) => (node.type as any) === 'HapticPressable').find((node) => node.props.accessibilityLabel === undefined)!);
+    press(screen.root.findAll((node) => (node.type as any) === 'HapticPressable').find((node) => String(node.props.accessibilityLabel).startsWith('Finalizar serie '))!);
 
      expect(inputs[0].props.editable).toBe(false);
      press(screen.root.find((node) => node.props.accessibilityLabel === 'Editar Serie 1'));
@@ -874,7 +881,65 @@ describe('finalization recovery boundaries', () => {
   function finish(screen: ReturnType<typeof render>) {
     press(screen.root.find((node) => node.props.accessibilityLabel === 'Pausar entrenamiento'));
     press(findButton(screen.root, 'Finalizar entrenamiento'));
+    const intent = mockAlert.alert.mock.calls.at(-1);
+    if (intent?.[0] === 'Guardar lo realizado') act(() => { intent[2]?.find((action: { text: string; onPress?: () => void }) => action.text === 'Guardar sesión')?.onPress?.(); });
   }
+  test('pause-menu partial finish requires explicit confirmation before persistence', async () => {
+    const addAttempt = vi.fn().mockResolvedValue(receipt);
+    const screen = setup(addAttempt, vi.fn(async () => undefined), { ...capturedDraft, completedSets: {} });
+    press(screen.root.find((node) => node.props.accessibilityLabel === 'Pausar entrenamiento'));
+    press(findButton(screen.root, 'Finalizar entrenamiento'));
+    await act(async () => { await Promise.resolve(); });
+    expect(addAttempt).not.toHaveBeenCalled();
+    const intent = mockAlert.alert.mock.calls.at(-1);
+    expect(intent?.[0]).toBe('Guardar lo realizado');
+    expect(intent?.[1]).toContain('0/1');
+    await act(async () => { intent?.[2]?.find((action: { text: string; onPress?: () => void }) => action.text === 'Guardar sesión')?.onPress?.(); });
+    expect(addAttempt).toHaveBeenCalledTimes(1);
+  });
+
+  test.each(['cancel button', 'Android dismissal'])('partial finish %s returns to an honest paused state', async (dismissal) => {
+    vi.useFakeTimers();
+    const addAttempt = vi.fn().mockResolvedValue(receipt);
+    const updateActiveWorkout = vi.fn(async (_draft?: any) => undefined);
+    const screen = setup(addAttempt, updateActiveWorkout, { ...capturedDraft, startedAtMs: Date.now(), completedSets: {} });
+    press(screen.root.find((node) => node.props.accessibilityLabel === 'Pausar entrenamiento'));
+    await act(async () => { await Promise.resolve(); });
+    const pausedAt = updateActiveWorkout.mock.calls.at(-1)?.[0] as any;
+    expect(pausedAt.pausedAtMs).toEqual(expect.any(Number));
+    press(findButton(screen.root, 'Finalizar entrenamiento'));
+    const intent = mockAlert.alert.mock.calls.at(-1);
+    expect(intent?.[2]?.find((action: { style?: string }) => action.style === 'cancel')?.text).toBe('Volver a la pausa');
+    act(() => {
+      if (dismissal === 'Android dismissal') intent?.[3]?.onDismiss?.();
+      else intent?.[2]?.find((action: { style?: string }) => action.style === 'cancel')?.onPress?.();
+    });
+    expect(findText(screen.root, 'Entrenamiento pausado')).toBeTruthy();
+    expect(findButton(screen.root, 'Reanudar')).toBeTruthy();
+    await act(async () => { await vi.advanceTimersByTimeAsync(5000); });
+    expect(addAttempt).not.toHaveBeenCalled();
+    expect((updateActiveWorkout.mock.calls.at(-1)?.[0] as any).pausedAtMs).toBe(pausedAt.pausedAtMs);
+    press(findButton(screen.root, 'Reanudar'));
+    await act(async () => { await Promise.resolve(); });
+    expect(findText(screen.root, 'Entrenamiento pausado')).toBeUndefined();
+    expect((updateActiveWorkout.mock.calls.at(-1)?.[0] as any).pausedAtMs).toBeUndefined();
+  });
+
+  test('active-origin partial finish cancellation leaves the workout active', async () => {
+    const addAttempt = vi.fn().mockResolvedValue(receipt);
+    const updateActiveWorkout = vi.fn(async (_draft?: any) => undefined);
+    const screen = setup(addAttempt, updateActiveWorkout, { ...capturedDraft, completedSets: {} });
+    press(findButton(screen.root, 'Finalizar entrenamiento'));
+    const intent = mockAlert.alert.mock.calls.at(-1);
+    const cancel = intent?.[2]?.find((action: { style?: string }) => action.style === 'cancel');
+    expect(cancel?.text).toBe('Seguir entrenando');
+    act(() => cancel?.onPress?.());
+    expect(findText(screen.root, 'Entrenamiento pausado')).toBeUndefined();
+    expect(screen.root.find((node) => node.props.accessibilityLabel === 'Pausar entrenamiento')).toBeTruthy();
+    expect(updateActiveWorkout.mock.calls.every(([value]) => value.pausedAtMs == null)).toBe(true);
+    expect(addAttempt).not.toHaveBeenCalled();
+  });
+
   test('bounds an unresolved canonical preflight and ignores its late resolution before retry', async () => {
     vi.useFakeTimers();
     const addAttempt = vi.fn().mockResolvedValue(receipt);
@@ -966,7 +1031,8 @@ describe('finalization recovery boundaries', () => {
     const addAttempt = vi.fn().mockRejectedValueOnce(new DefinitelyRejectedFinalizationError({ code: 'P0001', message: 'invalid training attempt input' })).mockResolvedValueOnce(receipt);
     const screen = setup(addAttempt, vi.fn(async () => undefined), { ...capturedDraft, completedSets: {} });
     finish(screen);
-    await vi.waitFor(() => expect(mockAlert.alert).toHaveBeenCalled());
+    await vi.waitFor(() => expect(addAttempt).toHaveBeenCalledTimes(1));
+    await vi.waitFor(() => expect(findButton(screen.root, 'Finalizar entrenamiento').props.loading).toBe(false));
     expect(screen.root.findAll((node) => (node.type as any) === 'GlassButton' && node.props.title === 'Reintentar guardado')).toHaveLength(0);
     const inputs = screen.root.findAll((node) => (node.type as any) === 'GlassInput');
     changeText(inputs[0], '25');
