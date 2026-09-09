@@ -1,6 +1,6 @@
 import { useDirtyExitGuard } from '../../hooks/useDirtyExitGuard';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Alert, BackHandler, ScrollView, StyleSheet, Switch, Text, View } from 'react-native';
+import { Alert, RefreshControl, ScrollView, StyleSheet, Switch, Text, View } from 'react-native';
 import { router, useFocusEffect } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -17,7 +17,9 @@ import { getOwnOnboarding } from '../../services/onboarding';
 import { ProfileAvatar } from '../../components/ProfileAvatar';
 import { ProfileTitleBadge } from '../../components/ProfileTitleBadge';
 import { HapticPressable } from '../../components/HapticPressable';
-import { ExperienceProgressCard } from '../../components/ExperienceProgressCard';
+import { ProfileAction, ProfileHistorySummary, ProfileOverview } from '../../components/ProfileOverview';
+import { summarizeProfileHistory } from '../../utils/profileOverview';
+import { useAuth } from '../../context/AuthContext';
 import { MuscleDistributionRadar } from '../../components/MuscleDistributionRadar';
 import { useData } from '../../context/DataContext';
 import { ownMuscleDistribution } from '../../utils/muscleDistribution';
@@ -54,9 +56,10 @@ function ProfileSetting({ label, value, onValueChange, primaryColor }: {
   onValueChange: (next: boolean) => void;
   primaryColor: string;
 }) {
+  const { theme } = useTheme();
   return (
-    <View style={styles.setting}>
-      <Text style={[styles.settingCopy, { color: primaryColor }]}>{label}</Text>
+    <View style={[styles.setting, { borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: theme.glassBorder }]}>
+      <Text style={[styles.settingCopy, { color: theme.text }]}>{label}</Text>
       <Switch
         accessibilityLabel={label}
         value={value}
@@ -68,10 +71,16 @@ function ProfileSetting({ label, value, onValueChange, primaryColor }: {
 }
 
 export default function ProfileScreen() {
+  const { user } = useAuth();
+  return <ProfileEditor key={user ?? 'signed-out'} ownerId={user} />;
+}
+
+function ProfileEditor({ ownerId }: { ownerId: string | null }) {
   const { theme } = useTheme();
   const [section, setSection] = useState<'athlete' | 'identity' | 'privacy' | 'appearance'>('athlete');
   const scrollRef = useRef<ScrollView>(null);
-  const { experienceProgress, attempts, catalogMuscleGroups = [] } = useData();
+  const { experienceProgress, attempts, sessions = [], isLoading: dataLoading, dataState, retryData, catalogMuscleGroups = [] } = useData();
+  const history = useMemo(() => summarizeProfileHistory(sessions), [sessions]);
   const { ownProfile, refreshOwnProfile, saveProfile } = useSocial();
   const [alias, setAlias] = useState('');
   const [categories, setCategories] = useState<Record<string, string>>({});
@@ -96,7 +105,16 @@ export default function ProfileScreen() {
   const [previewEndsAt, setPreviewEndsAt] = useState<number | null>(null);
   const [previewSeconds, setPreviewSeconds] = useState(0);
   const [saving, setSaving] = useState(false);
-  const profile = isRecord(ownProfile) ? ownProfile : null;
+  const saveInFlight = useRef(false);
+  const refreshRevision = useRef(0);
+  const [refreshing, setRefreshing] = useState(false);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const mounted = useRef(true);
+  useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
+  const profile = isRecord(ownProfile) && (typeof ownProfile.uid !== 'string' || ownProfile.uid === ownerId) ? ownProfile : null;
+  const latestConfirmedProfile = useRef<Record<string, unknown> | null>(profile);
+  // Track confirmed refreshes even while hydration is intentionally paused for a dirty draft.
+  useEffect(() => { latestConfirmedProfile.current = profile; }, [profile]);
   const { purchasedFrameIds } = useShop();
   const { enabled: backgroundParallaxEnabled, setEnabled: setBackgroundParallaxEnabled } = useBackgroundParallaxPreference();
   const muscleDistribution = useMemo(() => ownMuscleDistribution(attempts ?? [], catalogMuscleGroups), [attempts, catalogMuscleGroups]);
@@ -160,6 +178,7 @@ export default function ProfileScreen() {
     // Reconcile only fields untouched since this save began; newer edits remain dirty.
     const unchanged = (key: keyof typeof draftSnapshot) => !submitted
       || JSON.stringify(latestDraft.current[key]) === JSON.stringify(submitted[key]);
+    latestConfirmedProfile.current = profile;
     setBaselineProfile(profile);
     const nextCategories = stringRecord(profile.categories);
     if (unchanged('alias')) setAlias(stringOrEmpty(profile.alias));
@@ -186,20 +205,46 @@ export default function ProfileScreen() {
     applyProfile(profile);
   }, [profile]);
 
-  useFocusEffect(useCallback(() => {
-    const refresh = async () => {
-      try {
-        const [, onboarding] = await Promise.all([refreshOwnProfile(), getOwnOnboarding()]);
-        setSex(onboarding.sex);
-      } catch (reason) {
-        Alert.alert('Perfil no disponible', reason instanceof Error ? reason.message : 'Inténtalo de nuevo.');
-      }
-    };
-    void refresh();
-  }, [refreshOwnProfile]));
+  const refresh = useCallback(async () => {
+    const revision = ++refreshRevision.current;
+    const current = () => mounted.current && revision === refreshRevision.current;
+    setRefreshing(true);
+    setLoadError(null);
+    try {
+      // Avatar metadata failure must not hide an otherwise available profile.
+      await refreshOwnProfile();
+      const onboarding = await getOwnOnboarding();
+      if (current()) setSex(onboarding.sex);
+    } catch (reason) {
+      if (current()) setLoadError(reason instanceof Error ? reason.message : 'Inténtalo de nuevo.');
+    } finally {
+      if (current()) setRefreshing(false);
+    }
+  }, [refreshOwnProfile]);
+  useFocusEffect(useCallback(() => { void refresh(); }, [refresh]));
+
+  const selectSection = (next: typeof section) => {
+    setSection(next);
+    setCustomizationSection(null);
+    setPreviewFrameId(null);
+    setPreviewEndsAt(null);
+    scrollRef.current?.scrollTo({ y: 0, animated: false });
+  };
+  const discard = () => Alert.alert('¿Descartar los cambios?', 'Se restaurará la última versión guardada de tu perfil. Los ajustes del dispositivo no cambian.', [
+    { text: 'Seguir editando', style: 'cancel' },
+    { text: 'Descartar', style: 'destructive', onPress: () => {
+      if (!mounted.current || saveInFlight.current) return;
+      const confirmed = latestConfirmedProfile.current ?? baselineProfile;
+      if (confirmed) applyProfile(confirmed);
+      setPreviewFrameId(null);
+      setPreviewEndsAt(null);
+      setCustomizationSection(null);
+    } },
+  ]);
 
   const save = async () => {
-    if (saving) return;
+    if (saveInFlight.current) return;
+    saveInFlight.current = true;
     const submitted = latestDraft.current;
     const nextCategories = { ...categories };
     delete nextCategories.trainingStyle;
@@ -226,40 +271,39 @@ export default function ProfileScreen() {
         shareSocialMuscleDistribution,
         muscleBalanceTargetId,
       });
+      if (!mounted.current) return;
       if (!accepted) throw new Error('No se pudo confirmar el perfil actualizado. Tus cambios siguen disponibles.');
       applyProfile(accepted, submitted);
-      Alert.alert('Perfil guardado', 'Tus ajustes de privacidad se actualizaron.');
+      Alert.alert('Perfil guardado', 'Tu identidad, apariencia y privacidad están actualizadas.');
     } catch (reason) {
-      Alert.alert('No se pudo guardar', reason instanceof Error ? reason.message : 'Revisa el alias e inténtalo de nuevo.');
+      if (mounted.current) Alert.alert('No se pudo guardar', reason instanceof Error ? reason.message : 'Revisa el alias e inténtalo de nuevo.');
     } finally {
-      setSaving(false);
+      saveInFlight.current = false;
+      if (mounted.current) setSaving(false);
     }
   };
 
   return (
     <ThemeBackground>
       <SafeAreaView style={styles.safe}>
-        <ScrollView ref={scrollRef} contentContainerStyle={styles.scroll} keyboardShouldPersistTaps="handled">
-           <AppScreenHeader title="Perfil" subtitle="Tu identidad y privacidad" />
-           {dirty ? <View style={{ gap: 8 }}><Text accessibilityLiveRegion="polite" style={{ color: theme.primary }}>Cambios pendientes de guardar</Text><GlassButton title="Guardar cambios" loading={saving} onPress={() => void save()} /></View> : null}
-           <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>{([['athlete', 'Atleta'], ['identity', 'Identidad'], ['privacy', 'Privacidad'], ['appearance', 'Apariencia']] as const).map(([key, label]) => <HapticPressable key={key} accessibilityRole="tab" accessibilityLabel={label} accessibilityState={{ selected: section === key }} onPress={() => { setSection(key); scrollRef.current?.scrollTo({ y: 0, animated: false }); }} style={{ padding: 14, borderRadius: 16, borderWidth: 1, borderColor: theme.glassBorder, backgroundColor: section === key ? theme.primary : theme.glass }}><Text style={{ color: section === key ? theme.onPrimary : theme.text, fontWeight: '800' }}>{label}</Text></HapticPressable>)}</View>
-           <GlassButton title="Preferencias de entrenamiento" variant="secondary" onPress={() => router.push('/profile/preferences')} />
-           {section === 'athlete' ? <><GlassCard>
-            <Text accessibilityRole="header" style={[styles.title, { color: theme.text }]}>Así te ve la comunidad</Text>
-            <View style={[styles.preview, { backgroundColor: theme.glass, borderColor: theme.glassBorder }]}>
-              <ProfileAvatar avatarId={avatarId} frameId={displayedFrameId} level={experienceProgress?.level} size={78} borderColor={theme.primary} />
-              <View style={styles.previewCopy}>
-                <Text style={[styles.previewAlias, { color: theme.text }]}>{alias || 'Tu alias'}</Text>
-                <ProfileTitleBadge titleId={titleId} />
-                <Text style={[styles.previewRank, { color: theme.textMuted }]}>Nivel {experienceProgress?.level ?? 1} · {experienceProgress?.rank ?? 'Principiante'}</Text>
-                {previewFrameId ? <Text style={[styles.previewTimer, { color: theme.primary }]}>Previsualización: {previewSeconds}s</Text> : null}
-              </View>
-            </View>
-           </GlassCard>
-           <GlassCard><ExperienceProgressCard progress={experienceProgress} frameId={frameId} theme={theme} title="Tu rango" /></GlassCard>
+        <ScrollView ref={scrollRef} contentContainerStyle={styles.scroll} keyboardShouldPersistTaps="handled" refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => void refresh()} tintColor={theme.primary} />}>
+          <AppScreenHeader title="Perfil" subtitle="Una identidad que crece contigo" />
+          {loadError ? <GlassCard><Text accessibilityRole="alert" style={{ color: theme.text }}>No se pudo actualizar el perfil. {profile ? 'Conservamos la última información disponible.' : 'Reintenta para recuperar tus datos.'}</Text><Text style={{ color: theme.textMuted }}>{loadError}</Text><GlassButton title="Reintentar" variant="secondary" onPress={() => void refresh()} /></GlassCard> : null}
+          {refreshing && !profile ? <Text accessibilityLiveRegion="polite" style={{ color: theme.textMuted }}>Cargando tu perfil…</Text> : null}
+          {section === 'athlete' ? <ProfileOverview alias={alias} about={about} avatarId={avatarId} frameId={frameId} titleId={titleId} progress={experienceProgress ?? null} draft={dirty} onEdit={() => selectSection('identity')} onAppearance={() => selectSection('appearance')} /> : null}
+          <View style={styles.sectionNav}>{([
+            ['athlete', 'Atleta', 'Tu recorrido', 'fitness-outline'],
+            ['identity', 'Identidad', 'Tu voz', 'person-outline'],
+            ['appearance', 'Apariencia', 'Tu estilo', 'sparkles-outline'],
+            ['privacy', 'Privacidad', 'Tu control', 'shield-checkmark-outline'],
+          ] as const).map(([key, label, hint, icon]) => <HapticPressable key={key} accessibilityRole="tab" accessibilityLabel={label} accessibilityState={{ selected: section === key }} onPress={() => selectSection(key)} style={[styles.sectionTab, { borderColor: section === key ? theme.primary : theme.glassBorder, backgroundColor: section === key ? theme.primary : theme.glass }]}><Ionicons name={icon} size={20} color={section === key ? theme.onPrimary : theme.primary} /><View style={{ flex: 1 }}><Text style={{ color: section === key ? theme.onPrimary : theme.text, fontWeight: '800' }}>{label}</Text><Text style={{ color: section === key ? theme.onPrimary : theme.textMuted, fontSize: 11 }}>{hint}</Text></View></HapticPressable>)}</View>
+          {section === 'athlete' ? <>
+            <GlassCard>{dataLoading ? <Text accessibilityLiveRegion="polite" style={{ color: theme.textMuted }}>Cargando tu recorrido…</Text> : dataState === 'error' ? <><Text style={{ color: theme.text }}>No se pudo cargar tu historial.</Text><GlassButton title="Reintentar historial" variant="secondary" onPress={retryData} /></> : <ProfileHistorySummary summary={history} onHistory={() => router.push('/history')} onTrain={() => router.push('/(tabs)/train')} />}</GlassCard>
+            <View style={styles.quickActions}><ProfileAction icon="analytics-outline" label="Explorar mi progreso" hint="Tendencias y evolución" onPress={() => router.push('/(tabs)/progress')} /><ProfileAction icon="options-outline" label="Preferencias de entrenamiento" hint="Movimiento, sonido y vibración" onPress={() => router.push('/profile/preferences')} /></View>
            <GlassCard>
+            <Text style={[styles.eyebrow, { color: theme.primary }]}>EQUILIBRIO · TU ENFOQUE</Text>
             <Text accessibilityRole="header" style={[styles.title, { color: theme.text }]}>Tu distribución muscular</Text>
-             <Text style={[styles.identityHint, { color: theme.textMuted }]}>{shareSocialMuscleDistribution ? 'Así se ve tu distribución en tu círculo.' : 'Tu distribución está privada para tu círculo.'}</Text>
+             <Text style={[styles.identityHint, { color: theme.textMuted }]}>{shareSocialMuscleDistribution ? 'Compartir distribución está activado en este borrador.' : 'Compartir distribución está desactivado en este borrador.'}</Text>
              <MuscleDistributionRadar data={muscleDistribution} reference={muscleBalanceTarget} />
              <View style={styles.targetHeader}><View style={styles.targetCopy}><Text style={[styles.targetTitle, { color: theme.text }]}>Objetivo de distribución</Text><Text style={[styles.identityHint, { color: theme.textMuted }]}>{MUSCLE_BALANCE_TARGETS.find((target) => target.id === muscleBalanceTargetId)?.description}</Text></View><HapticPressable accessibilityRole="button" accessibilityLabel="Elegir objetivo muscular" onPress={() => setCustomizationSection((current) => current === 'target' ? null : 'target')} style={[styles.targetButton, { borderColor: theme.primary }]}><Text style={[styles.editAvatarText, { color: theme.primary }]}>Cambiar</Text></HapticPressable></View>
              {customizationSection === 'target' ? <View accessibilityRole="radiogroup" style={styles.targetOptions}>{MUSCLE_BALANCE_TARGETS.map((target) => <HapticPressable key={target.id} accessibilityRole="radio" accessibilityLabel={target.label} accessibilityState={{ selected: muscleBalanceTargetId === target.id }} onPress={() => { setMuscleBalanceTargetId(target.id); setCustomizationSection(null); }} style={[styles.targetOption, { borderColor: muscleBalanceTargetId === target.id ? theme.primary : theme.glassBorder, backgroundColor: muscleBalanceTargetId === target.id ? theme.glass : 'transparent' }]}><Text style={[styles.avatarOptionLabel, { color: theme.text }]}>{target.label}</Text><Text style={[styles.identityHint, { color: theme.textMuted }]}>{target.description}</Text></HapticPressable>)}</View> : null}
@@ -270,7 +314,7 @@ export default function ProfileScreen() {
             <View style={styles.identityRow}>
               <ProfileAvatar avatarId={avatarId} frameId={frameId} level={experienceProgress?.level} size={88} borderColor={theme.primary} />
               <View style={styles.identityCopy}>
-                <Text accessibilityRole="header" style={[styles.identityTitle, { color: theme.text }]}>Personalizá tu perfil</Text>
+                <Text accessibilityRole="header" style={[styles.identityTitle, { color: theme.text }]}>Diseña tu identidad</Text>
                 <Text style={{ color: theme.textMuted }}>Avatar, marco y título para tu comunidad.</Text>
               </View>
             </View>
@@ -299,9 +343,13 @@ export default function ProfileScreen() {
           </GlassCard>
           : null}
           {section === 'identity' ? <GlassCard>
-            <Text accessibilityRole="header" style={[styles.title, { color: theme.text }]}>Perfil público</Text>
-            <GlassInput placeholder="Alias público" value={alias} onChangeText={setAlias} autoCapitalize="none" />
-            <GlassInput placeholder="Sobre ti" value={about} onChangeText={setAbout} style={styles.input} multiline />
+            <Text style={[styles.eyebrow, { color: theme.primary }]}>PRESENTACIÓN</Text>
+            <Text accessibilityRole="header" style={[styles.title, { color: theme.text }]}>Una identidad propia</Text>
+            <Text style={[styles.sectionHint, { color: theme.textMuted }]}>Tu alias te identifica en la comunidad. Tu descripción cuenta lo que te mueve.</Text>
+            <Text style={[styles.fieldLabel, { color: theme.text }]}>Alias público</Text>
+            <GlassInput accessibilityLabel="Alias público" placeholder="Alias público" value={alias} onChangeText={setAlias} autoCapitalize="none" />
+            <Text style={[styles.fieldLabel, { color: theme.text }]}>Sobre ti</Text>
+            <GlassInput accessibilityLabel="Sobre ti" placeholder="Sobre ti" value={about} onChangeText={setAbout} style={styles.input} multiline />
             {categoryKeys.map((key) => (
               <ProfileSetting
                 key={key}
@@ -314,6 +362,7 @@ export default function ProfileScreen() {
           </GlassCard>
           : null}
           {section === 'privacy' ? <GlassCard>
+            <Text style={[styles.eyebrow, { color: theme.primary }]}>TÚ DECIDES QUÉ SE VE</Text>
             <Text accessibilityRole="header" style={[styles.title, { color: theme.text }]}>Compartir entrenamientos</Text>
             <ProfileSetting label="Publicar resúmenes automáticamente" value={autoShare} onValueChange={setAutoShare} primaryColor={theme.primary} />
             <ProfileSetting label="Incluir plantilla de rutina" value={shareRoutine} onValueChange={setShareRoutine} primaryColor={theme.primary} />
@@ -323,7 +372,8 @@ export default function ProfileScreen() {
           </GlassCard>
           : null}
           {section === 'appearance' ? <GlassCard>
-            <Text accessibilityRole="header" style={[styles.title, { color: theme.text }]}>Fondos</Text>
+            <Text accessibilityRole="header" style={[styles.title, { color: theme.text }]}>Tu ambiente de entrenamiento</Text>
+            <ProfileAction icon="color-palette-outline" label="Explorar temas y fondos" hint="Colecciones, colores y ambientes" onPress={() => router.push('/(tabs)/shop')} />
             <ProfileSetting label="Parallax de fondos" value={backgroundParallaxEnabled} onValueChange={setBackgroundParallaxEnabled} primaryColor={theme.primary} />
             <Text style={{ color: theme.textMuted }}>Usa el movimiento del dispositivo cuando haya un fondo equipado. Este ajuste se guarda al cambiar, sin usar Guardar perfil.</Text>
           </GlassCard>
@@ -339,7 +389,8 @@ export default function ProfileScreen() {
           </GlassCard>
           : null}
           {section === 'athlete' ? <GlassCard>
-            <Text accessibilityRole="header" style={[styles.title, { color: theme.text }]}>Mediciones</Text>
+            <Text style={[styles.eyebrow, { color: theme.primary }]}>SOLO PARA TI</Text>
+            <Text accessibilityRole="header" style={[styles.title, { color: theme.text }]}>Tu evolución, en privado</Text>
             <Text style={{ color: theme.textMuted }}>Actualizá peso, talla y perímetros de forma privada para seguir tu evolución.</Text>
             <GlassButton title="Actualizar antropometrías" variant="secondary" onPress={() => router.push('/profile/measurements')} />
           </GlassCard>
@@ -349,9 +400,10 @@ export default function ProfileScreen() {
             <GlassButton title="Usuarios bloqueados" variant="secondary" onPress={() => router.push('/profile/blocked')} />
           </GlassCard>
           : null}
-          <Text style={{ color: theme.textMuted }}>Los cambios de identidad, apariencia y privacidad se aplican al guardar. Si hay un error, tus cambios permanecen aquí.</Text>
-          <GlassButton title={profile ? 'Guardar perfil' : 'Crear perfil'} loading={saving} disabled={saving} onPress={() => void save()} />
+          {section !== 'athlete' ? <><Text style={{ color: theme.textMuted }}>Los cambios de identidad, apariencia y privacidad se aplican al guardar. Si hay un error, tus cambios permanecen aquí.</Text>
+          {!profile ? <GlassButton title="Crear perfil" loading={saving} disabled={saving || refreshing} onPress={() => void save()} /> : !dirty ? <Text accessibilityLiveRegion="polite" style={{ color: theme.primary }}>Todo guardado</Text> : null}</> : null}
         </ScrollView>
+        {dirty ? <View style={[styles.saveDock, { backgroundColor: theme.background?.[0] ?? theme.glass, borderColor: theme.glassBorder }]}><Text accessibilityLiveRegion="polite" style={{ color: theme.text, fontWeight: '800' }}>Cambios pendientes de guardar</Text><View style={styles.dockActions}><HapticPressable accessibilityRole="button" accessibilityLabel="Descartar cambios" accessibilityState={{ disabled: saving }} disabled={saving} onPress={discard} style={styles.discard}><Text style={{ color: theme.textMuted, fontWeight: '700' }}>Descartar</Text></HapticPressable><View style={{ flex: 1 }}><GlassButton title="Guardar cambios" loading={saving} onPress={() => void save()} /></View></View></View> : null}
       </SafeAreaView>
     </ThemeBackground>
   );
@@ -359,8 +411,17 @@ export default function ProfileScreen() {
 
 const styles = StyleSheet.create({
   safe: { flex: 1 },
-  scroll: { padding: 20, gap: 12, paddingBottom: 36 },
-  title: { fontSize: 18, fontWeight: '800', marginBottom: 10 },
+  scroll: { padding: 20, gap: 18, paddingBottom: 40, maxWidth: 760, width: '100%', alignSelf: 'center' },
+  sectionNav: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
+  sectionTab: { flexGrow: 1, flexBasis: '45%', flexDirection: 'row', gap: 10, alignItems: 'center', padding: 14, borderRadius: 18, borderWidth: 1, minHeight: 62 },
+  quickActions: { gap: 10 },
+  eyebrow: { fontSize: 10, fontWeight: '900', letterSpacing: 1.4, marginBottom: 8 },
+  fieldLabel: { fontSize: 13, fontWeight: '800', marginTop: 14, marginBottom: 8 },
+  sectionHint: { fontSize: 14, lineHeight: 21, marginBottom: 8 },
+  saveDock: { padding: 16, gap: 10, borderTopWidth: 1, width: '100%', maxWidth: 760, alignSelf: 'center' },
+  dockActions: { flexDirection: 'row', alignItems: 'center', gap: 12 },
+  discard: { padding: 12, minHeight: 48, justifyContent: 'center' },
+  title: { fontSize: 22, fontWeight: '800', marginBottom: 10 },
   input: { marginTop: 10 },
   preview: { alignItems: 'center', borderRadius: 18, borderWidth: 1, flexDirection: 'row', gap: 16, padding: 14 },
   previewCopy: { flex: 1, gap: 6 },
@@ -381,7 +442,7 @@ const styles = StyleSheet.create({
   titlePreview: { alignItems: 'center', justifyContent: 'center', minHeight: 62, position: 'relative' },
   frameLock: { alignItems: 'center', backgroundColor: 'rgba(15,23,42,0.88)', borderColor: 'rgba(255,255,255,0.45)', borderRadius: 999, borderWidth: 1, bottom: -3, height: 22, justifyContent: 'center', position: 'absolute', right: -5, width: 22 },
   avatarOptionLabel: { fontSize: 11, fontWeight: '700', textAlign: 'center' },
-  setting: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 16, marginVertical: 8 },
+  setting: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 16, paddingVertical: 12, minHeight: 56 },
    settingCopy: { flex: 1 },
    targetHeader: { alignItems: 'center', flexDirection: 'row', gap: 12, marginTop: 12 },
    targetCopy: { flex: 1, gap: 3 },
