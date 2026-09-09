@@ -1,8 +1,8 @@
 import { useAnimationActivity } from '../hooks/useAnimationActivity';
 import { CHART_DESIGN } from '../constants/chartDesign';
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
-import { BlurMask, Canvas, Circle, Group, LinearGradient, Path, Skia, vec } from '@shopify/react-native-skia';
+import { MuscleDistributionRadarCanvas } from './MuscleDistributionRadarCanvas';
 import Animated, { cancelAnimation, Easing, useAnimatedStyle, useSharedValue, withDelay, withTiming } from 'react-native-reanimated';
 import type { MuscleDistributionEntry } from '../services/socialGraph';
 import type { AppTheme } from '../types';
@@ -12,15 +12,6 @@ import { radarPoint, radarPoints } from '../utils/radarGeometry';
 const SIZE = 260;
 const CENTER = SIZE / 2;
 const RADIUS = 82;
-
-function skiaPath(points: readonly { x: number; y: number }[]) {
-  const [first, ...rest] = points;
-  if (!first) return Skia.PathBuilder.Make().build();
-  return rest.reduce(
-    (builder, point) => builder.lineTo(point.x, point.y),
-    Skia.PathBuilder.Make().moveTo(first.x, first.y),
-  ).close().build();
-}
 
 export function MuscleDistributionRadar({ data, reference, palette }: { data: readonly MuscleDistributionEntry[]; reference?: readonly MuscleDistributionEntry[]; palette?: AppTheme }) {
   const { theme: activeTheme } = useTheme();
@@ -42,9 +33,8 @@ export function MuscleDistributionRadar({ data, reference, palette }: { data: re
   const labels = data.map((entry, index) => ({ ...entry, ...radarPoint(index, data.length, RADIUS + 31, CENTER) }));
   const shapePoints = radarPoints(data.map((entry) => referenceTotal > 0 && total > 0 ? entry.value / total : entry.value), comparisonMax, RADIUS, CENTER, 8);
   const referencePoints = radarPoints(data.map((entry) => (referenceById.get(entry.id) ?? 0) / Math.max(referenceTotal, 1)), comparisonMax, RADIUS, CENTER, 0);
-  const polygon = useMemo(() => skiaPath(shapePoints), [data, comparisonMax, total, referenceTotal]);
-  const referencePolygon = useMemo(() => skiaPath(referencePoints), [data, reference, comparisonMax]);
-  const rings = useMemo(() => [.25, .5, .75, 1].map((ratio) => skiaPath(data.map((_, index) => radarPoint(index, data.length, RADIUS * ratio, CENTER)))), [data]);
+  const rings = [.25, .5, .75, 1].map((ratio) => data.map((_, index) => radarPoint(index, data.length, RADIUS * ratio, CENTER)));
+  const axes = data.map((_, index) => radarPoint(index, data.length, RADIUS, CENTER));
   const summary = [...populated].sort((left, right) => right.value - left.value)[0];
   const signature = JSON.stringify([data, reference]);
   useEffect(() => {
@@ -62,14 +52,7 @@ export function MuscleDistributionRadar({ data, reference, palette }: { data: re
   if (!populated.length) return <View style={styles.empty}><Text style={{ color: theme.textMuted }}>Sin ejercicios completados en los últimos 90 días.</Text></View>;
   return <View accessibilityRole="summary" accessibilityLabel={`Distribución de estímulo muscular de los últimos 90 días. Mayor foco: ${summary.label}, ${summary.value.toFixed(2)} puntos.${reference ? ' Incluye el objetivo de referencia.' : ''}`} onLayout={({ nativeEvent }) => setWidth(nativeEvent.layout.width)}>
     <Animated.View style={[styles.canvasWrap, { width: SIZE * scale, height: SIZE * scale }, revealStyle]}>
-      <Canvas style={StyleSheet.absoluteFill}>
-        {rings.map((ring, index) => <Path key={index} path={ring} style="stroke" strokeWidth={index === rings.length - 1 ? 1.5 : 1} color={theme.glassBorder} opacity={0.44 + index * 0.08} />)}
-        {data.map((_, index) => { const edge = radarPoint(index, data.length, RADIUS, CENTER); return <Path key={index} path={skiaPath([{ x: CENTER, y: CENTER }, edge, { x: CENTER, y: CENTER }])} style="stroke" strokeWidth={1} color={theme.glassBorder} opacity={0.45} />; })}
-        {referenceTotal > 0 ? <Path path={referencePolygon} style="stroke" strokeWidth={2} color={theme.textMuted} opacity={0.8} /> : null}
-        <Path path={polygon} color={theme.primary} opacity={0.32}><LinearGradient start={vec(CENTER, CENTER - RADIUS)} end={vec(CENTER, CENTER + RADIUS)} colors={[theme.accent, theme.primary]} /></Path>
-        <Path path={polygon} style="stroke" strokeWidth={3} color={theme.primary}><BlurMask blur={focusedId ? 7 : 4} style="solid" /></Path>
-        {shapePoints.map((point, index) => <Group key={data[index].id}><Circle cx={point.x} cy={point.y} r={focusedId === data[index].id ? 8 : 5} color={theme.accent} opacity={0.32}><BlurMask blur={6} style="solid" /></Circle><Circle cx={point.x} cy={point.y} r={focusedId === data[index].id ? 4.5 : 3.25} color={theme.accent} /></Group>)}
-      </Canvas>
+      <MuscleDistributionRadarCanvas size={SIZE} center={CENTER} radius={RADIUS} rings={rings} axes={axes} shape={shapePoints} reference={referenceTotal > 0 ? referencePoints : undefined} focusedIndex={data.findIndex((entry) => entry.id === focusedId)} theme={theme} />
       {labels.map((entry) => <Pressable key={entry.id} accessibilityRole="button" accessibilityLabel={`${entry.label}: ${entry.value.toFixed(2)} puntos de estímulo${referenceTotal ? `; objetivo ${(((referenceById.get(entry.id) ?? 0) / referenceTotal) * 100).toFixed(0)}%` : ''}`} onPress={() => setFocusedId(entry.id)} style={[styles.label, { left: entry.x * scale - 36, top: entry.y * scale - 10 }]}><Text numberOfLines={1} style={[styles.labelText, { color: focusedId === entry.id ? theme.accent : theme.text }]}>{entry.label} {entry.value.toFixed(1)}</Text></Pressable>)}
     </Animated.View>
     {focusedId ? <Text accessibilityLiveRegion="polite" style={{ color: theme.text, fontSize: CHART_DESIGN.detail, fontWeight: '700' }}>{data.find((entry) => entry.id === focusedId)?.label}: {data.find((entry) => entry.id === focusedId)?.value.toFixed(2)} puntos de estímulo{referenceTotal ? ` · objetivo ${(((referenceById.get(focusedId) ?? 0) / referenceTotal) * 100).toFixed(0)}%` : ''}</Text> : null}
