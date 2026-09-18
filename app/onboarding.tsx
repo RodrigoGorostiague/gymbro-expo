@@ -10,7 +10,8 @@ import { ThemeBackground } from '../components/GlassCard';
 import { ANTHROPOMETRICS } from '../constants/anthropometrics';
 import { useAuth } from '../context/AuthContext';
 import { useTheme } from '../context/ThemeContext';
-import { recordBodyMetric } from '../services/bodyMetrics';
+import { saveBodyDay } from '../services/bodyEvolution';
+import { localDay } from '../utils/bodyEvolution';
 import { completeOwnOnboarding, OnboardingSex } from '../services/onboarding';
 import { normalizeDecimalInput } from '../utils/decimalInput';
 
@@ -42,14 +43,15 @@ export default function OnboardingScreen() {
     if (!user || !birthDate || !sex) return;
     setSaving(true);
     try {
-      await completeOwnOnboarding({ alias, realName, birthDate: birthDate.toISOString().slice(0, 10), sex });
-      const measuredAt = new Date().toISOString();
+      const entries = [];
       for (const metric of includeMeasurements ? ANTHROPOMETRICS : []) {
         const value = normalizeDecimalInput(measurements[metric.type] ?? '');
         if (value === null) continue;
         if (value <= 0) throw new Error(`${metric.label}: ingresá un valor mayor a cero.`);
-        await recordBodyMetric(user, { metricType: metric.type, value, unit: metric.unit, measuredAt });
+        entries.push({ metricType: metric.type, value });
       }
+      await completeOwnOnboarding({ alias, realName, birthDate: birthDate.toISOString().slice(0, 10), sex });
+      if (entries.length) await saveBodyDay(localDay(), entries);
       router.replace('/(tabs)/train');
     } catch (error) {
       Alert.alert('No pudimos completar tu perfil', error instanceof Error ? error.message : 'Intentá nuevamente.');
@@ -63,7 +65,7 @@ export default function OnboardingScreen() {
       <Image source={require('../assets/gymbro-icon.png')} style={styles.logo} />
       <Text style={[styles.eyebrow, { color: theme.primary }]}>GYMBRO · {step}/2</Text>
       <Text style={[styles.title, { color: theme.text }]}>{step === 1 ? 'Tu punto de partida' : 'Medí tu progreso'}</Text>
-      <Text style={[styles.subtitle, { color: theme.textMuted }]}>{step === 1 ? 'Tu alias es público. Tu nombre real, fecha de nacimiento, sexo y medidas pertenecen a tu perfil privado.' : 'Podés cargar estas medidas ahora o actualizarlas cuando quieras desde tu perfil.'}</Text>
+      <Text style={[styles.subtitle, { color: theme.textMuted }]}>{step === 1 ? 'Tu alias es público. Tu nombre real, fecha de nacimiento, sexo y medidas pertenecen a tu perfil privado.' : 'Podés cargar estas medidas ahora o actualizarlas cuando quieras desde Más → Evolución corporal.'}</Text>
     </LinearGradient>
     {step === 1 ? <View style={styles.form}>
       <GlassInput value={realName} onChangeText={setRealName} placeholder="Nombre real" autoCapitalize="words" accessibilityLabel="Nombre real" />

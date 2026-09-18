@@ -45,6 +45,24 @@
         {
           "motionPermission": "Allow $(PRODUCT_NAME) to use device motion for background parallax."
         }
+      ],
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "Permite usar la cámara para registrar tu evolución corporal.",
+          "recordAudioAndroid": false,
+          "barcodeScannerEnabled": false
+        }
+      ],
+      [
+        "expo-media-library",
+        {
+          "savePhotosPermission": "Permite guardar las fotos confirmadas en tu galería.",
+          "photosPermission": "Permite guardar tus fotos de evolución corporal.",
+          "granularPermissions": [
+            "photo"
+          ]
+        }
       ]
     ],
     "extra": {

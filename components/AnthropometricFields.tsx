@@ -1,15 +1,15 @@
 import React from 'react';
 import { Alert, StyleSheet, Text, View } from 'react-native';
 import { FontAwesome5 } from '@expo/vector-icons';
-import { ANTHROPOMETRICS } from '../constants/anthropometrics';
+import { ANTHROPOMETRICS, AnthropometricDefinition } from '../constants/anthropometrics';
 import { AppTheme, AnthropometricMetricType } from '../types';
 import { HapticPressable } from './HapticPressable';
 import { GlassInput } from './UI';
 
 export type AnthropometricDraft = Partial<Record<AnthropometricMetricType, string>>;
 
-export function AnthropometricFields({ values, onChange, theme }: { values: AnthropometricDraft; onChange: (type: AnthropometricMetricType, value: string) => void; theme: AppTheme }) {
-  return <View style={styles.fields}>{ANTHROPOMETRICS.map((metric) => <View key={metric.type} style={styles.field}>
+export function AnthropometricFields({ values, onChange, theme, definitions = ANTHROPOMETRICS }: { definitions?: readonly AnthropometricDefinition[]; values: AnthropometricDraft; onChange: (type: AnthropometricMetricType, value: string) => void; theme: AppTheme }) {
+  return <View style={styles.fields}>{definitions.map((metric) => <View key={metric.type} style={styles.field}>
     <View style={styles.labelRow}>
       <Text style={[styles.label, { color: theme.text }]}>{metric.label}</Text>
       <HapticPressable accessibilityRole="button" accessibilityLabel={`Cómo medir ${metric.label}`} onPress={() => Alert.alert(metric.label, metric.help)} hitSlop={10}>

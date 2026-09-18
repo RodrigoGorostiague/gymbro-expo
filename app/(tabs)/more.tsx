@@ -8,7 +8,8 @@ import { GlassCard, ThemeBackground } from '../../components/GlassCard';
 import { HapticPressable } from '../../components/HapticPressable';
 import { useTheme } from '../../context/ThemeContext';
 const destinations = [
-  ['person-outline', 'Mi perfil', 'Identidad, privacidad y medidas', '/profile'],
+  ['body-outline', 'Evolución corporal', 'Peso, medidas y fotos comparables', '/body'],
+  ['person-outline', 'Mi perfil', 'Identidad y privacidad', '/profile'],
   ['options-outline', 'Preferencias de entrenamiento', 'Movimiento, vibración y sonido', '/profile/preferences'],
   ['color-palette-outline', 'Apariencia y recompensas', 'Tus temas, fondos y coleccionables', '/(tabs)/shop'],
   ['mail-outline', 'Bandeja de entrada', 'Invitaciones, planes y notificaciones', '/community/inbox'],
