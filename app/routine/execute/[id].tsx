@@ -1,5 +1,8 @@
+import { WorkoutExerciseCard } from '../../../components/WorkoutExerciseCard';
+import { setLoadBasis, routineSetLabels, continuesDropBlock } from '../../../utils/setPrescription';
+import { seedMesocycleWorkout } from '../../../utils/mesocycleContinuity';
 import { useLatestRequest } from '../../../hooks/useLatestRequest';
-import React, { useCallback, useEffect, useEffectEvent, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useEffectEvent, useMemo, useRef, useState } from 'react';
 import {
   Alert,
   AppState,
@@ -47,8 +50,8 @@ import { matchesActiveWorkout } from '../../../utils/activeWorkoutReentry';
 import { reconcileActiveWorkoutTiming } from '../../../utils/activeWorkoutTiming';
 import { withTimeout } from '../../../utils/withTimeout';
 import { validateMesocycleExecutionLineage } from '../../../utils/mesocycleExecutionLineage';
-import { ActiveWorkoutInviteCandidate, completedJointWorkoutInput, finishJointWorkoutAttempt, resolveJointWorkoutAttempt, inviteActiveWorkoutMember, jointParticipantInviteCapacity, JointCompletedWorkout, JointParticipant, JointVisibility, JointWorkoutLiveState, leaveJointWorkoutAttempt, listActiveWorkoutInviteCandidates, listJointWorkouts, updateJointWorkoutLiveProgress } from '../../../services/jointWorkouts';
-import { prepareJointWorkoutPublication, queueJointWorkoutPublication, removePendingJointWorkoutPublication } from '../../../services/jointWorkoutPublicationQueue';
+import { ActiveWorkoutInviteCandidate, completedJointWorkoutInput, resolveJointWorkoutAttempt, inviteActiveWorkoutMember, jointParticipantInviteCapacity, JointCompletedWorkout, JointParticipant, JointVisibility, JointWorkoutLiveState, leaveJointWorkoutAttempt, listActiveWorkoutInviteCandidates, listJointWorkouts, updateJointWorkoutLiveProgress } from '../../../services/jointWorkouts';
+import { prepareJointWorkoutPublication, queueJointWorkoutPublication, flushPendingJointWorkoutPublications, loadJointPublicationProgress } from '../../../services/jointWorkoutPublicationQueue';
 import { recapSharePayload } from '../../../services/workoutRecapFeed';
 import { closeWorkoutStartActivity, publishWorkoutStartActivity } from '../../../services/workoutStartActivity';
 import { attemptToSession } from '../../../utils/workoutAttempts';
@@ -57,7 +60,7 @@ import { getShopTheme } from '../../../constants/shopThemes';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import Animated, { cancelAnimation, Easing, FadeIn, ZoomIn, useAnimatedStyle, useSharedValue, withRepeat, withTiming } from 'react-native-reanimated';
-import { WorkoutVictory } from '../../../components/WorkoutVictory';
+import { WorkoutCompletionReview } from '../../../components/WorkoutCompletionReview';
 import { nextWorkoutSet } from '../../../utils/workoutExperience';
 import { getSensoryPreferences } from '../../../utils/sensoryPreferences';
 import { useAnimationActivity } from '../../../hooks/useAnimationActivity';
@@ -110,6 +113,8 @@ const JOINT_PROGRESS_DEBOUNCE_MS = 350;
 const gymbroIcon = process.env.NODE_ENV === 'test' ? 0 : require('../../../assets/gymbro-icon.png');
 
 interface SetRuntimeValues {
+  durationSeconds?: string;
+  actualEffort?: import('../../../types').ActualEffort;
   weight: string;
   reps: string;
 }
@@ -176,25 +181,37 @@ export default function ExecuteRoutineScreen() {
   const { realtimeRevision } = useSocial();
   const rosterReads = useLatestRequest(`${user}:${id}`);
   const candidateReads = useLatestRequest(`${user}:${id}`);
-  const { getRoutine, addAttempt, mesocycles, routines, exercises: catalogExercises, definitions = [], activeWorkoutDraft, startActiveWorkout, updateActiveWorkout, cancelActiveWorkout, clearActiveWorkoutIfMatches, refreshActiveWorkoutTiming = async () => undefined } = useData();
+  const { activeWorkoutRemoteRevision = 0, offlineWorkoutEnabled = false, onlineWorkoutBlocked = false, offlineWorkoutStatus = 'unavailable', offlineWorkoutError, offlineWorkoutResult, prepareOnlineWorkout, getRoutine, addAttempt, mesocycles, routines, attempts = [], exercises: catalogExercises, definitions = [], activeWorkoutDraft, startActiveWorkout, updateActiveWorkout, cancelActiveWorkout, clearActiveWorkoutIfMatches, refreshActiveWorkoutTiming = async () => undefined } = useData();
   const { theme } = useTheme();
   const [pendingJointCompletion, setPendingJointCompletion] = useState<PendingJointCompletion | null>(null);
+  const [jointPublicationWaiting, setJointPublicationWaiting] = useState(false);
   const [jointPublicationError, setJointPublicationError] = useState<string | null>(null);
   const [isSyncingJointCompletion, setIsSyncingJointCompletion] = useState(false);
   const parsedLineage = parseLineage(params);
   const resumingExpiredSession = !!parsedLineage && matchesActiveWorkout(activeWorkoutDraft, { owner: user, routineId: id, lineage: parsedLineage });
   const lineageValidation = validateMesocycleExecutionLineage(mesocycles, id, parsedLineage, readSingleParam(params.mesocycleId), resumingExpiredSession);
-  const lineage = lineageValidation.valid ? lineageValidation.lineage : undefined;
+  const localRecovery = offlineWorkoutEnabled && matchesActiveWorkout(activeWorkoutDraft, { owner: user, routineId: id, ...(parsedLineage ? { lineage: parsedLineage } : {}) });
+  const lineage = localRecovery ? activeWorkoutDraft?.lineage : lineageValidation.valid ? lineageValidation.lineage : undefined;
   const plannedEntry = lineage && mesocycles.find((mesocycle) => mesocycle.id === lineage.mesocycleId)
     ?.weeks.find((week) => week.weekNumber === lineage.weekNumber)
     ?.entries.find((entry) => entry.id === lineage.plannedSessionId);
   const sourceRoutine = plannedEntry && 'routineSnapshot' in plannedEntry && plannedEntry.routineSnapshot
     ? plannedEntry.routineSnapshot
-    : getRoutine(id) ?? (activeWorkoutDraft?.pendingFinalization && matchesActiveWorkout(activeWorkoutDraft, { owner: user, routineId: id }) ? activeWorkoutDraft.routineSnapshot : undefined);
+    : getRoutine(id) ?? ((activeWorkoutDraft?.pendingFinalization || localRecovery) && matchesActiveWorkout(activeWorkoutDraft, { owner: user, routineId: id }) ? activeWorkoutDraft?.routineSnapshot : undefined);
+  const launchSeed = useMemo(() => sourceRoutine && !activeWorkoutDraft
+    ? seedMesocycleWorkout(sourceRoutine, mesocycles, attempts, user, lineage)
+    : null, [sourceRoutine, mesocycles, attempts, user, lineage?.mesocycleId, lineage?.weekNumber, lineage?.plannedSessionId, activeWorkoutDraft]);
+  const previousPerformance = useMemo(() => sourceRoutine
+    ? seedMesocycleWorkout(sourceRoutine, mesocycles, attempts, user, lineage, activeWorkoutDraft?.startedAtMs).previous
+    : {}, [sourceRoutine, mesocycles, attempts, user, lineage?.mesocycleId, lineage?.weekNumber, lineage?.plannedSessionId, activeWorkoutDraft?.startedAtMs]);
   const initialJointWorkoutId = readSingleParam(params.jointWorkoutId) ?? activeWorkoutDraft?.jointWorkoutId;
 
+  const [offlineResumeConfirmed, setOfflineResumeConfirmed] = useState(false);
+  const offlineResumeRequired = localRecovery && !activeWorkoutDraft?.pendingFinalization && !activeWorkoutDraft?.pausedAtMs && Date.now() - activeWorkoutDraft!.startedAtMs - (activeWorkoutDraft!.pausedDurationMs ?? 0) >= 5 * 60 * 60 * 1000 && !offlineResumeConfirmed;
+  const hydratedRemoteRevisionRef = useRef(-1);
   const [phase, setPhase] = useState<'setup' | 'active' | 'done'>('setup');
-  const [restSeconds, setRestSeconds] = useState('90');
+  const [restSecondsOverride, setRestSeconds] = useState<string | null>(null);
+  const restSeconds = restSecondsOverride ?? String(launchSeed?.restTimerSeconds ?? 90);
   const [elapsed, setElapsed] = useState(0);
   const [restRemaining, setRestRemaining] = useState(0);
   const [isResting, setIsResting] = useState(false);
@@ -216,11 +233,13 @@ export default function ExecuteRoutineScreen() {
   const [isJointExpanded, setJointExpanded] = useState(false);
   const [workoutRoutine, setWorkoutRoutine] = useState<Routine | null>(null);
   const [focusMode, setFocusMode] = useState(false);
+  const [exerciseDisclosure, setExerciseDisclosure] = useState<Record<string, boolean>>({});
+  useEffect(() => { setExerciseDisclosure({}); setFocusMode(false); }, [activeWorkoutDraft?.attemptId]);
   const [pickerVisible, setPickerVisible] = useState(false);
   const [positionMenuExerciseId, setPositionMenuExerciseId] = useState<string | null>(null);
-  const [pauseMenuVisible, setPauseMenuVisible] = useState(false);
+  const [finishMenuVisible, setFinishMenuVisible] = useState(false);
   const [jointCancellationStatus, setJointCancellationStatus] = useState<'idle' | 'pending' | 'uncertain'>(activeWorkoutDraft?.jointCancellationPending ? 'pending' : 'idle');
-  const [pauseSyncError, setPauseSyncError] = useState<string | null>(null);
+  const [workoutSyncError, setWorkoutSyncError] = useState<string | null>(null);
   const [restCompletionBadgeVisible, setRestCompletionBadgeVisible] = useState(false);
   const [workoutControlsVisible, setWorkoutControlsVisible] = useState(true);
   const [pendingSaveCount, setPendingSaveCount] = useState(0);
@@ -258,6 +277,15 @@ export default function ExecuteRoutineScreen() {
   useEffect(() => {
     activeWorkoutDraftRef.current = activeWorkoutDraft;
   }, [activeWorkoutDraft]);
+
+  useEffect(() => {
+    if (!offlineWorkoutResult || offlineWorkoutResult.sourceAttemptId !== attemptIdRef.current) return;
+    if (offlineWorkoutResult.attempt?.id) attemptRef.current = offlineWorkoutResult.attempt;
+    setRewardReceipt(offlineWorkoutResult.receipt);
+    setExperienceReceipt(offlineWorkoutResult.experienceReceipt);
+    setEarnedGems(receiptTotal(offlineWorkoutResult.receipt));
+    setPhase('done');
+  }, [offlineWorkoutResult]);
 
   const updateCurrentActiveWorkout = useCallback((updater: (draft: ActiveWorkoutDraft) => ActiveWorkoutDraft, defer = false, allowFinalizationReset = false) => {
     const current = activeWorkoutDraftRef.current;
@@ -309,7 +337,7 @@ export default function ExecuteRoutineScreen() {
     const nowMs = Date.now();
     const localRestEndsAtMs = restEndsAtMsRef.current;
     if (localRestEndsAtMs && activeWorkoutDraft.restEndsAtMs) restEndsAtMsRef.current = null;
-    const timing = reconcileActiveWorkoutTiming(activeWorkoutDraft, nowMs);
+    const timing = reconcileActiveWorkoutTiming(activeWorkoutDraft, nowMs, offlineWorkoutEnabled);
     setElapsed(timing.elapsedSeconds);
     if (localRestEndsAtMs && !activeWorkoutDraft.restEndsAtMs) {
       const localRemaining = Math.max(0, Math.ceil((localRestEndsAtMs - nowMs) / 1000));
@@ -347,7 +375,7 @@ export default function ExecuteRoutineScreen() {
   }, [phase]));
 
   const persistAndLeaveActiveWorkout = useEffectEvent(() => {
-    if (phase !== 'active' || pauseMenuVisible || pickerVisible || isFinishing) return false;
+    if (phase !== 'active' || finishMenuVisible || pickerVisible || isFinishing) return false;
     void updateCurrentActiveWorkout((draft) => ({ ...draft, setValues: setValuesRef.current })).then(() => router.back()).catch((error) => {
       Alert.alert('No se pudo guardar el entrenamiento', error instanceof Error ? error.message : 'Vuelve a intentarlo.');
     });
@@ -360,7 +388,8 @@ export default function ExecuteRoutineScreen() {
   }, []));
 
   useEffect(() => {
-    if (!sourceRoutine || !activeWorkoutDraft || !matchesActiveWorkout(activeWorkoutDraft, { owner: user, routineId: sourceRoutine.id, ...(lineage ? { lineage } : {}) }) || phase !== 'setup') return;
+    if (!sourceRoutine || !activeWorkoutDraft || !matchesActiveWorkout(activeWorkoutDraft, { owner: user, routineId: sourceRoutine.id, ...(lineage ? { lineage } : {}) }) || (phase !== 'setup' && hydratedRemoteRevisionRef.current === activeWorkoutRemoteRevision)) return;
+    hydratedRemoteRevisionRef.current = activeWorkoutRemoteRevision;
     attemptIdRef.current = activeWorkoutDraft.attemptId;
     if (activeWorkoutDraft.pendingFinalization) {
       attemptRef.current = activeWorkoutDraft.pendingFinalization.attempt;
@@ -378,18 +407,18 @@ export default function ExecuteRoutineScreen() {
     if (activeWorkoutDraft.jointCancellationPending) {
       jointCancellationStartedRef.current = true;
       setJointCancellationStatus('pending');
-      setPauseMenuVisible(true);
+      setFinishMenuVisible(true);
     }
     if (!activeWorkoutDraft.routineSnapshot || JSON.stringify(migratedCompletedSets) !== JSON.stringify(activeWorkoutDraft.completedSets)) {
       void updateCurrentActiveWorkout((draft) => ({ ...draft, routineSnapshot: snapshot, completedSets: migratedCompletedSets }));
     }
     setJointWorkoutId(activeWorkoutDraft.jointWorkoutId ?? initialJointWorkoutId ?? null);
-    const timing = reconcileActiveWorkoutTiming(activeWorkoutDraft, Date.now());
+    const timing = reconcileActiveWorkoutTiming(activeWorkoutDraft, Date.now(), offlineWorkoutEnabled);
     setRestRemaining(timing.restRemainingSeconds);
     setIsResting(timing.isResting);
     setElapsed(timing.elapsedSeconds);
     setPhase('active');
-  }, [activeWorkoutDraft, initialJointWorkoutId, lineage, phase, sourceRoutine, updateCurrentActiveWorkout, user]);
+  }, [activeWorkoutDraft, activeWorkoutRemoteRevision, initialJointWorkoutId, lineage, phase, sourceRoutine, updateCurrentActiveWorkout, user]);
 
   useEffect(() => {
     if (phase === 'active' && attemptIdRef.current && !activeWorkoutDraft && !finalizationLocked) setPhase('setup');
@@ -413,7 +442,7 @@ export default function ExecuteRoutineScreen() {
   useEffect(() => {
     if (phase !== 'active') return;
     void loadJointState().catch(() => undefined);
-  }, [jointWorkoutId, phase]);
+  }, [activeWorkoutRemoteRevision, jointWorkoutId, phase]);
 
   useEffect(() => {
     if (phase !== 'active' || realtimeRevision === 0) return;
@@ -514,10 +543,15 @@ export default function ExecuteRoutineScreen() {
     startInFlightRef.current = true;
     setIsStarting(true);
     try {
-      const snapshot = snapshotWorkoutRoutine(sourceRoutine);
-      const values = buildSetValues(snapshot);
+      const snapshot = launchSeed?.routine ?? snapshotWorkoutRoutine(sourceRoutine);
+      const values = launchSeed?.values ?? buildSetValues(snapshot);
       const attemptId = generateId();
-      await startActiveWorkout({ version: 1, owner: user, attemptId, routineId: snapshot.id, routineSnapshot: snapshot, jointWorkoutId: initialJointWorkoutId, lineage, startedAtMs: Date.now(), restTimerSeconds: restTimerConfig, completedSets: {}, setValues: values });
+      const canonical = await startActiveWorkout({ version: 1, owner: user, attemptId, routineId: snapshot.id, routineSnapshot: snapshot, jointWorkoutId: initialJointWorkoutId, lineage, startedAtMs: Date.now(), restTimerSeconds: restTimerConfig, completedSets: {}, setValues: values });
+      if (canonical && canonical.attemptId !== attemptId) {
+        continueActiveWorkout(canonical);
+        return;
+      }
+      setRestSeconds(String(restTimerConfig));
       applySetValues(values);
       setWorkoutRoutine(snapshot);
       setCompletedSets({});
@@ -598,37 +632,14 @@ export default function ExecuteRoutineScreen() {
   };
 
   const syncActiveWorkout = (draft: ActiveWorkoutDraft) => {
-    setPauseSyncError(null);
+    setWorkoutSyncError(null);
     void withTimeout(
       updateCurrentActiveWorkout(() => draft),
       REMOTE_OPERATION_TIMEOUT_MS,
       'Workout sync',
     ).catch((error) => {
-      setPauseSyncError(error instanceof Error ? error.message : 'No se pudo sincronizar el entrenamiento.');
+      setWorkoutSyncError(error instanceof Error ? error.message : 'No se pudo sincronizar el entrenamiento.');
     });
-  };
-
-  const pauseWorkout = () => {
-    const currentDraft = activeWorkoutDraftRef.current;
-    if (!currentDraft || pauseMutationRef.current) return false;
-    pauseMutationRef.current = true;
-    const nowMs = Date.now();
-    const timing = reconcileActiveWorkoutTiming(currentDraft, nowMs);
-    if (restRef.current) clearInterval(restRef.current);
-    restRef.current = null;
-    restEndsAtMsRef.current = null;
-    setElapsed(timing.elapsedSeconds); setRestRemaining(timing.restRemainingSeconds); setIsResting(timing.restRemainingSeconds > 0);
-    const pausedDraft = {
-      ...currentDraft,
-      setValues: setValuesRef.current,
-      restEndsAtMs: undefined,
-      pausedAtMs: nowMs,
-      pausedRestRemainingSeconds: timing.restRemainingSeconds,
-    };
-    syncActiveWorkout(pausedDraft);
-    publishJointLiveProgress(completedSets, 'paused');
-    pauseMutationRef.current = false;
-    return true;
   };
 
   const resumeWorkout = () => {
@@ -658,18 +669,14 @@ export default function ExecuteRoutineScreen() {
     return true;
   };
 
-  const showPauseMenu = () => {
-    if (activeWorkoutDraftRef.current?.pausedAtMs) {
-      setPauseMenuVisible(true);
-      return;
-    }
-    if (pauseWorkout()) setPauseMenuVisible(true);
-  };
+  // Old saved pauses are resumed once on entry; new workouts cannot be paused.
+  const resumeLegacyPause = useEffectEvent(() => resumeWorkout());
+  useEffect(() => {
+    if (phase === 'active' && activeWorkoutDraft?.pausedAtMs && !activeWorkoutDraft.pendingFinalization && !activeWorkoutDraft.jointCancellationPending) resumeLegacyPause();
+  }, [phase, activeWorkoutDraft?.attemptId, activeWorkoutDraft?.pausedAtMs]);
 
-  const resumeFromPauseMenu = () => {
-    if (jointCancellationStartedRef.current) return;
-    setPauseMenuVisible(false);
-    resumeWorkout();
+  const closeFinishMenu = () => {
+    if (!jointCancellationStartedRef.current && !jointCancellationInFlightRef.current && !isFinishing) setFinishMenuVisible(false);
   };
 
   const retryActiveWorkoutSync = () => {
@@ -678,28 +685,29 @@ export default function ExecuteRoutineScreen() {
   };
 
   useEffect(() => {
-    if (!pauseSyncError) return;
+    if (!workoutSyncError) return;
     const subscription = AppState.addEventListener('change', (state) => {
       if (state === 'active') retryActiveWorkoutSync();
     });
     return () => subscription.remove();
-  }, [pauseSyncError]);
+  }, [workoutSyncError]);
 
-  const finishFromPauseMenu = () => {
-    if (jointCancellationStartedRef.current) return;
-    setPauseMenuVisible(false);
-    requestFinish('pause');
+  const finishFromFinishMenu = () => {
+    if (jointCancellationStartedRef.current || finishInFlightRef.current || jointCancellationInFlightRef.current) return;
+    setFinishMenuVisible(false);
+    void finishWorkout(jointWorkoutId ? 'circle' : undefined);
   };
 
-  const cancelFromPauseMenu = async () => {
-    if (jointCancellationInFlightRef.current) return;
+  const cancelFromFinishMenu = async () => {
+    if (jointCancellationInFlightRef.current || finishInFlightRef.current || isFinishing) return;
     jointCancellationInFlightRef.current = true;
+    setJointCancellationStatus('pending');
     if (jointWorkoutId) {
       jointCancellationStartedRef.current = true;
       setJointCancellationStatus('pending');
     }
     try {
-      if (jointWorkoutId) {
+      if (jointWorkoutId && activeWorkoutDraftRef.current?.transportMode !== 'online') {
         // Make the lock restart-safe before an idempotent leave can commit remotely.
         await updateCurrentActiveWorkout((draft) => ({ ...draft, jointCancellationPending: true }));
         if (!user || !attemptIdRef.current) throw new Error('Authentication required.');
@@ -708,7 +716,7 @@ export default function ExecuteRoutineScreen() {
       await cancelActiveWorkout();
       router.back();
     } catch (error) {
-      if (jointWorkoutId) setJointCancellationStatus('uncertain');
+      setJointCancellationStatus(jointWorkoutId ? 'uncertain' : 'idle');
       Alert.alert('No se pudo cancelar el entrenamiento', error instanceof Error ? error.message : 'Inténtalo nuevamente.');
     } finally {
       jointCancellationInFlightRef.current = false;
@@ -717,8 +725,8 @@ export default function ExecuteRoutineScreen() {
 
   useEffect(() => {
     if (phase !== 'active' || !jointWorkoutId || activeWorkoutDraft?.jointCancellationPending !== true) return;
-    setPauseMenuVisible(true);
-    void cancelFromPauseMenu();
+    setFinishMenuVisible(true);
+    void cancelFromFinishMenu();
   }, [activeWorkoutDraft?.jointCancellationPending, jointWorkoutId, phase]);
 
   const loadJointState = async (workoutId = jointWorkoutId) => {
@@ -762,7 +770,9 @@ export default function ExecuteRoutineScreen() {
     const successfulIds = new Set<string>();
     let activeWorkoutId = jointWorkoutId;
     try {
-      await withTimeout(publishWorkoutStartActivity(routine.name, captured.jointWorkoutId, captured.attemptId), REMOTE_OPERATION_TIMEOUT_MS, 'Joint workout invitation presence');
+      const claimed = await prepareOnlineWorkout();
+      activeWorkoutDraftRef.current = claimed;
+      await withTimeout(publishWorkoutStartActivity(routine.name, claimed.jointWorkoutId, claimed.attemptId), REMOTE_OPERATION_TIMEOUT_MS, 'Joint workout invitation presence');
       for (const profile of selected) {
         try {
           {
@@ -834,21 +844,26 @@ export default function ExecuteRoutineScreen() {
     void loadJointInviteCandidates(false, isJointExpanded);
   }, [isJointExpanded, phase, realtimeRevision]);
 
-  const updateSetValue = (setKey: SetKey, field: keyof SetRuntimeValues, value: string) => {
+  const updateSetValue = (setKey: SetKey, field: 'weight' | 'reps' | 'durationSeconds', value: string) => {
     if (completedSets[setKey]) return;
     const next = { ...setValuesRef.current, [setKey]: { ...setValuesRef.current[setKey], [field]: value } };
     applySetValues(next);
+    if (offlineWorkoutEnabled) void commitSetValues(next).catch(() => undefined);
   };
 
   const completeSet = async (setKey: SetKey, tipo: SetType) => {
     if (completedSets[setKey] || completingSetsRef.current.has(setKey)) return;
 
-    const values = setValues[setKey];
-    const weight = parseFloat(values?.weight ?? '0');
-    const reps = parseInt(values?.reps ?? '0', 10);
+    const values = setValuesRef.current[setKey];
+    const ownerExercise = routine?.exercises.find((exercise) => exercise.sets.some((set) => `${exercise.id}-${set.id}` === setKey));
+    const prescription = ownerExercise?.sets.find((set) => `${ownerExercise.id}-${set.id}` === setKey);
+    const bodyweight = !!ownerExercise && !!prescription && setLoadBasis(ownerExercise, prescription) === 'bodyweight';
+    const weight = bodyweight ? 0 : Number((values?.weight ?? '').replace(',', '.'));
+    const timed = prescription?.durationSeconds !== undefined;
+    const reps = Number(timed ? values?.durationSeconds : values?.reps);
 
-    if (!Number.isFinite(weight) || weight < 0 || !Number.isInteger(reps) || reps <= 0) {
-      Alert.alert('Datos incompletos', 'Ingresa peso y repeticiones antes de finalizar la serie.');
+    if ((!bodyweight && !values?.weight.trim()) || !Number.isFinite(weight) || weight < 0 || !Number.isInteger(reps) || reps <= 0 || (timed && reps > 86400)) {
+      Alert.alert('Datos incompletos', timed ? 'Ingresa una duración válida en segundos y revisa la carga.' : 'Ingresa repeticiones válidas y revisa la carga.');
       return;
     }
 
@@ -856,7 +871,7 @@ export default function ExecuteRoutineScreen() {
     try {
       const next = { ...completedSets, [setKey]: true };
       setCompletedSets(next);
-      if (routine && nextWorkoutSet(routine, next)) startRestTimer(next);
+      if (routine && nextWorkoutSet(routine, next) && !(ownerExercise && prescription && continuesDropBlock(ownerExercise, prescription.id))) startRestTimer(next);
       else {
         if (restRef.current) clearInterval(restRef.current);
         restEndsAtMsRef.current = null;
@@ -883,12 +898,10 @@ export default function ExecuteRoutineScreen() {
     try {
       if (!user) throw new Error('Authentication required.');
       await queueJointWorkoutPublication(user, completion);
-      await withTimeout(
-        finishJointWorkoutAttempt(user, completion.attemptId, completion.workoutId, completion.visibility, completion.completedWorkout),
-        REMOTE_OPERATION_TIMEOUT_MS,
-        'Finish joint workout',
-      );
-      if (user) await removePendingJointWorkoutPublication(user, completion.workoutId);
+      await withTimeout(flushPendingJointWorkoutPublications(user), REMOTE_OPERATION_TIMEOUT_MS, 'Finish joint workout');
+      const progress = (await loadJointPublicationProgress(user)).find((item) => item.workoutId === completion.workoutId);
+      if (progress?.error) throw new Error(progress.error);
+      setJointPublicationWaiting(progress?.state === 'waiting');
       setPendingJointCompletion(null);
     } catch (error) {
       setJointPublicationError(error instanceof Error ? error.message : 'Inténtalo nuevamente.');
@@ -915,9 +928,11 @@ export default function ExecuteRoutineScreen() {
         const runtime = setValuesRef.current[key];
         return {
           setId: set.id,
-          weight: parseFloat(runtime?.weight ?? String(set.weight)) || 0,
-          reps: parseInt(runtime?.reps ?? String(set.reps), 10) || 0,
+          weight: setLoadBasis(exercise, set) === 'bodyweight' ? 0 : Number((runtime?.weight ?? String(set.weight)).replace(',', '.')) || 0,
+          ...(set.durationSeconds !== undefined ? { durationSeconds: Number(runtime?.durationSeconds ?? set.durationSeconds) || 0 } : {}),
+          reps: set.durationSeconds !== undefined ? 0 : Number(runtime?.reps ?? set.reps) || 0,
           completed: !!completedSets[key],
+          ...(completedSets[key] && runtime?.actualEffort ? { actualEffort: runtime.actualEffort } : {}),
         };
       }),
     }));
@@ -926,7 +941,7 @@ export default function ExecuteRoutineScreen() {
     const wasAmbiguous = ambiguousFinalizationRef.current;
     try {
       if (!user) throw new Error('Authentication required.');
-      const canonicalGroup = !attemptRef.current && attemptIdRef.current ? await withTimeout(resolveJointWorkoutAttempt(attemptIdRef.current), REMOTE_OPERATION_TIMEOUT_MS, 'Joint workout finalization association') : null;
+      const canonicalGroup = (!offlineWorkoutEnabled || activeWorkoutDraftRef.current?.transportMode === 'online') && !attemptRef.current && attemptIdRef.current ? await withTimeout(resolveJointWorkoutAttempt(attemptIdRef.current), REMOTE_OPERATION_TIMEOUT_MS, 'Joint workout finalization association') : null;
       const completionGroup = attemptRef.current?.jointWorkoutId ?? canonicalGroup ?? jointWorkoutId;
       const attempt = attemptRef.current ?? createWorkoutAttempt({
         id: attemptIdRef.current ?? (attemptIdRef.current = generateId()),
@@ -938,7 +953,7 @@ export default function ExecuteRoutineScreen() {
         lineage,
         jointWorkoutId: completionGroup ?? undefined,
         results: Object.fromEntries(exercises.flatMap((exercise) => exercise.sets.map((set) =>
-          [`${exercise.exerciseId}:${set.setId}`, { performed: set.completed, reps: set.reps, load: set.weight }]))),
+          [`${exercise.exerciseId}:${set.setId}`, { performed: set.completed, reps: set.reps, durationSeconds: set.durationSeconds, load: set.weight, actualEffort: set.actualEffort }]))),
       });
       attemptRef.current = attempt;
       let jointCompletion: PendingJointCompletion | null = null;
@@ -961,7 +976,7 @@ export default function ExecuteRoutineScreen() {
       setFinalizationLocked(true);
       const pendingFinalization = { attempt, ...(jointCompletion ? { sharePayload: jointCompletion.completedWorkout.sharePayload, jointVisibility: jointCompletion.visibility } : {}) };
       if (activeWorkoutDraftRef.current) {
-        await updateCurrentActiveWorkout((draft) => ({ ...draft, pendingFinalization }));
+        await updateCurrentActiveWorkout((draft) => ({ ...draft, ...(completionGroup ? { jointWorkoutId: completionGroup } : {}), pendingFinalization }));
         pendingFinalizationRef.current = pendingFinalization;
       } else if (!wasAmbiguous || !pendingFinalizationRef.current) {
         throw new Error('No hay un borrador activo para guardar el resultado.');
@@ -973,6 +988,8 @@ export default function ExecuteRoutineScreen() {
       dispatched = true;
       const finalized = await withTimeout(addAttempt(attempt), REMOTE_OPERATION_TIMEOUT_MS, 'Save workout');
       void closeWorkoutStartActivity().catch(() => undefined);
+      // Planned-session reconciliation may return an already finalized canonical ID.
+      if (finalized.attempt?.id) attemptRef.current = finalized.attempt;
       setRewardReceipt(finalized.receipt);
       setExperienceReceipt(finalized.experienceReceipt);
       setEarnedGems(receiptTotal(finalized.receipt));
@@ -1023,15 +1040,11 @@ export default function ExecuteRoutineScreen() {
     persistWorkoutRoutine(next, merged);
   };
 
-  const updateSessionSetEffortTarget = (exerciseId: string, setId: string, effortTarget: RoutineSet['effortTarget']) => {
-    if (!routine || completedSets[`${exerciseId}-${setId}`]) return;
-    const next = {
-      ...routine,
-      exercises: routine.exercises.map((exercise) => exercise.id === exerciseId
-        ? { ...exercise, sets: exercise.sets.map((set) => set.id === setId ? { ...set, effortTarget } : set) }
-        : exercise),
-    };
-    persistWorkoutRoutine(next);
+  const updateActualEffort = (setKey: string, actualEffort: SetRuntimeValues['actualEffort']) => {
+    if (completedSets[setKey] || finalizationLocked || isFinishing) return;
+    const next = { ...setValuesRef.current, [setKey]: { ...setValuesRef.current[setKey], actualEffort } };
+    applySetValues(next);
+    void commitSetValues(next).catch((error) => Alert.alert('No se pudo guardar el esfuerzo', error instanceof Error ? error.message : 'Inténtalo nuevamente.'));
   };
 
   const updateSessionSetType = (exerciseId: string, setId: string, type: 'C' | 'effective' | 'F') => {
@@ -1068,7 +1081,7 @@ export default function ExecuteRoutineScreen() {
     return <ThemeBackground calm><SafeAreaView style={[styles.safe, styles.center]}><GlassCard style={styles.doneCard}><Text style={[styles.doneTitle, { color: theme.text }]}>Entrenamiento no disponible</Text><Text style={[styles.doneMeta, { color: theme.textMuted }]}>Este entrenamiento ya no está disponible. Volvé a Entrenar para elegir una rutina vigente.</Text><View style={styles.spacer} /><GlassButton title="Volver a entrenar" onPress={() => router.replace('/(tabs)/train')} /></GlassCard></SafeAreaView></ThemeBackground>;
   }
 
-  if (!lineageValidation.valid && !pendingFinalizationRef.current) {
+  if (!lineageValidation.valid && !pendingFinalizationRef.current && !localRecovery) {
     const message = lineageValidation.reason === 'expired-planned-session'
       ? 'La fecha programada para esta sesión ya pasó.'
       : lineageValidation.reason === 'inactive-mesocycle'
@@ -1078,6 +1091,8 @@ export default function ExecuteRoutineScreen() {
       : 'La sesión programada ya no está disponible. Actualizá o reabrí el mesociclo antes de entrenar.';
     return <ThemeBackground calm><SafeAreaView style={[styles.safe, styles.center]}><GlassCard style={styles.doneCard}><Text style={[styles.doneTitle, { color: theme.text }]}>Sesión desactualizada</Text><Text style={[styles.doneMeta, { color: theme.textMuted }]}>{message}</Text><View style={styles.spacer} /><GlassButton title={lineageValidation.mesocycleId ? 'Volver al mesociclo' : 'Volver a rutinas'} onPress={() => lineageValidation.mesocycleId ? router.replace(`/mesocycle/summary/${lineageValidation.mesocycleId}`) : router.replace('/(tabs)/routines')} /></GlassCard></SafeAreaView></ThemeBackground>;
   }
+
+  if (offlineResumeRequired) return <ThemeBackground><SafeAreaView style={{ flex: 1, justifyContent: 'center', padding: 24, gap: 16 }}><Text style={{ color: theme.text }}>Este entrenamiento lleva más de cinco horas. Tus datos se conservaron en el dispositivo.</Text><GlassButton title="Continuar entrenamiento guardado" onPress={() => setOfflineResumeConfirmed(true)} /></SafeAreaView></ThemeBackground>;
 
   if (phase === 'setup') {
     const hasDifferentActiveWorkout = !!activeWorkoutDraft
@@ -1099,6 +1114,7 @@ export default function ExecuteRoutineScreen() {
               onChangeText={setRestSeconds}
               placeholder="90"
             />
+            {launchSeed?.restTimerSeconds !== undefined ? <Text style={{ color: theme.textMuted }}>Se usarán los últimos valores compatibles de este mesociclo. Los ajustes planificados se conservan.</Text> : null}
             <Text style={[styles.hint, { color: theme.textMuted }]}>
               Se reinicia al marcar una serie como completada. Al terminar el descanso recibirás
               una alerta para continuar.
@@ -1119,12 +1135,22 @@ export default function ExecuteRoutineScreen() {
   if (phase === 'done' && attemptRef.current) {
     const savedSession = attemptToSession(attemptRef.current);
     return <ThemeBackground calm><SafeAreaView style={styles.safe}>
-      <ScrollView contentContainerStyle={{ paddingVertical: 24, paddingBottom: 32, gap: 16 }}>
-        <WorkoutVictory session={savedSession} experience={experienceReceipt} rewards={rewardReceipt} celebrate
-          onDetails={() => router.push(`/session/recap/${savedSession.id}`)} />
+      <WorkoutCompletionReview key={`${user}:${savedSession.id}`} session={savedSession} experience={experienceReceipt} rewards={rewardReceipt} celebrate
+        onDetails={() => router.push(`/session/recap/${savedSession.id}`)} onDone={() => router.replace('/(tabs)/train')}>
+        {jointPublicationWaiting ? <GlassCard><Text style={{ color: theme.text }}>Entrenamiento guardado. La publicación del grupo espera a que todos terminen y confirmen su cierre.</Text></GlassCard> : null}
         {pendingJointCompletion ? <GlassCard><Text accessibilityRole="alert" style={{ color: theme.text }}>Entrenamiento guardado. Publicación conjunta pendiente.</Text><Text style={{ color: theme.textMuted }}>{jointPublicationError ?? 'Sincronizando el resultado conjunto…'}</Text><GlassButton title="Reintentar publicación" variant="secondary" loading={isSyncingJointCompletion} onPress={() => void syncJointCompletion(pendingJointCompletion)} /></GlassCard> : null}
-      </ScrollView>
-      <View style={{ paddingVertical: 12 }}><GlassButton title="Listo · volver a entrenar" onPress={() => router.replace('/(tabs)/train')} /></View>
+      </WorkoutCompletionReview>
+    </SafeAreaView></ThemeBackground>;
+  }
+
+  if (onlineWorkoutBlocked || (activeWorkoutDraft?.transportMode === 'online'
+    && ['blocked', 'conflict', 'local-error'].includes(offlineWorkoutStatus))) {
+    return <ThemeBackground calm><SafeAreaView style={[styles.safe, styles.center]}>
+      <GlassCard style={styles.doneCard}>
+        <Text style={{ color: theme.text }}>El entrenamiento compartido necesita conexión y sincronización.</Text>
+        <Text style={{ color: theme.textMuted }}>{offlineWorkoutError ?? 'Tus cambios pendientes se conservan. No se sobrescribió el servidor.'}</Text>
+        <GlassButton title="Volver" variant="secondary" onPress={() => router.back()} />
+      </GlassCard>
     </SafeAreaView></ThemeBackground>;
   }
 
@@ -1137,27 +1163,13 @@ export default function ExecuteRoutineScreen() {
   </GlassCard></SafeAreaView></ThemeBackground>;
 
   const totalSets = routine.exercises.reduce((acc, e) => acc + e.sets.length, 0);
-  const doneSets = Object.values(completedSets).filter(Boolean).length;
+  const doneSets = routine.exercises.reduce((total, exercise) => total + exercise.sets.filter((set) => completedSets[`${exercise.id}-${set.id}`]).length, 0);
   const nextSet = nextWorkoutSet(routine, completedSets);
-  const requestFinish = (origin: 'active' | 'pause' = 'active') => {
-    if (jointCancellationStartedRef.current || isFinishing) return;
-    if (doneSets >= totalSets) {
-      void finishWorkout(jointWorkoutId ? 'circle' : undefined);
-      return;
-    }
-    let decided = false;
-    const cancelIntent = () => {
-      if (decided) return;
-      decided = true;
-      if (origin === 'pause') setPauseMenuVisible(true);
-    };
-    Alert.alert('Guardar lo realizado', `${doneSets}/${totalSets} series realizadas. Las pendientes no se marcarán como completas.`, [
-      { text: origin === 'pause' ? 'Volver a la pausa' : 'Seguir entrenando', style: 'cancel', onPress: cancelIntent },
-      { text: 'Guardar sesión', onPress: () => {
-        decided = true;
-        void finishWorkout(jointWorkoutId ? 'circle' : undefined);
-      } },
-    ], origin === 'pause' ? { cancelable: true, onDismiss: cancelIntent } : undefined);
+  const nextExercise = routine.exercises.find((exercise) => exercise.id === nextSet?.exerciseId);
+  const nextLabel = nextExercise && nextSet ? routineSetLabels(nextExercise.sets)[nextSet.setId] : '';
+  const requestFinish = () => {
+    if (jointCancellationStartedRef.current || jointCancellationInFlightRef.current || isFinishing) return;
+    setFinishMenuVisible(true);
   };
   const changeRest = (seconds: number) => {
     const restEndsAtMs = Date.now() + seconds * 1000;
@@ -1182,32 +1194,38 @@ export default function ExecuteRoutineScreen() {
               <Text style={[styles.fixedTimerValue, { color: theme.text }]}>{formatTime(elapsed)}</Text>
             </View>
             <View style={[styles.fixedControlDivider, { backgroundColor: theme.glassBorder }]} />
-            <HapticPressable accessibilityRole="button" accessibilityLabel={activeWorkoutDraft?.pausedAtMs ? 'Resolver entrenamiento pausado' : 'Pausar entrenamiento'} accessibilityHint="Abre las opciones para reanudar, finalizar o cancelar" onPress={() => void showPauseMenu()} style={[styles.fixedPauseControl, { borderColor: theme.glassBorder, backgroundColor: theme.glass }]}>
-              <Ionicons name={activeWorkoutDraft?.pausedAtMs ? 'play' : 'pause'} size={20} color={activeWorkoutDraft?.pausedAtMs ? theme.textMuted : theme.accent} />
-            </HapticPressable>
-            <View style={[styles.fixedControlDivider, { backgroundColor: theme.glassBorder }]} />
             <View style={styles.fixedTimerMetric}>
               <Ionicons name="hourglass-outline" size={16} color={isResting ? theme.accent : theme.textMuted} />
               <Text style={[styles.fixedTimerValue, { color: isResting ? theme.accent : theme.textMuted }]}>{isResting ? formatTime(restRemaining) : formatTime(restTimerConfig)}</Text>
             </View>
-            {!pauseMenuVisible ? <HapticPressable accessibilityLabel="Finalizar sesión" accessibilityState={{ disabled: isFinishing }} disabled={isFinishing} onPress={() => requestFinish()} style={{ minWidth: 56, minHeight: 48, alignItems: 'center', justifyContent: 'center', gap: 2 }}><Ionicons name="checkmark-circle-outline" size={24} color={theme.primary} /><Text style={{ color: theme.text, fontSize: 10, fontWeight: '800' }}>Finalizar</Text></HapticPressable> : null}
+            {!finishMenuVisible ? <HapticPressable accessibilityLabel="Finalizar sesión" accessibilityState={{ disabled: isFinishing }} disabled={isFinishing} onPress={() => requestFinish()} style={{ minWidth: 56, minHeight: 48, alignItems: 'center', justifyContent: 'center', gap: 2 }}><Ionicons name="checkmark-circle-outline" size={24} color={theme.primary} /><Text style={{ color: theme.text, fontSize: 10, fontWeight: '800' }}>Finalizar</Text></HapticPressable> : null}
             </View>
           </GlassCard>
+          {offlineWorkoutEnabled || offlineWorkoutError ? <View style={{ padding: 8, gap: 4 }}>
+            <Text accessibilityLiveRegion="polite" style={{ color: theme.textMuted }}>{offlineWorkoutStatus === 'unavailable' ? 'Guardado offline no disponible' : pendingSaveCount > 0 ? 'Guardando en este dispositivo…' : offlineWorkoutStatus === 'saved' ? 'Guardado en este dispositivo y sincronizado' : offlineWorkoutStatus === 'syncing' ? 'Sincronizando entrenamiento…' : offlineWorkoutStatus === 'local-error' ? 'Cambios sin guardar: no cierres la app' : offlineWorkoutStatus === 'conflict' ? 'Conflicto: tus datos locales se conservan' : offlineWorkoutStatus === 'blocked' ? 'Sincronización bloqueada: tus datos se conservan' : 'Guardado en este dispositivo · Pendiente de sincronización'}</Text>
+            {offlineWorkoutError ? <Text accessibilityRole="alert" style={{ color: theme.textMuted }}>{offlineWorkoutError}</Text> : null}
+          </View> : null}
           <WorkoutSaveIndicator visible={pendingSaveCount > 0 || isJointBusy} color={theme.glassBorder} textColor={theme.textMuted} />
         </Animated.View>
         <FlatList
             data={focusMode && nextSet ? routine.exercises.filter((exercise) => exercise.id === nextSet.exerciseId) : routine.exercises}
             keyExtractor={(exercise) => exercise.id}
+            extraData={{ exerciseDisclosure, completedSets, setValues, focusMode }}
+            keyboardShouldPersistTaps="handled"
+            keyboardDismissMode="on-drag"
+            automaticallyAdjustKeyboardInsets
             style={styles.exerciseList}
             contentContainerStyle={styles.exerciseListContent}
             onScroll={handleExerciseScroll}
             scrollEventThrottle={16}
             ListHeaderComponent={<View style={{ gap: 12, marginBottom: 16 }}>
-              <Text accessibilityRole="header" style={{ color: theme.text, fontSize: 26, fontWeight: '900' }}>{nextSet ? nextSet.exerciseName : 'Sesión lista para guardar'}</Text>
-              <Text style={{ color: theme.textMuted }}>{doneSets}/{totalSets} series realizadas{nextSet ? ` · Sigue: serie ${nextSet.setIndex + 1}` : ''}</Text>
-              <GlassButton title={focusMode ? 'Ver rutina completa' : 'Enfocar serie actual'} variant="secondary" onPress={() => setFocusMode(!focusMode)} />
-              {isResting ? <GlassCard blur={false}><Text accessibilityRole="header" style={{ color: theme.accent, fontSize: 28, fontWeight: '900', fontVariant: ['tabular-nums'] }}>{formatTime(restRemaining)} · Descanso</Text><Text style={{ color: theme.textMuted }}>{nextSet ? `Después: ${nextSet.exerciseName}, serie ${nextSet.setIndex + 1}` : 'Terminaste las series'}</Text><View style={{ flexDirection: 'row', gap: 12, marginTop: 12 }}><GlassButton title="+30 s" variant="secondary" onPress={() => changeRest(restRemaining + 30)} /><GlassButton title="Omitir descanso" variant="secondary" onPress={() => changeRest(0)} /></View></GlassCard> : null}
-              {!pauseMenuVisible ? <GlassButton title="Finalizar entrenamiento" loading={isFinishing} variant={nextSet ? 'secondary' : 'primary'} onPress={() => requestFinish()} /> : null}
+              <Text accessibilityRole="header" style={{ color: theme.text, fontSize: 26, fontWeight: '900' }}>{routine.name}</Text>
+              <Text style={{ color: theme.textMuted }}>{doneSets}/{totalSets} series realizadas{nextSet ? ` · Sigue: ${nextSet.exerciseName}, serie ${nextLabel}` : ' · Puedes finalizar la sesión'}</Text>
+              <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
+                <GlassButton title={focusMode ? 'Ver rutina completa' : 'Enfocar serie actual'} variant="secondary" onPress={() => { void commitSetValues().catch(() => undefined); setFocusMode(!focusMode); }} />
+                {!focusMode && <GlassButton title={routine.exercises.every((exercise) => exerciseDisclosure[exercise.id] ?? exercise.id === nextSet?.exerciseId) ? 'Ocultar ejercicios' : 'Desplegar ejercicios'} variant="secondary" onPress={() => { void commitSetValues().catch(() => undefined); const expanded = !routine.exercises.every((exercise) => exerciseDisclosure[exercise.id] ?? exercise.id === nextSet?.exerciseId); setExerciseDisclosure(Object.fromEntries(routine.exercises.map((exercise) => [exercise.id, expanded]))); }} />}
+              </View>
+              {isResting ? <GlassCard blur={false}><Text accessibilityRole="header" style={{ color: theme.accent, fontSize: 28, fontWeight: '900', fontVariant: ['tabular-nums'] }}>{formatTime(restRemaining)} · Descanso</Text><Text style={{ color: theme.textMuted }}>{nextSet ? `Después: ${nextSet.exerciseName}, serie ${nextLabel}` : 'Terminaste las series'}</Text><View style={{ flexDirection: 'row', gap: 12, marginTop: 12 }}><GlassButton title="+30 s" variant="secondary" onPress={() => changeRest(restRemaining + 30)} /><GlassButton title="Omitir descanso" variant="secondary" onPress={() => changeRest(0)} /></View></GlassCard> : null}
             </View>}
             ListFooterComponent={<GlassCard style={styles.addExerciseCard}>
              <HapticPressable
@@ -1221,10 +1239,15 @@ export default function ExecuteRoutineScreen() {
              </HapticPressable>
            </GlassCard>}
             renderItem={({ item: exercise, index: exIndex }) => <>
-            <GlassCard style={styles.exerciseCard} blur={false}>
-                <Text style={[styles.exerciseName, { color: theme.text }]}>
-                  {routine.exercises.findIndex((candidate) => candidate.id === exercise.id) + 1}. {exercise.name || 'Sin nombre'}
-                </Text>
+            <WorkoutExerciseCard
+                name={exercise.name || 'Sin nombre'}
+                position={routine.exercises.findIndex((candidate) => candidate.id === exercise.id) + 1}
+                completed={exercise.sets.filter((set) => completedSets[`${exercise.id}-${set.id}`]).length}
+                total={exercise.sets.length}
+                current={exercise.id === nextSet?.exerciseId}
+                expanded={focusMode || (exerciseDisclosure[exercise.id] ?? exercise.id === nextSet?.exerciseId)}
+                onToggle={() => { void commitSetValues().catch(() => undefined); if (focusMode) setFocusMode(false); setExerciseDisclosure((current) => ({ ...current, [exercise.id]: !(focusMode || (current[exercise.id] ?? exercise.id === nextSet?.exerciseId)) })); }}
+            >
                 {(() => {
                   const exerciseStarted = hasCompletedSessionExerciseSet(exercise, completedSets);
                   const structuralLockHint = 'No se puede modificar un ejercicio iniciado';
@@ -1262,6 +1285,16 @@ export default function ExecuteRoutineScreen() {
                  const setKey = `${exercise.id}-${set.id}`;
                   const completed = !!completedSets[setKey];
                   const values = setValues[setKey] ?? { weight: '', reps: '' };
+                  if (completed) {
+                    const basis = setLoadBasis(exercise, set);
+                    const amount = set.durationSeconds !== undefined ? `${values.durationSeconds ?? set.durationSeconds} s` : `${values.reps || set.reps} reps`;
+                    const load = basis === 'bodyweight' ? 'Peso corporal' : `${basis === 'added' ? 'Lastre ' : basis === 'assisted' ? 'Asistencia ' : ''}${values.weight || set.weight} ${exercise.loadUnit ?? 'kg'}`;
+                    return <View key={set.id} style={[styles.completedSummary, { borderColor: theme.glassBorder }]}>
+                      <Ionicons name="checkmark-circle" color={theme.success} size={21} />
+                      <View style={{ flex: 1, gap: 4 }}><Text style={{ color: theme.text, fontWeight: '700' }}>{routineSetLabels(exercise.sets)[set.id]} · {amount} · {load}</Text><Text style={{ color: theme.textMuted }}>{values.actualEffort ? `${values.actualEffort.kind.toUpperCase()} ${values.actualEffort.value} realizado` : 'Esfuerzo sin registrar'}{set.dropGroupId ? ' · Drop set' : set.backoffGroupId ? ' · Backoff' : ''}</Text></View>
+                      <HapticPressable accessibilityLabel={`Editar serie ${routineSetLabels(exercise.sets)[set.id]} de ${exercise.name}`} accessibilityHint={`Reabrir serie de ${exercise.name}`} onPress={() => reopenSet(setKey)} style={styles.summaryEdit}><Text style={{ color: theme.primary, fontWeight: '700' }}>Editar</Text></HapticPressable>
+                    </View>;
+                  }
                   const isBackoff = !!set.backoffGroupId;
                   const firstInBackoff = isBackoff && (setIndex === 0 || exercise.sets[setIndex - 1]?.backoffGroupId !== set.backoffGroupId);
                   const lastInBackoff = isBackoff && (setIndex === exercise.sets.length - 1 || exercise.sets[setIndex + 1]?.backoffGroupId !== set.backoffGroupId);
@@ -1278,14 +1311,14 @@ export default function ExecuteRoutineScreen() {
                         lastInBackoff && styles.backoffEnd,
                         isFailureSet(set.tipo) && styles.failureSetCard,
                         {
-                        borderColor: completed ? theme.success : isFailureSet(set.tipo) ? '#EF4444' : theme.glassBorder,
+                        borderColor: completed ? theme.success : nextSet?.setId === set.id && nextSet.exerciseId === exercise.id ? theme.primary : isFailureSet(set.tipo) ? '#EF4444' : theme.glassBorder,
                         backgroundColor: completed ? `${theme.glass}` : 'rgba(0,0,0,0.15)',
                       },
                     ]}
                   >
                     <View style={styles.setCardHeader}>
                        <Text style={[styles.setTypeHint, { color: isFailureSet(set.tipo) ? '#EF4444' : theme.textMuted }]}>
-                         {isBackoff ? (firstInBackoff ? `Backoff · ${backoffCount} subseries` : `Subserie ${subseries}`) : isFailureSet(set.tipo) ? 'Sin repeticiones' : `Serie ${setIndex + 1}`}
+                         {set.dropGroupId ? `${routineSetLabels(exercise.sets)[set.id]} · Drop set` : isBackoff ? `Serie ${routineSetLabels(exercise.sets)[set.id]} · Backoff` : isFailureSet(set.tipo) ? 'Al fallo' : set.tipo === 'C' ? 'Calentamiento' : `Serie ${routineSetLabels(exercise.sets)[set.id]}`}
                        </Text>
                        <View style={styles.setHeaderActions}>
                        {completed ? (
@@ -1313,21 +1346,21 @@ export default function ExecuteRoutineScreen() {
                     <View style={styles.inputRow}>
                       <View style={styles.inputGroup}>
                         <Text style={[styles.fieldLabel, { color: theme.textMuted }]}>
-                          {exercise.loadMode === 'bodyweight' ? 'Peso corporal' : exercise.loadMode === 'assisted' ? 'Asistencia' : 'Carga externa'} ({exercise.loadUnit ?? 'kg'})
+                          {setLoadBasis(exercise, set) === 'bodyweight' ? 'Peso corporal · sin carga adicional' : setLoadBasis(exercise, set) === 'added' ? 'Lastre' : setLoadBasis(exercise, set) === 'assisted' ? 'Asistencia' : 'Carga externa'} ({exercise.loadUnit ?? 'kg'})
                         </Text>
                         <GlassInput
                           accessibilityLabel={`${exercise.name}, serie ${setIndex + 1}, carga en ${exercise.loadUnit ?? 'kg'}`}
                           style={styles.setInput}
                           keyboardType="decimal-pad"
-                          value={values.weight}
-                          editable={!completed}
+                          value={setLoadBasis(exercise, set) === 'bodyweight' ? '—' : values.weight}
+                          editable={!completed && setLoadBasis(exercise, set) !== 'bodyweight'}
                           placeholder="0"
                           onChangeText={(text) => updateSetValue(setKey, 'weight', text)}
                           onBlur={() => { void commitSetValues(); }}
                           onSubmitEditing={() => { void commitSetValues(); }}
                         />
                       </View>
-                      {isFailureSet(set.tipo) ? (
+                      {set.durationSeconds !== undefined ? <View style={styles.inputGroup}><Text style={[styles.fieldLabel, { color: theme.textMuted }]}>Duración (segundos)</Text><GlassInput accessibilityLabel={`${exercise.name}, duración en segundos`} style={styles.setInput} keyboardType="number-pad" value={values.durationSeconds ?? ''} editable={!completed} onChangeText={(text) => updateSetValue(setKey, 'durationSeconds', text)} onBlur={() => { void commitSetValues(); }} /></View> : isFailureSet(set.tipo) ? (
                         <View style={styles.inputGroup}>
                           <Text style={[styles.fieldLabel, { color: theme.textMuted }]}>Repeticiones al fallo</Text>
                           <GlassInput style={styles.setInput} keyboardType="number-pad" value={values.reps}
@@ -1354,10 +1387,15 @@ export default function ExecuteRoutineScreen() {
                       )}
                     </View>
 
-                    <EffortTargetControl
-                      value={set.effortTarget}
+                    {previousPerformance[setKey] ? <Text style={{ color: theme.textMuted }}>
+                      Anterior: {previousPerformance[setKey].durationSeconds !== undefined ? `${previousPerformance[setKey].durationSeconds} s` : `${previousPerformance[setKey].weight} ${previousPerformance[setKey].unit} × ${previousPerformance[setKey].reps}`}
+                      {previousPerformance[setKey].actualEffort ? ` · ${previousPerformance[setKey].actualEffort!.kind.toUpperCase()} ${previousPerformance[setKey].actualEffort!.value}` : ' · Esfuerzo sin registrar'}
+                    </Text> : null}
+                    {set.effortTarget ? <Text style={{ color: theme.textMuted }}>Objetivo de la rutina: {set.effortTarget.kind.toUpperCase()} {set.effortTarget.value}</Text> : null}
+                    <EffortTargetControl actual
+                      value={setValues[setKey]?.actualEffort}
                       disabled={completed}
-                      onChange={(effortTarget) => updateSessionSetEffortTarget(exercise.id, set.id, effortTarget)}
+                      onChange={(actualEffort) => updateActualEffort(setKey, actualEffort)}
                     />
 
                     {completed ? (
@@ -1374,6 +1412,7 @@ export default function ExecuteRoutineScreen() {
                       <HapticPressable
                         accessibilityRole="button"
                         accessibilityLabel={`Finalizar serie ${setIndex + 1} de ${exercise.name}`}
+                        accessibilityHint="Confirma esta serie con los valores visibles en un toque"
                         onPress={() => completeSet(setKey, set.tipo)}
                         style={({ pressed }) => [styles.completeBtn, { backgroundColor: theme.primary }, pressed && styles.completeBtnPressed]}
                       >
@@ -1391,7 +1430,7 @@ export default function ExecuteRoutineScreen() {
                    <Text style={[styles.editSetBtnText, { color: theme.primary }]}>+ Backoff</Text>
                  </HapticPressable>
                 </View>
-            </GlassCard>
+            </WorkoutExerciseCard>
              </>}
          />
         <View style={styles.socialHubDock}>
@@ -1420,10 +1459,10 @@ export default function ExecuteRoutineScreen() {
           visible
           onRequestClose={() => setPositionMenuExerciseId(null)}
         >
-          <View style={styles.pauseMenuBackdrop}>
+          <View style={styles.finishMenuBackdrop}>
             <GlassCard style={[styles.positionMenu, { borderColor: theme.glassBorder, backgroundColor: theme.tabBarBackground }]}>
-              <Text style={[styles.pauseMenuTitle, { color: theme.text }]}>Cambiar posición</Text>
-              <Text style={[styles.pauseMenuCopy, { color: theme.textMuted }]}>Elegí dónde va {positionMenuExercise?.name ?? 'este ejercicio'} en este entrenamiento. No cambia tu rutina guardada.</Text>
+              <Text style={[styles.finishMenuTitle, { color: theme.text }]}>Cambiar posición</Text>
+              <Text style={[styles.finishMenuCopy, { color: theme.textMuted }]}>Elegí dónde va {positionMenuExercise?.name ?? 'este ejercicio'} en este entrenamiento. No cambia tu rutina guardada.</Text>
               {routine.exercises.map((exercise, index) => {
                 const isCurrentPosition = index === positionMenuExerciseIndex;
                 return <HapticPressable
@@ -1447,28 +1486,27 @@ export default function ExecuteRoutineScreen() {
           </View>
         </Modal> : null}
 
-        {pauseMenuVisible ? <Modal
+        {finishMenuVisible ? <Modal
           transparent
           animationType="fade"
-          visible={pauseMenuVisible}
-          onRequestClose={() => resumeFromPauseMenu()}
+          visible={finishMenuVisible}
+          onRequestClose={closeFinishMenu}
         >
-          <View style={styles.pauseMenuBackdrop}>
-            <GlassCard style={[styles.pauseMenu, { borderColor: theme.glassBorder, backgroundColor: theme.tabBarBackground }]}>
-              <View style={styles.pauseMenuTitleRow}>
-                <View style={[styles.pauseMenuDot, { backgroundColor: theme.accent }]} />
-                <Text style={[styles.pauseMenuTitle, { color: theme.text }]}>Entrenamiento pausado</Text>
+          <View style={styles.finishMenuBackdrop}>
+            <GlassCard style={[styles.finishMenu, { borderColor: theme.glassBorder, backgroundColor: theme.tabBarBackground }]}>
+              <View style={styles.finishMenuTitleRow}>
+                <View style={[styles.finishMenuDot, { backgroundColor: theme.accent }]} />
+                <Text style={[styles.finishMenuTitle, { color: theme.text }]}>Finalizar entrenamiento</Text>
               </View>
-              <Text style={[styles.pauseMenuCopy, { color: theme.textMuted }]}>El cronómetro y el descanso están detenidos hasta que elijas cómo continuar.</Text>
-              {pauseSyncError ? <View style={[styles.pauseSyncError, { borderColor: theme.glassBorder }]}>
-                <Text accessibilityRole="alert" style={[styles.pauseSyncErrorText, { color: theme.textMuted }]}>La pausa sigue guardada en este dispositivo. Se sincronizará al reintentar o volver a la app.</Text>
-                <GlassButton title="Reintentar sincronización" variant="secondary" onPress={retryActiveWorkoutSync} />
+              <Text style={[styles.finishMenuCopy, { color: theme.textMuted }]}>{doneSets}/{totalSets} series realizadas. Guardar conserva lo realizado; cancelar descarta este entrenamiento.</Text>
+              {workoutSyncError ? <View style={[styles.workoutSyncError, { borderColor: theme.glassBorder }]}>
+                <Text accessibilityRole="alert" style={[styles.workoutSyncErrorText, { color: theme.textMuted }]}>No se pudo sincronizar el entrenamiento. La sincronización se reintentará al volver a la app.</Text>
               </View> : null}
-              <GlassButton title="Reanudar" disabled={jointCancellationStatus !== 'idle'} onPress={() => void resumeFromPauseMenu()} />
-              <GlassButton title="Finalizar entrenamiento" variant="secondary" disabled={isFinishing || jointCancellationStatus !== 'idle'} onPress={finishFromPauseMenu} />
+              <HapticPressable accessibilityRole="button" accessibilityLabel="Cerrar opciones de finalización" disabled={isFinishing || jointCancellationStatus !== 'idle'} onPress={closeFinishMenu}><Ionicons name="close" size={24} color={theme.text} /></HapticPressable>
+              <GlassButton title="Guardar sesión" disabled={isFinishing || jointCancellationStatus !== 'idle'} onPress={finishFromFinishMenu} />
               <WorkoutSaveIndicator visible={isFinishing} color={theme.glassBorder} textColor={theme.textMuted} />
-              <HapticPressable accessibilityRole="button" accessibilityLabel="Cancelar entrenamiento" accessibilityState={{ disabled: jointCancellationStatus === 'pending' }} disabled={jointCancellationStatus === 'pending'} onPress={() => void cancelFromPauseMenu()} style={styles.pauseCancelButton}>
-                <Text style={styles.pauseCancelText}>Cancelar entrenamiento</Text>
+              <HapticPressable accessibilityRole="button" accessibilityLabel="Cancelar entrenamiento" accessibilityState={{ disabled: isFinishing || jointCancellationStatus === 'pending' }} disabled={isFinishing || jointCancellationStatus === 'pending'} onPress={() => void cancelFromFinishMenu()} style={styles.cancelWorkoutButton}>
+                <Text style={styles.cancelWorkoutText}>Cancelar entrenamiento</Text>
               </HapticPressable>
             </GlassCard>
           </View>
@@ -1498,7 +1536,6 @@ const styles = StyleSheet.create({
    fixedTimerMetric: { alignItems: 'center', flex: 1, flexDirection: 'row', gap: 6, justifyContent: 'center' },
    fixedTimerValue: { fontSize: 16, fontVariant: ['tabular-nums'], fontWeight: '900' },
    fixedControlDivider: { height: 24, width: StyleSheet.hairlineWidth },
-   fixedPauseControl: { alignItems: 'center', borderRadius: 14, borderWidth: 1, height: 50, justifyContent: 'center', width: 50 },
    stickyMetaRow: { alignItems: 'center', flexDirection: 'row', justifyContent: 'space-between' },
    stickyParticipants: { alignItems: 'center', flexDirection: 'row', gap: 5, minHeight: 28 },
    stickyParticipantsLabel: { fontSize: 12, fontWeight: '700' },
@@ -1521,6 +1558,8 @@ const styles = StyleSheet.create({
    exerciseList: { flex: 1 },
     exerciseListContent: { paddingBottom: 104, paddingTop: 82 },
    exerciseCard: { marginBottom: 14 },
+   completedSummary: { flexDirection: 'row', alignItems: 'center', gap: 10, borderBottomWidth: 1, paddingVertical: 12, marginBottom: 8 },
+   summaryEdit: { minHeight: 44, paddingHorizontal: 8, justifyContent: 'center' },
     exerciseOrderActions: { alignItems: 'center', flexDirection: 'row', gap: 8, marginBottom: 12 },
    exerciseOrderButton: { alignItems: 'center', borderRadius: 10, borderWidth: 1, flexDirection: 'row', gap: 6, minHeight: 44, paddingHorizontal: 12, paddingVertical: 8 },
     exerciseOrderButtonText: { fontSize: 12, fontWeight: '800' },
@@ -1640,20 +1679,20 @@ const styles = StyleSheet.create({
    socialHubGlass: { borderRadius: 18 },
    socialHubContent: { paddingHorizontal: 12, paddingVertical: 8 },
    jointActions: { flexDirection: 'row', gap: 8 },
-   pauseMenuBackdrop: { alignItems: 'center', backgroundColor: 'rgba(0,0,0,0.54)', flex: 1, justifyContent: 'center', padding: 24 },
-   pauseMenu: { alignSelf: 'stretch', gap: 12 },
-   pauseSyncError: { borderRadius: 12, borderWidth: 1, gap: 8, padding: 10 },
-   pauseSyncErrorText: { fontSize: 12, lineHeight: 17 },
+   finishMenuBackdrop: { alignItems: 'center', backgroundColor: 'rgba(0,0,0,0.54)', flex: 1, justifyContent: 'center', padding: 24 },
+   finishMenu: { alignSelf: 'stretch', gap: 12 },
+   workoutSyncError: { borderRadius: 12, borderWidth: 1, gap: 8, padding: 10 },
+   workoutSyncErrorText: { fontSize: 12, lineHeight: 17 },
     positionMenu: { alignSelf: 'stretch', gap: 10 },
     positionOption: { borderRadius: 12, borderWidth: 1, minHeight: 48, paddingHorizontal: 12, paddingVertical: 10 },
     positionOptionText: { fontSize: 14, fontWeight: '800' },
     positionCurrentText: { fontSize: 12, marginTop: 2 },
-   pauseMenuTitleRow: { alignItems: 'center', flexDirection: 'row', gap: 9 },
-   pauseMenuDot: { borderRadius: 6, height: 12, width: 12 },
-   pauseMenuTitle: { fontSize: 20, fontWeight: '900' },
-   pauseMenuCopy: { fontSize: 14, lineHeight: 20 },
-   pauseCancelButton: { alignItems: 'center', minHeight: 44, justifyContent: 'center' },
-   pauseCancelText: { color: '#EF4444', fontSize: 14, fontWeight: '800' },
+   finishMenuTitleRow: { alignItems: 'center', flexDirection: 'row', gap: 9 },
+   finishMenuDot: { borderRadius: 6, height: 12, width: 12 },
+   finishMenuTitle: { fontSize: 20, fontWeight: '900' },
+   finishMenuCopy: { fontSize: 14, lineHeight: 20 },
+   cancelWorkoutButton: { alignItems: 'center', minHeight: 44, justifyContent: 'center' },
+   cancelWorkoutText: { color: '#EF4444', fontSize: 14, fontWeight: '800' },
   center: { justifyContent: 'center', padding: 20 },
   doneCard: { alignItems: 'center', padding: 32 },
   doneEmoji: { fontSize: 48, marginBottom: 12 },

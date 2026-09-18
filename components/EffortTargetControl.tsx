@@ -9,11 +9,12 @@ type EffortMode = EffortTarget['kind'] | 'none';
 
 interface EffortTargetControlProps {
   value?: EffortTarget;
+  actual?: boolean;
   disabled?: boolean;
   onChange: (target: EffortTarget | undefined) => void;
 }
 
-export function EffortTargetControl({ value, disabled = false, onChange }: EffortTargetControlProps) {
+export function EffortTargetControl({ value, actual = false, disabled = false, onChange }: EffortTargetControlProps) {
   const { theme } = useTheme();
   const [pendingMode, setPendingMode] = useState<EffortTarget['kind'] | null>(null);
   const [isEditing, setIsEditing] = useState(false);
@@ -42,9 +43,9 @@ export function EffortTargetControl({ value, disabled = false, onChange }: Effor
   if (!isEditing) {
     const accessibilityLabel = value
       ? `Editar ${value.kind.toUpperCase()} ${value.value}`
-      : 'Configurar intensidad objetivo';
+      : actual ? 'Registrar esfuerzo realizado' : 'Configurar intensidad objetivo';
     return <View style={styles.wrap}>
-      <Text style={[styles.label, { color: theme.textMuted }]}>Intensidad objetivo</Text>
+      <Text style={[styles.label, { color: theme.textMuted }]}>{actual ? 'Esfuerzo realizado' : 'Intensidad objetivo'}</Text>
       <HapticPressable
         accessibilityRole="button"
         accessibilityLabel={accessibilityLabel}
@@ -62,7 +63,7 @@ export function EffortTargetControl({ value, disabled = false, onChange }: Effor
 
   return (
     <View style={styles.wrap}>
-      <Text style={[styles.label, { color: theme.textMuted }]}>Intensidad objetivo</Text>
+      <Text style={[styles.label, { color: theme.textMuted }]}>{actual ? 'Esfuerzo realizado' : 'Intensidad objetivo'}</Text>
       <View accessibilityRole="radiogroup" style={styles.modes}>
         {([
           ['none', 'Sin objetivo'],
@@ -73,7 +74,7 @@ export function EffortTargetControl({ value, disabled = false, onChange }: Effor
           return <HapticPressable
             key={candidate}
             accessibilityRole="radio"
-            accessibilityLabel={candidate === 'none' ? 'Sin objetivo' : label}
+            accessibilityLabel={candidate === 'none' ? (actual ? 'Sin registrar' : 'Sin objetivo') : label}
             accessibilityState={{ selected, disabled }}
             disabled={disabled}
             onPress={() => selectMode(candidate)}

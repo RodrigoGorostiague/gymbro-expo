@@ -1,0 +1,44 @@
+import React from 'react';
+import { act } from 'react-test-renderer';
+import { beforeEach, expect, test, vi } from 'vitest';
+import { findButton, findInputs, render, resetRuntimeHarness, setMockData, setMockParams } from './helpers/runtimeHarness';
+import EditRoutineScreen from '../app/routine/[id]';
+import { isValidPerformance } from '../utils/workoutAttempts';
+
+beforeEach(resetRuntimeHarness);
+function setup(loadMode = 'external-load') {
+  const routine = { id:'audit', name:'Audit', muscleGroups:['abdomen'], createdAt:'2026-09-18', exercises:[{
+    id:'exercise', name:'Rueda abdominal', variant:'rueda', muscleGroups:['abdomen'], loadMode, loadUnit:'kg',
+    sets:[{ id:'s1', tipo:1, weight:0, reps:10, effortTarget:{kind:'rir',value:2}, backoffGroupId:'b1' },
+      { id:'s2', tipo:2, weight:0, reps:8, effortTarget:{kind:'rpe',value:8}, backoffGroupId:'b1' }],
+  }] };
+  const updateRoutine = vi.fn(async()=>undefined);
+  setMockParams({id:'audit'});
+  setMockData({exercises:[],getRoutine:()=>routine,getExercise:vi.fn(),updateRoutine});
+  return {screen:render(React.createElement(EditRoutineScreen)),updateRoutine};
+}
+test('AUDIT preserves independent effort targets and backoff group when saving existing sets',async()=>{
+  const {screen,updateRoutine}=setup();
+  await act(async()=>{await findButton(screen.root,'Guardar rutina').props.onPress();});
+  const sets=updateRoutine.mock.calls[0][0].exercises[0].sets;
+  expect(sets.map((s:any)=>s.effortTarget)).toEqual([{kind:'rir',value:2},{kind:'rpe',value:8}]);
+  expect(sets.map((s:any)=>s.backoffGroupId)).toEqual(['b1','b1']);
+});
+test('AUDIT deleting a set leaves a one-member backoff group with no normalization',async()=>{
+  const {screen,updateRoutine}=setup();
+  const remove=screen.root.findAll((n:any)=>n.type==='HapticPressable'&&n.findAll((c:any)=>c.type==='Text'&&c.children.join('')==='−').length>0)[0];
+  act(()=>remove.props.onPress());
+  await act(async()=>{await findButton(screen.root,'Guardar rutina').props.onPress();});
+  expect(updateRoutine.mock.calls[0][0].exercises[0].sets).toEqual([expect.objectContaining({id:'s2',backoffGroupId:'b1',effortTarget:{kind:'rpe',value:8}})]);
+});
+test('AUDIT bodyweight routine still shows mandatory kg-shaped weight inputs',()=>{
+  const {screen}=setup('bodyweight');
+  const weights=findInputs(screen.root,n=>n.props.keyboardType==='decimal-pad');
+  expect(weights).toHaveLength(2);
+  expect(weights.every(n=>n.props.placeholder==='kg')).toBe(true);
+});
+test('AUDIT current result validator rejects duration-only and bodyweight-without-measurement',()=>{
+  expect(isValidPerformance({mode:'bodyweight',unit:'kg',bodyweight:70,durationSeconds:30} as any)).toBe(false);
+  expect(isValidPerformance({mode:'bodyweight',unit:'kg',bodyweight:0,reps:10})).toBe(false);
+  expect(isValidPerformance({mode:'bodyweight',unit:'kg',bodyweight:70,reps:10})).toBe(true);
+});

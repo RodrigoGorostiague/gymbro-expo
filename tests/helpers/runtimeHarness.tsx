@@ -184,7 +184,7 @@ export function setMockParams(params: Record<string, unknown>) {
 }
 
 export function setMockData(data: Record<string, unknown>) {
-  currentData = data;
+  currentData = { prepareOnlineWorkout: async () => ({ ...(currentData.activeWorkoutDraft as object), transportMode: 'online' }), ...data };
 }
 
 export function render(element: React.ReactElement): ReactTestRenderer {

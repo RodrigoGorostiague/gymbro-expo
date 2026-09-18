@@ -346,7 +346,7 @@ describe('global exercise variant catalog', () => {
   });
 
   test('keeps routine draft decimals visible until save and commits normalized kilograms', async () => {
-    const updateRoutine = vi.fn();
+    const updateRoutine = vi.fn(async (routine) => routine);
     const routine = {
       id: 'routine-1',
       name: 'Upper A',
@@ -367,10 +367,11 @@ describe('global exercise variant catalog', () => {
       exercises: [],
       getExercise: vi.fn(),
       getRoutine: vi.fn(() => routine),
-      updateRoutine,
+      saveRoutineDraft: updateRoutine,
     });
 
     const screen = render(React.createElement(EditRoutineScreen));
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 0)); });
     const [weightInput] = findInputs(screen.root, (node) => node.props.keyboardType === 'decimal-pad');
     expect(weightInput.props.value).toBe('2.5');
 
@@ -380,9 +381,9 @@ describe('global exercise variant catalog', () => {
 
     changeText(draftInput, '.5');
     const saveButton = findButton(screen.root, 'Guardar rutina');
-    await Promise.resolve(saveButton.props.onPress());
+    await act(async () => { await saveButton.props.onPress(); await new Promise((resolve) => setTimeout(resolve, 0)); });
 
-    expect(updateRoutine).toHaveBeenCalledWith(
+    expect(updateRoutine.mock.calls[0]?.[0]).toEqual(
       expect.objectContaining({
         exercises: [expect.objectContaining({
           sets: [expect.objectContaining({ weight: 0.5 })],
@@ -393,23 +394,24 @@ describe('global exercise variant catalog', () => {
   });
 
   test('renders and saves an intentional zero kilogram prescription', async () => {
-    const updateRoutine = vi.fn();
+    const updateRoutine = vi.fn(async (routine) => routine);
     const routine = {
       id: 'routine-zero', name: 'Zero load', muscleGroups: ['pecho'], createdAt: '2026-07-31T00:00:00.000Z',
       exercises: [{ id: 'routine-ex-zero', definitionId: 'system:press-banca', name: 'Press banca', muscleGroups: ['pecho'], variant: 'barra', sets: [{ id: 'set-zero', tipo: 1, weight: 0, reps: 8 }] }],
     };
     setMockParams({ id: 'routine-zero' });
-    setMockData({ exercises: [], definitions: [], getExercise: vi.fn(), getRoutine: vi.fn(() => routine), updateRoutine });
+    setMockData({ exercises: [], definitions: [], getExercise: vi.fn(), getRoutine: vi.fn(() => routine), saveRoutineDraft: updateRoutine });
 
     const screen = render(React.createElement(EditRoutineScreen));
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 0)); });
     const [weightInput] = findInputs(screen.root, (node) => node.props.keyboardType === 'decimal-pad');
     expect(weightInput.props.value).toBe('0');
-    await Promise.resolve(findButton(screen.root, 'Guardar rutina').props.onPress());
-    expect(updateRoutine).toHaveBeenCalledWith(expect.objectContaining({ exercises: [expect.objectContaining({ sets: [expect.objectContaining({ weight: 0 })] })] }));
+    await act(async () => { findButton(screen.root, 'Guardar rutina').props.onPress(); await new Promise((resolve) => setTimeout(resolve, 0)); });
+    expect(updateRoutine.mock.calls[0]?.[0]).toEqual(expect.objectContaining({ exercises: [expect.objectContaining({ sets: [expect.objectContaining({ weight: 0 })] })] }));
     screen.unmount();
   });
 
-  test('keeps the add-exercise CTA reachable for empty and dense routine layouts', () => {
+  test('keeps the add-exercise CTA reachable for empty and dense routine layouts', async () => {
     setMockParams({ id: 'routine-1' });
     setMockData({
       exercises: [],
@@ -425,10 +427,12 @@ describe('global exercise variant catalog', () => {
     });
 
     const emptyScreen = render(React.createElement(EditRoutineScreen));
-    expect(findText(emptyScreen.root, 'Todavía no agregaste ejercicios')).toBeTruthy();
-    expect(findButton(emptyScreen.root, '+ Agregar ejercicio')).toBeTruthy();
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 0)); });
+    expect(findText(emptyScreen.root, 'Empieza por los ejercicios')).toBeTruthy();
+    expect(findButton(emptyScreen.root, '+ Ejercicios')).toBeTruthy();
     expect(findButton(emptyScreen.root, 'Guardar rutina')).toBeTruthy();
     emptyScreen.unmount();
+    storage.data.clear();
 
     setMockData({
       exercises: [],
@@ -451,8 +455,9 @@ describe('global exercise variant catalog', () => {
     });
 
     const denseScreen = render(React.createElement(EditRoutineScreen));
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 0)); });
     expect(findTextsContaining(denseScreen.root, 'Exercise 6')).toHaveLength(1);
-    expect(findButton(denseScreen.root, '+ Agregar ejercicio')).toBeTruthy();
+    expect(findButton(denseScreen.root, '+ Ejercicios')).toBeTruthy();
     expect(findButton(denseScreen.root, 'Guardar rutina')).toBeTruthy();
     denseScreen.unmount();
   });

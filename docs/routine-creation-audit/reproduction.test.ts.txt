@@ -1,0 +1,60 @@
+// Evidencia de auditoría: copiar a tests/routineCreationAuditProbe.test.ts para ejecutar.
+// Estas expectativas caracterizan defectos actuales; no son criterios de corrección.
+import React from 'react';
+import { act } from 'react-test-renderer';
+import { beforeEach, expect, test, vi } from 'vitest';
+import { changeText, findButton, findInputs, findText, mockAlert, mockRouter, render, resetRuntimeHarness, setMockData, setMockParams } from './helpers/runtimeHarness';
+import EditRoutineScreen from '../app/routine/[id]';
+
+beforeEach(resetRuntimeHarness);
+const saved = { id: 'audit-routine', name: 'Guardada', muscleGroups: ['pecho'], exercises: [], createdAt: '2026-09-18' };
+const exercise = { id: 'audit-exercise', name: 'Press de prueba', muscleGroups: ['pecho'], variant: 'barra', defaultSets: [{ id: 'default-set', tipo: 1, weight: 20, reps: 10 }] };
+function setup(routine: any = saved) {
+  const data = { exercises: [exercise], definitions: [], getRoutine: () => routine, getExercise: () => exercise, updateRoutine: vi.fn(async () => undefined) };
+  setMockParams({ id: saved.id });
+  setMockData(data);
+  return { data, screen: render(React.createElement(EditRoutineScreen)) };
+}
+function add(screen: any) {
+  act(() => screen.root.find((node: any) => node.type === 'ExercisePicker').props.onSelect(exercise));
+}
+test('AUDIT reproduces lost exercise and name after getRoutine identity changes, with same saved routine', () => {
+  const { data, screen } = setup();
+  add(screen);
+  changeText(findInputs(screen.root, n => n.props.placeholder === 'Nombre de la rutina')[0], 'Borrador');
+  expect(findText(screen.root, exercise.name)).toBeTruthy();
+  setMockData({ ...data, getRoutine: () => saved });
+  act(() => screen.update(React.createElement(EditRoutineScreen)));
+  expect(findText(screen.root, exercise.name)).toBeUndefined();
+  expect(findInputs(screen.root, n => n.props.placeholder === 'Nombre de la rutina')[0].props.value).toBe('Guardada');
+});
+test('AUDIT reproduces blank default weight and rejected save after catalog addition', async () => {
+  const { data, screen } = setup();
+  add(screen);
+  expect(findInputs(screen.root, n => n.props.keyboardType === 'decimal-pad')[0].props.value).toBe('');
+  await act(async () => { await findButton(screen.root, 'Guardar rutina').props.onPress(); });
+  expect(data.updateRoutine).not.toHaveBeenCalled();
+  expect(mockAlert.alert).toHaveBeenCalledWith('Validación', 'Cada serie debe tener un peso válido mayor o igual a 0.');
+});
+test('AUDIT reproduces loss after unmount and reopening', () => {
+  const { screen } = setup();
+  add(screen);
+  expect(findText(screen.root, exercise.name)).toBeTruthy();
+  act(() => screen.unmount());
+  const reopened = render(React.createElement(EditRoutineScreen));
+  expect(findText(reopened.root, exercise.name)).toBeUndefined();
+});
+test('AUDIT reproduces navigation back when routine is absent during hydration', () => {
+  setMockParams({ id: saved.id });
+  setMockData({ exercises: [], getRoutine: () => undefined, getExercise: vi.fn(), updateRoutine: vi.fn(), dataState: 'loading' });
+  render(React.createElement(EditRoutineScreen));
+  expect(mockRouter.back).toHaveBeenCalledOnce();
+});
+test('AUDIT reproduces empty weights on backoff copied from a configured set', async () => {
+  const { data, screen } = setup({ ...saved, exercises: [{ ...exercise, id: 'routine-ex', sets: [{ id: 'configured-set', tipo: 1, weight: 20, reps: 10 }] }] });
+  const button = screen.root.find((node: any) => node.type === 'HapticPressable' && node.findAll((child: any) => child.type === 'Text' && child.children.join('') === '+ Backoff (2 subseries)').length > 0);
+  act(() => button.props.onPress());
+  expect(findInputs(screen.root, n => n.props.keyboardType === 'decimal-pad').map(n => n.props.value)).toEqual(['20', '', '']);
+  await act(async () => { await findButton(screen.root, 'Guardar rutina').props.onPress(); });
+  expect(data.updateRoutine).not.toHaveBeenCalled();
+});
