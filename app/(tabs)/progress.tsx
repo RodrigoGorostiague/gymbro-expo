@@ -7,6 +7,7 @@ import { GlassCard, ThemeBackground } from '../../components/GlassCard';
 import { HapticPressable } from '../../components/HapticPressable';
 import { LogoutButton } from '../../components/LogoutButton';
 import { SimpleLineChart } from '../../components/LineChart';
+import { WeeklySummary } from '../../components/progress/WeeklySummary';
 import { EmptyFilter, EntityPanel, FilterChip } from '../../components/progress/Filters';
 import { useData } from '../../context/DataContext';
 import { useAuth } from '../../context/AuthContext';
@@ -93,6 +94,7 @@ export default function ProgressScreen() {
             <Text style={[styles.body, { color: theme.textMuted }]}>{dataState === 'ready' ? `Comparado con ${formatPeriod(core.periods.previous.start, core.periods.previous.end)}. Las señales se muestran por separado.` : 'No mostraremos afirmaciones hasta terminar de cargar tus datos.'}</Text>
             {dataState === 'ready' ? <Text style={[styles.body, { color: theme.textMuted }]}>Series válidas: {core.current.validSets} ahora · {core.previous.validSets} en el período anterior. Más series no siempre significa mejor recuperación.</Text> : null}
           </GlassCard>
+          {dataState === 'ready' ? <WeeklySummary /> : null}
           <GlassCard><ExperienceProgressCard progress={experienceProgress} frameId={ownProfile?.frameId} theme={theme} title="Nivel y próximos hitos" /></GlassCard>
 
           <View accessibilityRole="tablist" style={styles.periodRow}>{PERIODS.map((item) => <HapticPressable key={item.value} accessibilityRole="tab" accessibilityState={{ selected: periodDays === item.value }} accessibilityLabel={`Período ${item.label}`} onPress={() => { setPeriodDays(item.value); setChartRevision((current) => current + 1); }} style={[styles.period, { borderColor: theme.glassBorder, backgroundColor: periodDays === item.value ? theme.secondary : theme.glass }]}><Text style={{ color: periodDays === item.value ? theme.onPrimary : theme.text, fontWeight: '800' }}>{item.label}</Text></HapticPressable>)}</View>
