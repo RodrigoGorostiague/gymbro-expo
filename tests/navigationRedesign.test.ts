@@ -1,0 +1,72 @@
+import React from 'react';
+import { act } from 'react-test-renderer';
+import { beforeEach, describe, expect, test, vi } from 'vitest';
+import { findButton, findText, mockRouter, press, render, resetRuntimeHarness, setMockData } from './helpers/runtimeHarness';
+
+vi.mock('../components/LogoutButton', () => ({ LogoutButton: () => null }));
+
+import TrainEntryScreen from '../app/(tabs)/train';
+
+describe('Train entry ownership', () => {
+  beforeEach(() => resetRuntimeHarness());
+
+  test('renders routines when no active block exists without navigating away from Train', () => {
+    setMockData({ dataState: 'ready', routines: [{ id: 'routine-1', name: 'Rutina', exercises: [], muscleGroups: [] }], mesocycles: [] });
+    const tree = render(React.createElement(TrainEntryScreen));
+
+    expect(findText(tree.root, 'Biblioteca de rutinas')).toBeDefined();
+    expect(mockRouter.replace).not.toHaveBeenCalled();
+    expect(mockRouter.push).not.toHaveBeenCalled();
+  });
+
+  test('prioritizes an active mesocycle and exposes its summary action from Train', () => {
+    setMockData({ dataState: 'ready', routines: [], mesocycles: [{ id: 'active-1', name: 'Bloque de fuerza', goal: 'Ganar fuerza', status: 'active', durationWeeks: 4, weeks: [], createdAt: '' }] });
+    const tree = render(React.createElement(TrainEntryScreen));
+
+    expect(findText(tree.root, 'Activo')).toBeDefined();
+    expect(findText(tree.root, 'Bloque de fuerza')).toBeDefined();
+    press(tree.root.find((node) => node.props.accessibilityLabel === 'Abrir resumen de Bloque de fuerza'));
+    expect(mockRouter.push).toHaveBeenCalledWith('/mesocycle/summary/active-1');
+  });
+
+  test('renders routines for a first-time athlete without navigating away from Train', () => {
+    setMockData({ dataState: 'ready', routines: [] });
+    const tree = render(React.createElement(TrainEntryScreen));
+
+    expect(findText(tree.root, 'Biblioteca de rutinas')).toBeDefined();
+    expect(mockRouter.replace).not.toHaveBeenCalled();
+    expect(mockRouter.push).not.toHaveBeenCalled();
+  });
+
+  test('the first-session briefing opens creation without requiring a block', () => {
+    setMockData({ dataState: 'ready', routines: [], mesocycles: [] });
+    const tree = render(React.createElement(TrainEntryScreen));
+    press(findButton(tree.root, 'Crear mi primera rutina'));
+    expect(mockRouter.push).toHaveBeenCalledWith('/routine/create');
+  });
+
+  test('keeps the loading screen until the data lifecycle is ready', () => {
+    setMockData({ dataState: 'loading', routines: [] });
+    const tree = render(React.createElement(TrainEntryScreen));
+    expect(mockRouter.replace).not.toHaveBeenCalled();
+    expect(mockRouter.push).not.toHaveBeenCalled();
+
+    setMockData({ dataState: 'ready', routines: [{ id: 'routine-1', name: 'Rutina', exercises: [], muscleGroups: [] }], mesocycles: [] });
+    act(() => { tree.update(React.createElement(TrainEntryScreen)); });
+    expect(findText(tree.root, 'Biblioteca de rutinas')).toBeDefined();
+    expect(mockRouter.replace).not.toHaveBeenCalled();
+    expect(mockRouter.push).not.toHaveBeenCalled();
+  });
+
+  test('shows a recoverable error instead of leaving a failed load on the preparation screen', () => {
+    const retryData = vi.fn();
+    setMockData({ dataState: 'error', dataError: 'No se pudo abrir la biblioteca.', retryData, routines: [] });
+    const tree = render(React.createElement(TrainEntryScreen));
+
+    expect(findText(tree.root, 'No se pudo abrir la biblioteca.')).toBeDefined();
+    expect(mockRouter.replace).not.toHaveBeenCalled();
+    expect(mockRouter.push).not.toHaveBeenCalled();
+    press(findButton(tree.root, 'Reintentar'));
+    expect(retryData).toHaveBeenCalledOnce();
+  });
+});

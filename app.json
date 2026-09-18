@@ -2,9 +2,9 @@
   "expo": {
     "name": "GymBro",
     "slug": "GymBro",
-    "version": "1.0.0",
+    "version": "0.8.0",
     "orientation": "portrait",
-    "icon": "./assets/icon.png",
+    "icon": "./assets/gymbro-icon.png",
     "userInterfaceStyle": "dark",
     "scheme": "gymbro",
     "ios": {
@@ -12,16 +12,12 @@
     },
     "android": {
       "package": "com.wagiri.gymbro",
-      "adaptiveIcon": {
-        "backgroundColor": "#1A0A00",
-        "foregroundImage": "./assets/android-icon-foreground.png",
-        "backgroundImage": "./assets/android-icon-background.png",
-        "monochromeImage": "./assets/android-icon-monochrome.png"
-      },
+      "googleServicesFile": "./google-services.json",
+      "icon": "./assets/gymbro-icon.png",
       "predictiveBackGestureEnabled": false
     },
     "web": {
-      "favicon": "./assets/favicon.png",
+      "favicon": "./assets/gymbro-icon.png",
       "bundler": "metro"
     },
     "plugins": [
@@ -30,12 +26,44 @@
       [
         "expo-notifications",
         {
-          "color": "#FF69B4",
-          "defaultChannel": "partner_messages",
-          "sounds": []
+          "icon": "./assets/notification-icon.png",
+          "color": "#FF9700",
+          "defaultChannel": "social_v2",
+          "sounds": [
+            "./assets/sounds/notification_social.wav"
+          ]
         }
       ],
-      "expo-font"
+      "expo-font",
+      "expo-secure-store",
+      "expo-audio",
+      "expo-asset",
+      "@react-native-community/datetimepicker",
+      "expo-image",
+      [
+        "expo-sensors",
+        {
+          "motionPermission": "Allow $(PRODUCT_NAME) to use device motion for background parallax."
+        }
+      ],
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "Permite usar la cámara para registrar tu evolución corporal.",
+          "recordAudioAndroid": false,
+          "barcodeScannerEnabled": false
+        }
+      ],
+      [
+        "expo-media-library",
+        {
+          "savePhotosPermission": "Permite guardar las fotos confirmadas en tu galería.",
+          "photosPermission": "Permite guardar tus fotos de evolución corporal.",
+          "granularPermissions": [
+            "photo"
+          ]
+        }
+      ]
     ],
     "extra": {
       "firebaseApiKey": "AIzaSyDx1ndii4iuEpNJi171VqNJmet-61el06M",

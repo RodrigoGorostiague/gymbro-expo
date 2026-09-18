@@ -101,3 +101,29 @@
 |---|---|
 | Focused/full verification | Focused Vitest: 4 files, 47/47; `TZ=America/New_York npm test`: 5 files, 56/56; typecheck, `git diff --check`, and Android Expo export passed. |
 | Runtime / rollback / size | Device walkthrough blocked in non-interactive shell. Roll back only PR8 capture/history/fallback and focused tests in the reported files. Authored review size: 399 additions + deletions; staged binary fingerprint `511439b156989cb49d0f43143ea78be4365accf7` preserved. |
+
+## Final Gate Reconciliation (2026-07-27)
+| Evidence | Result |
+|---|---|
+| Focused test | `TZ=America/New_York npx vitest run tests/workoutAttempts.test.ts tests/storage.test.ts tests/rewardSaga.test.ts tests/analytics.test.ts` — exit 0; 4 files passed, 54 tests passed. |
+| Full test | `TZ=America/New_York npm test` — exit 0; 11 files passed, 90 tests passed. |
+| Typecheck | `npx tsc --noEmit` — exit 0; no diagnostics. |
+| Runtime/build harness | `npx expo export --platform android --output-dir /tmp/opencode/gymbro-meaningful-progress-dashboard-reconcile` — exit 0; Metro bundled 1,951 modules and emitted a 6.3 MB Android bundle. |
+| Diff integrity | `git diff --check` — exit 0. Existing unrelated `exercise-catalog` work remained untouched. |
+| Rollback boundary | Revert only this reconciliation evidence section; no application behavior or tests changed. |
+| Remaining gate | Task 4.3 remains unchecked because no physical device/emulator walkthrough proved profile switching, search/retry, orientation, screen-reader behavior, or Glass/theme visuals, and ordinary bounded review plus SDD verification are downstream phases not run by apply. |
+
+## Connected Android Attempt (2026-07-27, ordinal 2)
+| Evidence | Result |
+|---|---|
+| Runtime candidate | Expo Go `56.0.1` launched the current SDK 56 bundle on `motorola edge 30 pro` (`192.168.0.194:38637`); Metro bundled 2,105 modules. The installed `com.wagiri.gymbro` build was not used because Expo Go bound the walkthrough to current source. |
+| Profiles and states | `rodaja` showed 1 attempt, 17 valid sets, 100% adherence, history, and insufficient-trend copy; `brisas` showed the profile-isolated zero-activity/empty state. No user workout/history data was mutated. |
+| Search | Exercise history search accepted `zzz` and rendered `No hay opciones que coincidan con la búsqueda`; clearing it restored options and selecting `Press plano` rendered the honest insufficient-data state. |
+| Accessibility | TalkBack was enabled and bound with touch exploration; keyboard traversal visibly focused the `Rutinas` dashboard tab. Exact spoken chart/filter labels and announcements were not captured, so screen-reader proof is incomplete. |
+| Orientation and size | A reversible forced-landscape request left the app in portrait because `app.json` declares `orientation: portrait`; no landscape dashboard reflow was observed. The runtime was a phone, not a tablet, and no tablet claim is made. |
+| Glass/theme visuals | Screenshots showed distinct orange/brown `rodaja` and purple/light `brisas` Glass cards, borders, backgrounds, selected controls, and readable empty/populated states. |
+| Retry/loading/error | No safe existing fixture produced a storage error on the device. Loading was too transient to capture, and destructive AsyncStorage corruption was not attempted; therefore device retry/error/loading proof is missing. |
+| Focused automation | `TZ=America/New_York npx vitest run tests/workoutAttempts.test.ts tests/storage.test.ts tests/rewardSaga.test.ts tests/analytics.test.ts` — exit 0; 4 files and 54 tests passed. `npx tsc --noEmit` — exit 0. |
+| Process and cleanup | Metro PID 1016996 served port 8081, bundled successfully, and was terminated; port 8081 was closed. Expo Go was force-stopped. TalkBack, touch exploration, rotation, and animation settings were restored to their captured values. |
+| Task decision | **FAILED / unchecked** — task 4.3 still lacks real device retry/error/loading, landscape reflow, complete screen-reader announcement evidence, and any required tablet-size proof. |
+| Rollback boundary | Revert only this connected-attempt section; no application behavior, tests, or user workout/history data changed. |

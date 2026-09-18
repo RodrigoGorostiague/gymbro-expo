@@ -1,0 +1,139 @@
+import { actualEffortFields, actualEffortMetrics } from '../utils/actualEffort';
+import { CatalogImportPlan, CompletedExercise, Routine, WorkoutRecapComment, WorkoutRecapDetail, WorkoutRecapSharePayload } from '../types';
+import { supabase, supabaseConfigurationError } from './supabase';
+import { avatarIdOrDefault } from '../constants/avatars';
+
+export type JointVisibility = 'public' | 'circle' | 'private';
+export type JointParticipantStatus = 'invited' | 'active' | 'completed' | 'declined';
+export type JointWorkoutLiveState = 'training' | 'resting' | 'paused';
+export type JointWorkoutLiveProgress = { state: JointWorkoutLiveState; completedExercises: number; totalExercises: number; completedSets: number; totalSets: number; restEndsAt?: string; updatedAt: string };
+export type JointRoutine = NonNullable<WorkoutRecapSharePayload['routine']>;
+export type JointCompletedWorkout = { routineName: string; durationSeconds: number; exercises: Array<{ name: string; muscleGroupIds: string[]; sets: Array<{ weight: number; reps: number; durationSeconds?: number; completed: boolean; actualEffort?: import('../types').ActualEffort }> }>; sharePayload?: WorkoutRecapSharePayload };
+export type JointParticipant = { id: string; alias: string; avatarId: string; frameId?: string; titleId?: string; status: JointParticipantStatus; terminalReason?: 'cancelled' | 'expired'; relationshipKind?: 'bro' | 'partner'; visibility?: JointVisibility; themeId?: string | null; isSelf?: boolean; liveProgress?: JointWorkoutLiveProgress; workout?: JointCompletedWorkout | null; sharePayload?: WorkoutRecapSharePayload | null; canInviteBro?: boolean; reactionCount?: number; commentCount?: number; viewerHasReacted?: boolean };
+export type JointWorkout = { id: string; initiatorId?: string; suggestedRoutine?: JointRoutine; createdAt: string; completedAt?: string | null; participants: JointParticipant[] };
+export type ActiveWorkoutInviteCandidate = { id: string; alias: string; avatarId: string; frameId?: string; titleId?: string; themeId: string | null; relationshipKind: 'bro' | 'partner'; groupMemberCount: number };
+
+function client() { if (!supabase) throw new Error(supabaseConfigurationError ?? 'Supabase is unavailable.'); return supabase; }
+function routineSnapshot(routine: Routine): JointRoutine {
+  return { name: routine.name.trim(), muscleGroups: [...new Set(routine.muscleGroups)].sort(), exercises: routine.exercises.map((exercise) => {
+    const groups = new Map<string, number>(); const drops = new Map<string, number>();
+    return { name: exercise.name.trim(), muscleGroups: [...new Set(exercise.muscleGroups)].sort(), loadMode: exercise.loadMode ?? exercise.definitionSnapshot?.loadMode ?? 'external-load', loadUnit: exercise.loadUnit ?? exercise.definitionSnapshot?.loadUnit ?? 'kg', variant: exercise.variant, sets: exercise.sets.map(({ tipo, weight, reps, effortTarget, backoffGroupId, dropGroupId, durationSeconds, loadBasis }) => ({ tipo, weight, reps, ...(durationSeconds !== undefined ? { durationSeconds } : {}), ...(loadBasis ? { loadBasis } : {}), ...(dropGroupId ? { dropGroup: drops.get(dropGroupId) ?? (drops.set(dropGroupId, drops.size), drops.size - 1) } : {}), ...(effortTarget ? { effortTarget } : {}), ...(backoffGroupId ? { backoffGroup: groups.get(backoffGroupId) ?? (groups.set(backoffGroupId, groups.size), groups.size - 1) } : {}) })) };
+  }) };
+}
+function jointId(value: string) { return value.replace(/[^a-zA-Z0-9_-]/g, ''); }
+function importedSets(sets: JointRoutine['exercises'][number]['sets'], prefix: string) {
+  const groups = new Map<number, string>();
+  return sets.map(({ backoffGroup, dropGroup, durationSeconds, loadBasis, tipo, weight, reps, effortTarget }, setIndex) => ({
+    tipo, weight, reps, ...(durationSeconds !== undefined ? { durationSeconds } : {}), ...(loadBasis ? { loadBasis } : {}), ...(dropGroup !== undefined ? { dropGroupId: `${prefix}:drop:${dropGroup}` } : {}), ...(effortTarget ? { effortTarget } : {}),
+    id: `${prefix}:${setIndex}`,
+    ...(backoffGroup === undefined ? {} : { backoffGroupId: groups.get(backoffGroup) ?? (groups.set(backoffGroup, `${prefix}:backoff:${groups.size}`), groups.get(backoffGroup)!) }),
+  }));
+}
+export function jointRoutineImportPlan(workoutId: string, recipient: string, routine: JointRoutine): CatalogImportPlan {
+  const prefix = `joint:${jointId(workoutId)}`;
+  return { recipient, definitions: routine.exercises.map((exercise, index) => ({ id: `${prefix}:definition:${index}`, source: { kind: 'custom' as const, owner: recipient, originId: `${prefix}:definition:${index}` }, name: exercise.name, muscleGroups: exercise.muscleGroups, loadMode: exercise.loadMode, loadUnit: exercise.loadUnit, variant: exercise.variant, defaultSets: importedSets(exercise.sets, `${prefix}:set:${index}`) })), routines: [{ id: `${prefix}:routine`, name: routine.name, muscleGroups: routine.muscleGroups, createdAt: new Date().toISOString(), exercises: routine.exercises.map((exercise, index) => ({ id: `${prefix}:exercise:${index}`, definitionId: `${prefix}:definition:${index}`, catalogExerciseId: `${prefix}:definition:${index}`, name: exercise.name, muscleGroups: exercise.muscleGroups, loadMode: exercise.loadMode, loadUnit: exercise.loadUnit, variant: exercise.variant, sets: importedSets(exercise.sets, `${prefix}:set:${index}`) })) }], mesocycles: [] };
+}
+export function completedJointWorkoutInput(routine: Routine, durationSeconds: number, exercises: readonly CompletedExercise[], sharePayload?: WorkoutRecapSharePayload): JointCompletedWorkout {
+  if (!routine.name.trim() || !Number.isInteger(durationSeconds) || durationSeconds < 0 || durationSeconds > 2_147_483_647) throw new Error('This completed workout cannot be shared.');
+  return { routineName: routine.name.trim(), durationSeconds, exercises: exercises.map((exercise) => ({ name: exercise.name.trim(), muscleGroupIds: [...new Set(exercise.muscleGroupIds ?? [])].sort(), sets: exercise.sets.map(({ weight, reps, completed, actualEffort, durationSeconds }) => ({ weight, reps, completed, ...(durationSeconds !== undefined ? { durationSeconds } : {}), ...(completed ? actualEffortFields(actualEffort) : {}) })) })), ...(sharePayload ? { sharePayload } : {}) };
+}
+function asCompletedWorkout(value: unknown): JointCompletedWorkout | null { if (!value || typeof value !== 'object') return null; const row = value as Record<string, unknown>; if (typeof row.routineName !== 'string' || typeof row.durationSeconds !== 'number' || !Array.isArray(row.exercises)) return null; return { routineName: row.routineName, durationSeconds: row.durationSeconds, exercises: row.exercises.flatMap((exercise) => { if (!exercise || typeof exercise !== 'object') return []; const item = exercise as Record<string, unknown>; if (typeof item.name !== 'string' || !Array.isArray(item.muscleGroupIds) || !Array.isArray(item.sets)) return []; return [{ name: item.name, muscleGroupIds: item.muscleGroupIds.filter((muscle): muscle is string => typeof muscle === 'string'), sets: item.sets.flatMap((set) => { if (!set || typeof set !== 'object') return []; const value = set as Record<string, unknown>; return typeof value.weight === 'number' && typeof value.reps === 'number' && typeof value.completed === 'boolean' ? [{ weight: value.weight, reps: value.reps, ...(typeof value.durationSeconds === 'number' && Number.isInteger(value.durationSeconds) && value.durationSeconds >= 0 ? { durationSeconds: value.durationSeconds } : {}), completed: value.completed, ...(value.completed ? actualEffortFields(value.actualEffort) : {}) }] : []; }) }]; }) }; }
+function asComment(value: unknown): WorkoutRecapComment | null { if (!value || typeof value !== 'object' || Array.isArray(value)) return null; const row = value as Record<string, unknown>; if (typeof row.id !== 'string' || typeof row.author_alias !== 'string' || typeof row.body !== 'string' || typeof row.created_at !== 'string') return null; return { id: row.id, authorAlias: row.author_alias, authorAvatarId: avatarIdOrDefault(row.author_avatar_id), authorThemeId: typeof row.author_theme_id === 'string' ? row.author_theme_id : null, body: row.body, createdAt: row.created_at, isAuthor: row.is_author === true }; }
+function asParticipant(value: unknown): JointParticipant | null { if (!value || typeof value !== 'object') return null; const row = value as Record<string, unknown>; if (typeof row.id !== 'string' || typeof row.alias !== 'string' || !['invited', 'active', 'completed', 'declined'].includes(String(row.status))) return null; const workout = asCompletedWorkout(row.workout); const sharePayload = row.share_payload && typeof row.share_payload === 'object' ? row.share_payload as WorkoutRecapSharePayload : null; const counts = ['completed_exercises', 'total_exercises', 'completed_sets', 'total_sets'].map((key) => row[key]); const liveProgress = ['training', 'resting', 'paused'].includes(String(row.live_state)) && counts.every((count) => typeof count === 'number' && Number.isInteger(count) && count >= 0) && typeof row.live_updated_at === 'string'
+  ? { state: row.live_state as JointWorkoutLiveState, completedExercises: row.completed_exercises as number, totalExercises: row.total_exercises as number, completedSets: row.completed_sets as number, totalSets: row.total_sets as number, ...(typeof row.rest_ends_at === 'string' ? { restEndsAt: row.rest_ends_at } : {}), updatedAt: row.live_updated_at }
+  : undefined;
+  return { id: row.id, alias: row.alias, avatarId: avatarIdOrDefault(row.avatar_id), status: row.status as JointParticipantStatus, ...(row.terminal_reason === 'cancelled' || row.terminal_reason === 'expired' ? { terminalReason: row.terminal_reason } : {}), ...(typeof row.equipped_frame_id === 'string' ? { frameId: row.equipped_frame_id } : {}), ...(typeof row.equipped_title_id === 'string' ? { titleId: row.equipped_title_id } : {}), ...(row.relationship_kind === 'bro' || row.relationship_kind === 'partner' ? { relationshipKind: row.relationship_kind } : {}), ...(typeof row.presentation_theme_id === 'string' || row.presentation_theme_id === null ? { themeId: row.presentation_theme_id } : {}), ...(typeof row.visibility === 'string' && ['public', 'circle', 'private'].includes(row.visibility) ? { visibility: row.visibility as JointVisibility } : {}), ...(row.is_self === true ? { isSelf: true } : {}), ...(liveProgress ? { liveProgress } : {}), ...(workout ? { workout } : {}), ...(sharePayload ? { sharePayload } : {}), ...(row.can_invite_bro === true ? { canInviteBro: true } : {}) }; }
+function asWorkout(value: unknown): JointWorkout | null { if (!value || typeof value !== 'object') return null; const row = value as Record<string, unknown>; if (typeof row.id !== 'string' || typeof row.created_at !== 'string') return null; return { id: row.id, ...(typeof row.initiator_id === 'string' ? { initiatorId: row.initiator_id } : {}), ...(row.suggested_routine && typeof row.suggested_routine === 'object' ? { suggestedRoutine: row.suggested_routine as JointRoutine } : {}), createdAt: row.created_at, ...(typeof row.completed_at === 'string' ? { completedAt: row.completed_at } : {}), participants: Array.isArray(row.participants) ? row.participants.flatMap((participant) => { const mapped = asParticipant(participant); return mapped ? [mapped] : []; }) : [] }; }
+export { routineSnapshot };
+export async function createJointWorkout(targetId: string, routine: Routine) { const { data, error } = await client().rpc('create_joint_workout', { target: targetId, suggested_routine_input: routineSnapshot(routine) }); if (error) throw new Error(error.message); return String(data); }
+export async function addJointWorkoutParticipant(workoutId: string, targetId: string): Promise<void> { const { error } = await client().rpc('add_joint_workout_participant', { workout_id: workoutId, target: targetId }); if (error) throw new Error(error.message); }
+export async function inviteActiveWorkoutMember(targetId: string, routine: Routine): Promise<string> { const { data, error } = await client().rpc('invite_active_workout_member', { target: targetId, suggested_routine_input: routineSnapshot(routine) }); if (error) throw new Error(error.message); return String(data); }
+export async function listActiveWorkoutInviteCandidates(): Promise<ActiveWorkoutInviteCandidate[]> { const { data, error } = await client().rpc('list_active_workout_invite_candidates', {}); if (error) throw new Error(error.message); return Array.isArray(data) ? data.flatMap((value) => { if (!value || typeof value !== 'object') return []; const row = value as Record<string, unknown>; const groupMemberCount = row.group_member_count; return typeof row.id === 'string' && typeof row.alias === 'string' && (row.relationship_kind === 'bro' || row.relationship_kind === 'partner') && typeof groupMemberCount === 'number' && Number.isInteger(groupMemberCount) && groupMemberCount > 0 ? [{ id: row.id, alias: row.alias, avatarId: avatarIdOrDefault(row.avatar_id), ...(typeof row.equipped_frame_id === 'string' ? { frameId: row.equipped_frame_id } : {}), ...(typeof row.equipped_title_id === 'string' ? { titleId: row.equipped_title_id } : {}), themeId: typeof row.presentation_theme_id === 'string' ? row.presentation_theme_id : null, relationshipKind: row.relationship_kind, groupMemberCount }] : []; }) : []; }
+export async function respondToJointInvite(workoutId: string, accepted: boolean) { const { error } = await client().rpc('respond_joint_workout_invite', { workout_id: workoutId, accepted }); if (error) throw new Error(error.message); }
+export async function leaveJointWorkout(workoutId: string) { const { error } = await client().rpc('leave_joint_workout', { workout_id: workoutId }); if (error) throw new Error(error.message); }
+export async function finishJointWorkout(workoutId: string, visibility: JointVisibility, completedWorkout: JointCompletedWorkout) { const { error } = await client().rpc('finish_joint_workout', { workout_id: workoutId, visibility_input: visibility, completed_workout_input: completedWorkout }); if (error) throw new Error(error.message); }
+export async function touchJointWorkoutPresence(workoutId: string) { const { error } = await client().rpc('touch_joint_workout_presence', { workout_id: workoutId }); if (error) throw new Error(error.message); }
+export async function updateJointWorkoutLiveProgress(workoutId: string, progress: Omit<JointWorkoutLiveProgress, 'restEndsAt' | 'updatedAt'> & { restSeconds?: number }): Promise<void> { const { error } = await client().rpc('update_joint_workout_live_progress', { workout_id: workoutId, state_input: progress.state, completed_exercises_input: progress.completedExercises, total_exercises_input: progress.totalExercises, completed_sets_input: progress.completedSets, total_sets_input: progress.totalSets, rest_seconds_input: progress.restSeconds ?? null }); if (error) throw new Error(error.message); }
+export async function listJointWorkouts(): Promise<JointWorkout[]> { const { data, error } = await client().rpc('list_joint_workouts'); if (error) throw new Error(error.message); return Array.isArray(data) ? data.flatMap((row) => { const workout = asWorkout(row); return workout ? [workout] : []; }) : []; }
+export async function listJointWorkoutPosts(): Promise<Array<{ id: string; createdAt: string; updatedAt: string; participants: JointParticipant[] }>> { const { data, error } = await client().rpc('list_joint_workout_posts'); if (error) throw new Error(error.message); return Array.isArray(data) ? data.flatMap((row) => { if (!row || typeof row !== 'object') return []; const value = row as Record<string, unknown>; if (typeof value.id !== 'string') return []; const createdAt = typeof value.created_at === 'string' && Number.isFinite(Date.parse(value.created_at)) ? value.created_at : null; const updatedAt = typeof value.updated_at === 'string' && Number.isFinite(Date.parse(value.updated_at)) ? value.updated_at : createdAt; if (!createdAt || !updatedAt) throw new Error('Invalid joint workout post timestamp.'); return [{ id: value.id, createdAt, updatedAt, participants: Array.isArray(value.participants) ? value.participants.flatMap((participant) => { const parsed = asParticipant(participant); return parsed ? [parsed] : []; }) : [] }]; }) : []; }
+export async function getJointWorkoutDetail(workoutId: string): Promise<JointWorkout | null> { const { data, error } = await client().rpc('get_joint_workout_detail', { workout_id: workoutId }); if (error) throw new Error(error.message); const workout = asWorkout(data); if (!workout) return null; const { data: states, error: stateError } = await client().rpc('get_joint_participant_reaction_states', { workout_id: workoutId }); if (stateError) throw new Error(stateError.message); const source = states && typeof states === 'object' && !Array.isArray(states) ? states as Record<string, unknown> : {}; return { ...workout, participants: workout.participants.map((participant) => { const state = source[participant.id] as Record<string, unknown> | undefined; return { ...participant, reactionCount: typeof state?.reaction_count === 'number' ? state.reaction_count : 0, commentCount: typeof state?.comment_count === 'number' ? state.comment_count : 0, viewerHasReacted: state?.viewer_has_reacted === true }; }) }; }
+export async function setJointParticipantReaction(workoutId: string, participantId: string, reacted: boolean): Promise<{ reacted: boolean; reactionCount: number }> { const { data, error } = await client().rpc('set_joint_participant_reaction', { workout_id: workoutId, target_id: participantId, reacted }); if (error) throw new Error(error.message); const value = data as Record<string, unknown>; if (typeof value?.reacted !== 'boolean' || typeof value.reaction_count !== 'number' || !Number.isInteger(value.reaction_count) || value.reaction_count < 0) throw new Error('Invalid joint reaction response.'); return { reacted: value.reacted, reactionCount: value.reaction_count }; }
+export async function listJointParticipantComments(workoutId: string, participantId: string): Promise<WorkoutRecapComment[]> { const { data, error } = await client().rpc('list_joint_participant_comments', { workout_id: workoutId, target_id: participantId }); if (error) throw new Error(error.message); return Array.isArray(data) ? data.flatMap((value) => { const comment = asComment(value); return comment ? [comment] : []; }) : []; }
+export async function createJointParticipantComment(workoutId: string, participantId: string, body: string): Promise<WorkoutRecapComment> { const trimmed = body.trim(); if (trimmed.length < 1 || trimmed.length > 500) throw new Error('Comments must contain between 1 and 500 characters.'); const { data, error } = await client().rpc('create_joint_participant_comment', { workout_id: workoutId, target_id: participantId, body_input: trimmed }); if (error) throw new Error(error.message); const comment = asComment(data); if (!comment) throw new Error('Invalid joint participant comment response.'); return comment; }
+export async function getJointParticipantPublicationDetail(workoutId: string, participantId: string): Promise<WorkoutRecapDetail | null> {
+  const [workout, comments] = await Promise.all([
+    getJointWorkoutDetail(workoutId),
+    listJointParticipantComments(workoutId, participantId),
+  ]);
+  const participant = workout?.participants.find((item) => item.id === participantId);
+  const createdAt = workout?.completedAt ?? workout?.createdAt;
+  if (!participant || !createdAt || participant.status !== 'completed' || !participant.workout) return null;
+  const counts = new Map<string, number>();
+  participant.workout.exercises.forEach((exercise) => new Set(exercise.muscleGroupIds).forEach((id) => counts.set(id, (counts.get(id) ?? 0) + 1)));
+  return {
+    id: `joint:${workoutId}:${participant.id}`,
+    authorId: participant.id,
+    authorAlias: participant.alias,
+    authorAvatarId: participant.avatarId,
+    authorThemeId: participant.themeId ?? null,
+    authorFrameId: participant.frameId,
+    authorTitleId: participant.titleId,
+    routineName: participant.workout.routineName,
+    completedAt: createdAt,
+    durationSeconds: participant.workout.durationSeconds,
+    exerciseCount: participant.workout.exercises.length,
+    muscleGroupIds: [...counts.keys()],
+    muscleDistribution: [...counts].map(([id, value]) => ({ id, value })),
+    metrics: { ...actualEffortMetrics(participant.workout.exercises), volume: participant.workout.exercises.reduce((total, exercise) => total + exercise.sets.reduce((sum, set) => sum + (set.completed ? set.weight * set.reps : 0), 0), 0) },
+    caption: null,
+    createdAt,
+    templateAvailable: !!participant.sharePayload?.routine,
+    mesocycleAvailable: !!participant.sharePayload?.mesocycle,
+    isAuthor: participant.isSelf === true,
+    reactionCount: participant.reactionCount ?? 0,
+    commentCount: participant.commentCount ?? comments.length,
+    viewerHasReacted: participant.viewerHasReacted === true,
+    exercises: participant.workout.exercises,
+    sharePayload: participant.sharePayload ?? null,
+    comments,
+    previousComparable: null,
+  };
+}
+export function directPartnerRecipient(workout: JointWorkout | null): string | null { const partners = workout?.participants.filter((participant) => participant.relationshipKind === 'partner') ?? []; return partners.length === 1 ? partners[0].id : null; }
+export function defaultJointParticipantId(workout: JointWorkout): string | null { return workout.participants.find((participant) => participant.id === workout.initiatorId)?.id ?? workout.participants[0]?.id ?? null; }
+export function jointParticipantInviteCapacity(participants: readonly JointParticipant[]): number { return Math.max(0, 3 - participants.filter((participant) => !participant.isSelf && participant.status !== 'declined').length); }
+export async function subscribeToJointWorkoutChanges(onChange: () => void): Promise<() => void> { const instance = client(); const { data, error } = await instance.auth.getSession(); if (error) throw new Error(error.message); if (!data.session) return () => undefined; await instance.realtime.setAuth(data.session.access_token); const channel = instance.channel(`joint-workout-feed:${data.session.user.id}`); channel.on('postgres_changes', { event: '*', schema: 'public', table: 'joint_workout_participants' }, onChange).subscribe((status) => { if (status === 'SUBSCRIBED') onChange(); }); return () => { void instance.removeChannel(channel); }; }
+
+export async function resolveJointWorkoutAttempt(attemptId: string): Promise<string | null> {
+  const { data, error } = await client().rpc('resolve_joint_workout_attempt', { attempt_id_input: attemptId });
+  if (error) throw new Error(error.message);
+  if (data !== null && typeof data !== 'string') throw new Error('Invalid joint workout attempt resolution.');
+  return data;
+}
+export async function finishJointWorkoutAttempt(owner: string, attemptId: string, capturedWorkoutId: string, visibility: JointVisibility, completedWorkout: JointCompletedWorkout): Promise<void> {
+  const { error } = await client().rpc('finish_joint_workout_attempt', { owner_input: owner, attempt_id_input: attemptId, captured_workout_id: capturedWorkoutId, visibility_input: visibility, completed_workout_input: completedWorkout });
+  if (error) throw new Error(error.message);
+}
+export async function leaveJointWorkoutAttempt(owner: string, attemptId: string, capturedWorkoutId: string): Promise<void> {
+  const { error } = await client().rpc('leave_joint_workout_attempt', { owner_input: owner, attempt_id_input: attemptId, captured_workout_id: capturedWorkoutId });
+  if (error) throw new Error(error.message);
+}
+
+export type JointPublicationStatus = { state: 'waiting' | 'published'; workoutId: string; waitingCount: number; expiresAt: string };
+function publicationStatus(value: unknown): JointPublicationStatus {
+  const row = value as Record<string, unknown> | null;
+  if (!row || !['waiting', 'published'].includes(String(row.state)) || typeof row.workout_id !== 'string'
+    || typeof row.waiting_count !== 'number' || !Number.isInteger(row.waiting_count) || row.waiting_count < 0
+    || typeof row.expires_at !== 'string' || !Number.isFinite(Date.parse(row.expires_at))) throw new Error('Invalid joint publication status.');
+  return { state: row.state as JointPublicationStatus['state'], workoutId: row.workout_id, waitingCount: row.waiting_count, expiresAt: row.expires_at };
+}
+export async function getJointPublicationStatus(workoutId: string): Promise<JointPublicationStatus> {
+  const { data, error } = await client().rpc('get_joint_workout_publication_status', { workout_id: workoutId });
+  if (error) throw new Error(error.message);
+  return publicationStatus(data);
+}
+export async function submitJointWorkoutPublication(owner: string, attemptId: string, capturedWorkoutId: string, visibility: JointVisibility, completedWorkout: JointCompletedWorkout): Promise<JointPublicationStatus> {
+  const { data, error } = await client().rpc('finish_joint_workout_attempt_with_status', { owner_input: owner, attempt_id_input: attemptId, captured_workout_id: capturedWorkoutId, visibility_input: visibility, completed_workout_input: completedWorkout });
+  if (error) throw new Error(error.message);
+  return publicationStatus(data);
+}

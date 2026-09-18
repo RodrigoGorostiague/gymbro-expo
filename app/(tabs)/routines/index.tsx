@@ -8,29 +8,31 @@ import {
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { router } from 'expo-router';
+import Ionicons from '@expo/vector-icons/Ionicons';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { AppScreenHeader } from '../../../components/AppScreenHeader';
 import { GlassCard, ThemeBackground } from '../../../components/GlassCard';
 import { HapticPressable } from '../../../components/HapticPressable';
 import { LogoutButton } from '../../../components/LogoutButton';
-import { ShareRoutineModal } from '../../../components/ShareRoutineModal';
 import { GlassButton } from '../../../components/UI';
 import { useAuth } from '../../../context/AuthContext';
 import { useData } from '../../../context/DataContext';
-import { useShare } from '../../../context/ShareContext';
 import { useTheme } from '../../../context/ThemeContext';
-import { PARTNER_PROFILE } from '../../../constants/kiss';
-import { MUSCLE_GROUP_LABELS } from '../../../constants/muscleGroups';
-import { Routine } from '../../../types';
 import { matchesActiveWorkout } from '../../../utils/activeWorkoutReentry';
+import { muscleGroupLabel } from '../../../utils/catalogMuscleGroups';
+import { groupRoutinesForLibrary, RoutineLibrarySection } from '../../../utils/routineLibrary';
 
-export default function RoutinesScreen() {
+const sectionCopy: Record<RoutineLibrarySection, string> = {
+  owned: 'Mis rutinas',
+  shared: 'Compartidas conmigo',
+};
+
+export default function RoutinesScreen({ navigation }: { navigation?: React.ReactNode }) {
   const { theme } = useTheme();
   const { user, welcomeMessage, setWelcomeMessage } = useAuth();
-  const partner = user ? PARTNER_PROFILE[user] : null;
-  const { routines, deleteRoutine, activeWorkoutDraft } = useData();
-  const { pendingShares, hasPendingShare } = useShare();
-  const [shareTarget, setShareTarget] = useState<Routine | null>(null);
+  const { routines, deleteRoutine, activeWorkoutDraft, catalogMuscleGroups = [] } = useData();
+  const [sharedExpanded, setSharedExpanded] = useState(false);
+  const sections = groupRoutinesForLibrary(routines).filter((section) => section.items.length > 0);
 
   useEffect(() => {
     if (user === 'brisas' && welcomeMessage) {
@@ -43,9 +45,63 @@ export default function RoutinesScreen() {
   const handleDelete = (id: string, name: string) => {
     Alert.alert('Eliminar rutina', `¿Eliminar "${name}"?`, [
       { text: 'Cancelar', style: 'cancel' },
-      { text: 'Eliminar', style: 'destructive', onPress: () => deleteRoutine(id) },
+      {
+        text: 'Eliminar',
+        style: 'destructive',
+        onPress: async () => {
+          try {
+            await deleteRoutine(id);
+          } catch (error) {
+            Alert.alert('No se pudo eliminar', error instanceof Error ? error.message : 'Inténtalo nuevamente.');
+          }
+        },
+      },
     ]);
   };
+
+  const renderRoutine = (item: typeof routines[number]) => (
+    <GlassCard key={item.id} style={styles.card}>
+      <HapticPressable
+        accessibilityLabel={`Ver rutina ${item.name}`}
+        accessibilityRole="button"
+        onPress={() => router.push(`/routine/${item.id}`)}
+      >
+        <View style={styles.cardHeader}>
+          <View style={[styles.folderIcon, { backgroundColor: theme.primary }]}>
+            <Text style={styles.folderEmoji}>📁</Text>
+          </View>
+          <View style={styles.cardInfo}>
+            <Text style={[styles.cardTitle, { color: theme.text }]} numberOfLines={1}>
+              {item.name}
+            </Text>
+            <Text style={[styles.cardMeta, { color: theme.textMuted }]}>
+              {item.exercises.length} ejercicio
+              {item.exercises.length !== 1 ? 's' : ''}
+            </Text>
+            {item.muscleGroups.length > 0 ? (
+              <View style={styles.muscleGroupRow}>
+                {item.muscleGroups.map((group) => (
+                  <View key={`${item.id}-${group}`} style={[styles.muscleGroupChip, { backgroundColor: theme.glass, borderColor: theme.glassBorder }]}>
+                    <Text style={[styles.muscleGroupChipText, { color: theme.text }]}>{muscleGroupLabel(catalogMuscleGroups, group)}</Text>
+                  </View>
+                ))}
+              </View>
+            ) : null}
+          </View>
+        </View>
+      </HapticPressable>
+      <View style={styles.cardActions}>
+        <HapticPressable accessibilityLabel={`${matchesActiveWorkout(activeWorkoutDraft, { owner: user, routineId: item.id }) ? 'Continuar' : 'Entrenar'} ${item.name}`} onPress={() => router.push(`/routine/execute/${item.id}`)} style={styles.actionWrap}>
+          <LinearGradient colors={[theme.primary, theme.accent]} start={{ x: 0, y: 0.5 }} end={{ x: 1, y: 0.5 }} style={styles.actionBtn}>
+            <Text style={styles.actionText}>▶ {matchesActiveWorkout(activeWorkoutDraft, { owner: user, routineId: item.id }) ? 'Continuar' : 'Entrenar'}</Text>
+          </LinearGradient>
+        </HapticPressable>
+        <HapticPressable accessibilityLabel={`Eliminar ${item.name}`} style={[styles.actionBtnOutline, { borderColor: theme.glassBorder }]} onPress={() => handleDelete(item.id, item.name)}>
+          <Text style={{ color: theme.textMuted }}>🗑</Text>
+        </HapticPressable>
+      </View>
+    </GlassCard>
+  );
 
   return (
     <ThemeBackground>
@@ -55,21 +111,12 @@ export default function RoutinesScreen() {
           subtitle="Plantillas reutilizables para mesociclos y entrenamientos"
           trailing={
             <>
-              {pendingShares.length > 0 && (
-                <HapticPressable
-                  onPress={() => router.push('/(tabs)/routines/pending-shares')}
-                  style={styles.pendingBtn}
-                >
-                  <Text style={[styles.pendingBadge, { backgroundColor: theme.primary }]}>
-                    {pendingShares.length}
-                  </Text>
-                </HapticPressable>
-              )}
               <LogoutButton />
               <GlassButton title="+ Nueva" onPress={() => router.push('/routine/create')} />
             </>
           }
         />
+        {navigation}
 
         {routines.length === 0 ? (
           <GlassCard style={styles.emptyCard}>
@@ -82,163 +129,18 @@ export default function RoutinesScreen() {
           </GlassCard>
         ) : (
           <FlatList
-            data={routines}
-            keyExtractor={(item) => item.id}
+            data={sections}
+            keyExtractor={(section) => section.key}
             contentContainerStyle={styles.list}
-            renderItem={({ item }) => (
-              <HapticPressable onPress={() => router.push(`/routine/${item.id}`)}>
-                <GlassCard style={styles.card}>
-                  <View style={styles.cardHeader}>
-                    <View style={[styles.folderIcon, { backgroundColor: theme.primary }]}>
-                      <Text style={styles.folderEmoji}>📁</Text>
-                    </View>
-                    <View style={styles.cardInfo}>
-                      <View style={styles.cardTitleRow}>
-                        <Text style={[styles.cardTitle, { color: theme.text }]} numberOfLines={1}>
-                          {item.name}
-                        </Text>
-                        {item.isShared ? (
-                          <View style={[styles.sharedBadge, { backgroundColor: theme.primary }]}>
-                            <Text style={styles.sharedBadgeText}>Compartida</Text>
-                          </View>
-                        ) : null}
-                      </View>
-                      <Text style={[styles.cardMeta, { color: theme.textMuted }]}> 
-                        {item.exercises.length} ejercicio
-                        {item.exercises.length !== 1 ? 's' : ''}
-                      </Text>
-                      {item.muscleGroups.length > 0 ? (
-                        <View style={styles.muscleGroupRow}>
-                          {item.muscleGroups.map((group) => (
-                            <View
-                              key={`${item.id}-${group}`}
-                              style={[
-                                styles.muscleGroupChip,
-                                {
-                                  backgroundColor: theme.glass,
-                                  borderColor: theme.glassBorder,
-                                },
-                              ]}
-                            >
-                              <Text style={[styles.muscleGroupChipText, { color: theme.text }]}> 
-                                {MUSCLE_GROUP_LABELS[group]}
-                              </Text>
-                            </View>
-                          ))}
-                        </View>
-                      ) : null}
-                    </View>
-                  </View>
-                  {/* Share toggle button — CombineWithPartnerCard pattern */}
-                  {partner && (
-                    <HapticPressable
-                      onPress={(event) => {
-                        event.stopPropagation();
-                        setShareTarget(item);
-                      }}
-                      disabled={item.isShared || hasPendingShare(item.name)}
-                      style={styles.shareToggleWrap}
-                    >
-                      <LinearGradient
-                        colors={
-                          item.isShared || hasPendingShare(item.name)
-                            ? [theme.glassBorder, theme.glassBorder]
-                            : [theme.primary, theme.accent]
-                        }
-                        start={{ x: 0, y: 0.5 }}
-                        end={{ x: 1, y: 0.5 }}
-                        style={styles.shareToggleBorder}
-                      >
-                        <View
-                          style={[
-                            styles.shareToggleInner,
-                            {
-                              backgroundColor:
-                                theme.blurTint === 'light'
-                                  ? 'rgba(255,255,255,0.65)'
-                                  : 'rgba(8,8,14,0.65)',
-                            },
-                          ]}
-                        >
-                          <Text
-                            style={[
-                              styles.shareToggleText,
-                              {
-                                color:
-                                  item.isShared || hasPendingShare(item.name)
-                                    ? theme.textMuted
-                                    : theme.text,
-                              },
-                            ]}
-                          >
-                            {item.isShared
-                              ? 'Compartida'
-                              : hasPendingShare(item.name)
-                                ? 'Pendiente de aceptación'
-                                : `Compartir con ${partner}`}
-                          </Text>
-                          <View
-                            style={[
-                              styles.shareTogglePill,
-                              {
-                                backgroundColor: item.isShared
-                                  ? theme.success
-                                  : hasPendingShare(item.name)
-                                    ? theme.glass
-                                    : theme.glass,
-                                borderColor: theme.glassBorder,
-                              },
-                            ]}
-                          >
-                            <Text
-                              style={[
-                                styles.shareTogglePillText,
-                                {
-                                  color: item.isShared
-                                    ? '#FFF'
-                                    : theme.textMuted,
-                                },
-                              ]}
-                            >
-                              {item.isShared ? '✓' : hasPendingShare(item.name) ? '⏳' : '🔗'}
-                            </Text>
-                          </View>
-                        </View>
-                      </LinearGradient>
-                    </HapticPressable>
-                  )}
-                  <View style={styles.cardActions}>
-                    <HapticPressable
-                      accessibilityLabel={`${matchesActiveWorkout(activeWorkoutDraft, { owner: user, routineId: item.id }) ? 'Continuar' : 'Entrenar'} ${item.name}`}
-                      onPress={() => router.push(`/routine/execute/${item.id}`)}
-                      style={styles.actionWrap}
-                    >
-                      <LinearGradient
-                        colors={[theme.primary, theme.accent]}
-                        start={{ x: 0, y: 0.5 }}
-                        end={{ x: 1, y: 0.5 }}
-                        style={styles.actionBtn}
-                      >
-                        <Text style={styles.actionText}>▶ {matchesActiveWorkout(activeWorkoutDraft, { owner: user, routineId: item.id }) ? 'Continuar' : 'Entrenar'}</Text>
-                      </LinearGradient>
-                    </HapticPressable>
-                    <HapticPressable
-                      style={[styles.actionBtnOutline, { borderColor: theme.glassBorder }]}
-                      onPress={() => handleDelete(item.id, item.name)}
-                    >
-                      <Text style={{ color: theme.textMuted }}>🗑</Text>
-                    </HapticPressable>
-                  </View>
-                </GlassCard>
-              </HapticPressable>
-            )}
+            renderItem={({ item: section }) => {
+              const expanded = section.key === 'owned' || sharedExpanded;
+              return <View style={styles.section}>
+                {section.key === 'shared' ? <HapticPressable accessibilityRole="button" accessibilityState={{ expanded }} accessibilityLabel={`${expanded ? 'Ocultar' : 'Mostrar'} ${sectionCopy.shared}`} onPress={() => setSharedExpanded((current) => !current)} style={[styles.sectionHeader, { borderColor: theme.glassBorder }]}><View><Text style={[styles.sectionTitle, { color: theme.text }]}>{sectionCopy.shared}</Text><Text style={[styles.sectionCount, { color: theme.textMuted }]}>{section.items.length} {section.items.length === 1 ? 'rutina' : 'rutinas'}</Text></View><Ionicons name={expanded ? 'chevron-up' : 'chevron-down'} size={21} color={theme.primary} /></HapticPressable> : <View style={[styles.sectionHeader, { borderColor: theme.glassBorder }]}><View><Text style={[styles.sectionTitle, { color: theme.text }]}>{sectionCopy.owned}</Text><Text style={[styles.sectionCount, { color: theme.textMuted }]}>{section.items.length} {section.items.length === 1 ? 'rutina' : 'rutinas'}</Text></View></View>}
+                {expanded ? <View style={styles.sectionItems}>{section.items.map(renderRoutine)}</View> : null}
+              </View>;
+            }}
           />
         )}
-        <ShareRoutineModal
-          visible={shareTarget !== null}
-          routine={shareTarget}
-          onClose={() => setShareTarget(null)}
-        />
       </SafeAreaView>
     </ThemeBackground>
   );
@@ -252,6 +154,28 @@ const styles = StyleSheet.create({
   },
   list: {
     paddingBottom: 24,
+    gap: 16,
+  },
+  section: {
+    gap: 12,
+  },
+  sectionHeader: {
+    alignItems: 'center',
+    borderBottomWidth: 1,
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    paddingBottom: 10,
+  },
+  sectionTitle: {
+    fontSize: 16,
+    fontWeight: '900',
+  },
+  sectionCount: {
+    fontSize: 12,
+    fontWeight: '700',
+    marginTop: 2,
+  },
+  sectionItems: {
     gap: 12,
   },
   card: {
@@ -304,40 +228,6 @@ const styles = StyleSheet.create({
     marginTop: 10,
     gap: 10,
   },
-  shareToggleWrap: {
-    marginTop: 12,
-    borderRadius: 14,
-    overflow: 'hidden',
-  },
-  shareToggleBorder: {
-    borderRadius: 14,
-    padding: 1.5,
-  },
-  shareToggleInner: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: 14,
-    paddingVertical: 12,
-    borderRadius: 12,
-  },
-  shareToggleText: {
-    fontSize: 14,
-    fontWeight: '700',
-    flex: 1,
-    paddingRight: 8,
-  },
-  shareTogglePill: {
-    paddingHorizontal: 10,
-    paddingVertical: 4,
-    borderRadius: 10,
-    borderWidth: 1,
-  },
-  shareTogglePillText: {
-    fontSize: 11,
-    fontWeight: '800',
-    letterSpacing: 0.5,
-  },
   actionWrap: {
     flex: 1,
     borderRadius: 12,
@@ -373,33 +263,5 @@ const styles = StyleSheet.create({
   emptyText: {
     textAlign: 'center',
     lineHeight: 20,
-  },
-  pendingBtn: {
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-  },
-  pendingBadge: {
-    minWidth: 22,
-    height: 22,
-    borderRadius: 11,
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingHorizontal: 6,
-  },
-  cardTitleRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-  },
-  sharedBadge: {
-    borderRadius: 6,
-    paddingHorizontal: 6,
-    paddingVertical: 2,
-  },
-  sharedBadgeText: {
-    color: '#FFF',
-    fontSize: 10,
-    fontWeight: '700',
-    letterSpacing: 0.3,
   },
 });

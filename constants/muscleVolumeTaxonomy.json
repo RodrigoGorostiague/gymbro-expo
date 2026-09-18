@@ -1,0 +1,173 @@
+[
+  {
+    "id": "chest",
+    "label": "Pecho",
+    "muscleIds": [
+      "GM-100",
+      "GM-101",
+      "GM-102",
+      "GM-103",
+      "GM-104",
+      "GM-105",
+      "pecho"
+    ]
+  },
+  {
+    "id": "shoulders",
+    "label": "Hombros",
+    "muscleIds": [
+      "GM-110",
+      "GM-111",
+      "GM-112",
+      "GM-113",
+      "GM-114",
+      "GM-115",
+      "GM-116",
+      "GM-117",
+      "GM-118",
+      "hombros"
+    ]
+  },
+  {
+    "id": "back",
+    "label": "Espalda",
+    "muscleIds": [
+      "GM-120",
+      "GM-121",
+      "GM-122",
+      "GM-123",
+      "GM-124",
+      "GM-125",
+      "GM-126",
+      "GM-127",
+      "GM-128",
+      "GM-129",
+      "GM-130",
+      "GM-131",
+      "GM-132",
+      "GM-133",
+      "GM-160",
+      "GM-161",
+      "GM-162",
+      "espalda",
+      "dorsales",
+      "trapecio"
+    ]
+  },
+  {
+    "id": "biceps",
+    "label": "Bíceps",
+    "muscleIds": [
+      "GM-141",
+      "GM-142",
+      "GM-143",
+      "GM-144",
+      "bíceps"
+    ]
+  },
+  {
+    "id": "triceps",
+    "label": "Tríceps",
+    "muscleIds": [
+      "GM-145",
+      "GM-146",
+      "GM-147",
+      "GM-148",
+      "tríceps"
+    ]
+  },
+  {
+    "id": "forearms",
+    "label": "Antebrazos",
+    "muscleIds": [
+      "GM-149",
+      "GM-150",
+      "GM-151",
+      "antebrazos"
+    ]
+  },
+  {
+    "id": "abs",
+    "label": "Abdominales",
+    "muscleIds": [
+      "GM-300",
+      "GM-301",
+      "GM-302",
+      "GM-303",
+      "GM-304",
+      "GM-305",
+      "core"
+    ]
+  },
+  {
+    "id": "glutes",
+    "label": "Glúteos",
+    "muscleIds": [
+      "GM-200",
+      "GM-201",
+      "GM-202",
+      "GM-203",
+      "glúteos"
+    ]
+  },
+  {
+    "id": "quads",
+    "label": "Cuádriceps",
+    "muscleIds": [
+      "GM-210",
+      "cuadriceps"
+    ]
+  },
+  {
+    "id": "hamstrings",
+    "label": "Isquiosurales",
+    "muscleIds": [
+      "GM-220",
+      "GM-221",
+      "femorales"
+    ]
+  },
+  {
+    "id": "adductors",
+    "label": "Aductores",
+    "muscleIds": [
+      "GM-230",
+      "GM-231",
+      "GM-232",
+      "aductores"
+    ]
+  },
+  {
+    "id": "abductors",
+    "label": "Abductores",
+    "muscleIds": [
+      "GM-240",
+      "GM-241",
+      "abductores"
+    ]
+  },
+  {
+    "id": "calves",
+    "label": "Pantorrillas",
+    "muscleIds": [
+      "GM-250",
+      "GM-251",
+      "GM-252",
+      "gemelos"
+    ]
+  },
+  {
+    "id": "tibialis",
+    "label": "Tibial anterior",
+    "muscleIds": [
+      "GM-260"
+    ]
+  },
+  {
+    "id": "hipFlexors",
+    "label": "Flexores de cadera",
+    "muscleIds": [
+      "GM-310"
+    ]
+  }
+]

@@ -2,6 +2,7 @@ import React from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 import { BlurView } from 'expo-blur';
 import { LinearGradient } from 'expo-linear-gradient';
+import { Ionicons } from '@expo/vector-icons';
 import { HapticPressable } from './HapticPressable';
 import { useTheme } from '../context/ThemeContext';
 
@@ -11,7 +12,7 @@ interface AppNavBarProps {
   trailing?: React.ReactNode;
 }
 
-export function AppNavBar({ onBack, backLabel = '← Volver', trailing }: AppNavBarProps) {
+export function AppNavBar({ onBack, backLabel = 'Volver', trailing }: AppNavBarProps) {
   const { theme } = useTheme();
 
   return (
@@ -33,7 +34,8 @@ export function AppNavBar({ onBack, backLabel = '← Volver', trailing }: AppNav
                 },
               ]}
             >
-              <HapticPressable onPress={onBack}>
+              <HapticPressable accessibilityLabel={backLabel} accessibilityRole="button" onPress={onBack} style={styles.backButton}>
+                <Ionicons name="chevron-back" size={18} color={theme.text} />
                 <Text style={[styles.back, { color: theme.text }]}>{backLabel}</Text>
               </HapticPressable>
               {trailing}
@@ -71,5 +73,10 @@ const styles = StyleSheet.create({
   back: {
     fontSize: 15,
     fontWeight: '600',
+  },
+  backButton: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    gap: 3,
   },
 });

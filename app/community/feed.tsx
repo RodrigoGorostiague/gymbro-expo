@@ -1,0 +1,222 @@
+import { useLatestRequest } from '../../hooks/useLatestRequest';
+import { useAuth } from '../../context/AuthContext';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
+import { Alert, FlatList, RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { router, useFocusEffect } from 'expo-router';
+import { SafeAreaView } from 'react-native-safe-area-context';
+import { AppScreenHeader } from '../../components/AppScreenHeader';
+import { GlassCard, ThemeBackground } from '../../components/GlassCard';
+import { HapticPressable } from '../../components/HapticPressable';
+import { GlassButton } from '../../components/UI';
+import { JointWorkoutFeedCard } from '../../components/JointWorkoutFeedCard';
+import { useSocial } from '../../context/SocialContext';
+import { useTheme } from '../../context/ThemeContext';
+import { CommunityActivity, WorkoutRecap } from '../../types';
+import { WorkoutPublicationCard } from '../../components/WorkoutPublicationCard';
+import { CommunityMilestoneCard } from '../../components/CommunityMilestoneCard';
+import { ProfileAvatar } from '../../components/ProfileAvatar';
+import { ProfileTitleBadge } from '../../components/ProfileTitleBadge';
+import { listJointWorkoutPosts } from '../../services/jointWorkouts';
+import { CommunityBadgeCounts, getCommunityBadgeCounts } from '../../services/communityBadge';
+import { activeWorkoutStartActivities, listWorkoutStartActivities, WorkoutStartActivity } from '../../services/workoutStartActivity';
+import { setWorkoutRecapReaction } from '../../services/workoutRecapFeed';
+import { feedDayKey, formatFeedDay, formatRelativeTime } from '../../utils/feedTimeline';
+
+const primaryDestinations: ReadonlyArray<{ label: string; href: string; badgeKey?: keyof Omit<CommunityBadgeCounts, 'total'> }> = [
+  { label: 'Explorar', href: '/community/discover' },
+  { label: 'Mi círculo', href: '/community/circle' },
+  { label: 'Entrenar juntos', href: '/community/joint-workout', badgeKey: 'jointInvitations' },
+] as const;
+
+const pendingDestinations: ReadonlyArray<readonly [string, string, keyof Omit<CommunityBadgeCounts, 'total'>]> = [
+  ['Solicitudes', '/community/requests', 'incomingRequests'],
+  ['Planes', '/community/plan-inbox', 'planShareRequests'],
+  ['Notificaciones', '/community/notifications', 'unreadNotifications'],
+];
+
+function badgeLabel(count: number): string | null {
+  return count > 99 ? '99+' : count > 0 ? String(count) : null;
+}
+
+type JointPost = { id: string; createdAt: string; updatedAt: string; participants: Array<{ id: string; alias: string; avatarId: string; status: 'invited' | 'active' | 'completed' | 'declined' }> };
+type FeedItem =
+  | { kind: 'recap'; id: string; publishedAt: string; recap: WorkoutRecap }
+  | { kind: 'joint'; id: string; publishedAt: string; post: JointPost }
+  | { kind: 'milestone'; id: string; publishedAt: string; activity: CommunityActivity }
+  | { kind: 'start'; id: string; publishedAt: string; activity: WorkoutStartActivity };
+
+function timestamp(value: string): number {
+  const parsed = new Date(value).getTime();
+  return Number.isNaN(parsed) ? 0 : parsed;
+}
+
+export default function CommunityFeedScreen() {
+  const { user } = useAuth();
+  const reads = useLatestRequest(user);
+  const { theme } = useTheme();
+  const { getWorkoutRecaps, getCommunityActivities, deleteWorkoutRecap, realtimeRevision, jointPublicationProgress = [], retryJointPublications, jointPublicationSyncError } = useSocial();
+  const [recaps, setRecaps] = useState<WorkoutRecap[]>([]);
+  const [recapCursor, setRecapCursor] = useState<string | null>(null);
+  const [activityCursor, setActivityCursor] = useState<string | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [jointPosts, setJointPosts] = useState<JointPost[]>([]);
+  const [activities, setActivities] = useState<readonly CommunityActivity[]>([]);
+  const [startActivities, setStartActivities] = useState<WorkoutStartActivity[]>([]);
+  const [badges, setBadges] = useState<CommunityBadgeCounts | null>(null);
+  const [now, setNow] = useState(() => Date.now());
+
+  useEffect(() => { setRecaps([]); setJointPosts([]); setActivities([]); setStartActivities([]); setBadges(null); setRecapCursor(null); setActivityCursor(null); }, [user]);
+
+  const pendingSections = useRef(new Set<() => void>());
+  useEffect(() => () => {
+    for (const cancel of pendingSections.current) cancel();
+  }, [user]);
+
+  const load = useCallback(async (nextRecapCursor: string | null = null, nextActivityCursor: string | null = null, append = false) => {
+    const currentRequest = reads.begin();
+    for (const cancel of pendingSections.current) cancel();
+    setLoading(true);
+    setError(null);
+    // Each section commits immediately. A hung sibling neither hides successful
+    // data nor keeps refresh busy forever; late responses are observed but ignored.
+    const section = <T,>(read: () => Promise<T>, apply: (value: T) => void) => new Promise<void>((resolve) => {
+      let settled = false;
+      const complete = () => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        pendingSections.current.delete(complete);
+        resolve();
+      };
+      const timer = setTimeout(() => {
+        if (currentRequest()) setError('Una sección del feed tardó demasiado. Puedes reintentar.');
+        complete();
+      }, 10_000);
+      pendingSections.current.add(complete);
+      void Promise.resolve().then(read).then((value) => {
+        if (!settled && currentRequest()) apply(value);
+      }).catch((reason) => {
+        if (!settled && currentRequest()) setError(reason instanceof Error ? reason.message : 'No se pudo actualizar una parte del feed.');
+      }).finally(complete);
+    });
+    await Promise.all([
+      section(() => getWorkoutRecaps(nextRecapCursor), (page) => {
+        setRecaps((current) => append ? [...current, ...page.recaps.filter((item) => !current.some(({ id }) => id === item.id))] : page.recaps);
+        setRecapCursor(page.nextCursor);
+      }),
+      section(() => nextRecapCursor ? Promise.resolve(null) : listJointWorkoutPosts(), (posts) => { if (posts) setJointPosts(posts); }),
+      section(() => getCommunityActivities(nextActivityCursor), (page) => {
+        setActivities((current) => append ? [...current, ...page.activities.filter((item) => !current.some(({ id }) => id === item.id))] : page.activities);
+        setActivityCursor(page.nextCursor);
+      }),
+      section(() => nextRecapCursor || nextActivityCursor ? Promise.resolve(null) : listWorkoutStartActivities(), (starts) => {
+        if (!starts) return;
+        const receivedAt = Date.now();
+        setNow(receivedAt);
+        setStartActivities(activeWorkoutStartActivities(starts, receivedAt));
+      }),
+      section(() => nextRecapCursor || nextActivityCursor ? Promise.resolve(null) : getCommunityBadgeCounts(), (badges) => { if (badges) setBadges(badges); }),
+    ]);
+    if (currentRequest()) setLoading(false);
+  }, [getCommunityActivities, getWorkoutRecaps, reads, user]);
+
+  useFocusEffect(useCallback(() => { void load(); }, [load]));
+  useEffect(() => { if (realtimeRevision > 0) void load(); }, [load, realtimeRevision]);
+  useEffect(() => {
+    const timer = setInterval(() => setNow(Date.now()), 60_000);
+    return () => clearInterval(timer);
+  }, []);
+
+  useEffect(() => {
+    const nextExpiry = Math.min(...startActivities.map((activity) => Date.parse(activity.expiresAt)).filter((expires) => expires > Date.now()));
+    if (!Number.isFinite(nextExpiry)) return;
+    const timer = setTimeout(() => setNow(Date.now()), Math.max(0, nextExpiry - Date.now()));
+    return () => clearTimeout(timer);
+  }, [startActivities, now]);
+
+  const remove = async (recap: WorkoutRecap) => {
+    try {
+      await deleteWorkoutRecap(recap.id);
+      await load();
+    } catch (reason) {
+      Alert.alert('No se pudo eliminar', reason instanceof Error ? reason.message : 'Inténtalo de nuevo.');
+    }
+  };
+  const toggleReaction = async (recap: WorkoutRecap) => {
+    const reacted = !recap.viewerHasReacted;
+    setRecaps((current) => current.map((item) => item.id === recap.id ? { ...item, viewerHasReacted: reacted, reactionCount: Math.max(0, (item.reactionCount ?? 0) + (reacted ? 1 : -1)) } : item));
+    try {
+      const state = await setWorkoutRecapReaction(recap.id, reacted);
+      setRecaps((current) => current.map((item) => item.id === recap.id ? { ...item, viewerHasReacted: state.reacted, reactionCount: state.reactionCount } : item));
+    } catch (reason) {
+      setRecaps((current) => current.map((item) => item.id === recap.id ? recap : item));
+      Alert.alert('No se pudo actualizar la estrella', reason instanceof Error ? reason.message : 'Intentá nuevamente.');
+    }
+  };
+
+  const recapCard = (recap: WorkoutRecap) => <View>
+    <WorkoutPublicationCard recap={recap} now={now} onPress={() => router.push({ pathname: '/social/recap/[id]', params: { id: recap.id } })} onProfilePress={recap.authorId && !recap.isAuthor ? () => router.push({ pathname: '/social/[uid]', params: { uid: recap.authorId! } }) : undefined} onToggleReaction={!recap.isAuthor ? () => void toggleReaction(recap) : undefined} />
+    {recap.isAuthor ? <GlassButton title="Eliminar publicación" variant="secondary" onPress={() => Alert.alert('Eliminar publicación', 'Esta acción elimina la publicación, no tu entrenamiento guardado.', [{ text: 'Conservar', style: 'cancel' }, { text: 'Eliminar', style: 'destructive', onPress: () => void remove(recap) }])} /> : null}
+  </View>;
+
+  const feed: FeedItem[] = [
+    ...recaps.map((recap) => ({ kind: 'recap' as const, id: recap.id, publishedAt: recap.createdAt, recap })),
+    ...jointPosts.map((post) => ({ kind: 'joint' as const, id: post.id, publishedAt: post.updatedAt, post })),
+    ...activities.map((activity) => ({ kind: 'milestone' as const, id: activity.id, publishedAt: activity.createdAt, activity })),
+    ...activeWorkoutStartActivities(startActivities, now).map((activity) => ({ kind: 'start' as const, id: activity.id, publishedAt: activity.startedAt, activity })),
+  ].sort((left, right) => timestamp(right.publishedAt) - timestamp(left.publishedAt) || right.id.localeCompare(left.id));
+
+  const feedCard = (item: FeedItem) => {
+    if (item.kind === 'recap') return recapCard(item.recap);
+    if (item.kind === 'joint') return <JointWorkoutFeedCard workoutId={item.post.id} participants={item.post.participants} publishedAt={item.publishedAt} now={now} />;
+    if (item.kind === 'milestone') return <CommunityMilestoneCard activity={item.activity} now={now} />;
+    const activity = item.activity;
+    return <GlassCard style={styles.startCard}><View style={[styles.liveDot, { backgroundColor: theme.primary }]} /><ProfileAvatar avatarId={activity.authorAvatarId} frameId={activity.authorFrameId} size={38} borderColor={theme.primary} /><View style={styles.startCopy}><Text style={[styles.startTitle, { color: theme.text }]}>{activity.isAuthor ? 'Comenzaste' : `${activity.authorAlias} comenzó`} {activity.jointWorkoutId ? 'a entrenar juntos' : 'un entrenamiento'}</Text><ProfileTitleBadge titleId={activity.authorTitleId} /><Text style={{ color: theme.textMuted }}>{activity.routineName} · En vivo para tu círculo</Text></View><Text style={[styles.startTime, { color: theme.textMuted }]}>{formatRelativeTime(activity.startedAt, now)}</Text></GlassCard>;
+  };
+
+  return <ThemeBackground><SafeAreaView style={styles.safe}><FlatList data={feed} keyExtractor={(item) => `${item.kind}-${item.id}`} initialNumToRender={8} testID="community-feed" contentContainerStyle={styles.scroll} keyboardShouldPersistTaps="handled" refreshControl={<RefreshControl refreshing={loading} onRefresh={() => void load()} tintColor={theme.primary} />} ListHeaderComponent={<View style={{ gap: 16 }}>
+    <AppScreenHeader title="Comunidad" subtitle="Tu círculo se entrena con vos" />
+    <View accessibilityRole="tablist" style={styles.destinations}>{primaryDestinations.map(({ label, href, badgeKey }) => {
+      const count = badgeKey ? badges?.[badgeKey] ?? 0 : 0;
+      return <HapticPressable key={href} accessibilityRole="tab" accessibilityLabel={`Abrir ${label}${count ? `, ${count} pendientes` : ''}`} onPress={() => router.push(href)} style={[styles.destination, { backgroundColor: theme.glass, borderColor: theme.glassBorder }]}><Text style={{ color: theme.text, fontWeight: '700' }}>{label}</Text>{badgeLabel(count) ? <View style={[styles.count, { backgroundColor: theme.primary }]}><Text style={styles.countText}>{badgeLabel(count)}</Text></View> : null}</HapticPressable>;
+    })}</View>
+    <GlassButton title={badges?.total ? `Bandeja · ${badges.total} pendientes` : 'Abrir bandeja unificada'} variant="secondary" onPress={() => router.push('/community/inbox')} />
+    <Text accessibilityRole="header" style={[styles.title, { color: theme.text }]}>Tu círculo en movimiento</Text>
+    {jointPublicationProgress.map((publication) => <GlassCard key={publication.workoutId}>
+      <Text accessibilityRole="text" style={{ color: theme.text }}>{publication.state === 'waiting' ? `Entrenamiento guardado. Esperando a ${publication.waitingCount ?? 0} integrantes.` : 'Entrenamiento guardado. Publicación conjunta pendiente.'}</Text>
+      <Text style={{ color: theme.textMuted }}>{publication.error ?? 'Se publicará cuando todos terminen o cancelen, o al cumplirse 24 horas desde el inicio del grupo.'}</Text>
+      <GlassButton title="Actualizar publicación" variant="secondary" onPress={() => void retryJointPublications()} />
+    </GlassCard>)}
+    {jointPublicationSyncError ? <GlassCard><Text accessibilityRole="alert" style={{ color: theme.text }}>{jointPublicationSyncError}</Text><GlassButton title="Reintentar sincronización" onPress={() => void retryJointPublications()} /></GlassCard> : null}
+    {error ? <GlassCard><Text accessibilityRole="alert" style={{ color: theme.text }}>{error}{feed.length ? ' Mostrando la última actualización disponible.' : ''}</Text><GlassButton title="Reintentar" variant="secondary" onPress={() => void load()} /></GlassCard> : null}
+    {!loading && !error && !feed.length ? <GlassCard><Text style={{ color: theme.textMuted }}>Todavía no hay actividad de tus conexiones. Cuando alguien entrene, aparecerá acá.</Text></GlassCard> : null}
+    </View>}
+    renderItem={({ item, index }) => <React.Fragment>
+      {index === 0 || feedDayKey(feed[index - 1].publishedAt) !== feedDayKey(item.publishedAt) ? <View accessibilityRole="header" style={[styles.dateDivider, { borderColor: theme.glassBorder }]}><Text style={[styles.dateLabel, { color: theme.textMuted }]}>{formatFeedDay(item.publishedAt, now)}</Text></View> : null}
+      {feedCard(item)}
+    </React.Fragment>}
+    ListFooterComponent={recapCursor || activityCursor ? <GlassButton title={loading ? 'Cargando…' : 'Ver más'} disabled={loading} variant="secondary" onPress={() => void load(recapCursor, activityCursor, true)} /> : null}
+  /></SafeAreaView></ThemeBackground>;
+}
+
+const styles = StyleSheet.create({
+  safe: { flex: 1 },
+  scroll: { padding: 20, gap: 12, paddingBottom: 36 },
+  destinations: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
+  destination: { borderRadius: 999, borderWidth: 1, paddingHorizontal: 12, paddingVertical: 9 },
+  pending: { borderTopWidth: StyleSheet.hairlineWidth, gap: 8, paddingTop: 12 },
+  pendingTitle: { fontSize: 11, fontWeight: '900', letterSpacing: 0.8 },
+  pendingActions: { flexDirection: 'row', flexWrap: 'wrap', gap: 12 },
+  pendingAction: { alignItems: 'center', flexDirection: 'row', gap: 5 },
+  count: { alignItems: 'center', borderRadius: 999, justifyContent: 'center', minWidth: 18, paddingHorizontal: 5, paddingVertical: 2 },
+  countText: { color: '#FFFFFF', fontSize: 10, fontWeight: '900' },
+  title: { fontSize: 20, fontWeight: '800', marginTop: 8 },
+  dateDivider: { alignItems: 'center', borderTopWidth: StyleSheet.hairlineWidth, marginTop: 8, paddingTop: 12 },
+  dateLabel: { fontSize: 10, fontWeight: '900', letterSpacing: 1.1 },
+  startCard: { alignItems: 'center', flexDirection: 'row', gap: 10, paddingVertical: 14 },
+  liveDot: { borderRadius: 5, height: 10, width: 10 },
+  startCopy: { flex: 1, gap: 3 },
+  startTitle: { fontSize: 16, fontWeight: '900' },
+  startTime: { fontSize: 11, fontWeight: '700' },
+});

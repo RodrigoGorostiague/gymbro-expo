@@ -1,0 +1,38 @@
+import React from 'react';
+import {act} from 'react-test-renderer';
+import {beforeEach,expect,test,vi} from 'vitest';
+import {normalizeSessionSetNumbers,withSessionSetType} from '../utils/workoutDraft';
+import {render,resetRuntimeHarness,setMockData,setMockParams,findButton} from './helpers/runtimeHarness';
+import Editor from '../app/routine/[id]';
+beforeEach(resetRuntimeHarness);
+const sets=[1,2,3].map((tipo)=>({id:`s${tipo}`,tipo,weight:tipo*10,reps:8}));
+test('existing normalization excludes warmup and failure and restores effective sequence',()=>{
+ const warmed=withSessionSetType(sets,'s1','C');
+ expect(warmed.map(s=>s.tipo)).toEqual(['C',1,2]);
+ expect(withSessionSetType(warmed,'s1','effective').map(s=>s.tipo)).toEqual([1,2,3]);
+ expect(withSessionSetType(sets,'s2','F').map(s=>s.tipo)).toEqual([1,'F',2]);
+});
+test('normalization is idempotent across 81 combinations and preserves identity and load',()=>{
+ for(let n=0;n<81;n++){
+  const data=Array.from({length:4},(_,i)=>({id:`s${i}`,tipo:([7,'C','F'] as const)[Math.floor(n/3**i)%3],weight:10+i,reps:8}));
+  const result=normalizeSessionSetNumbers(data);
+  expect(normalizeSessionSetNumbers(result)).toEqual(result);
+  expect(result.filter(s=>typeof s.tipo==='number').map(s=>s.tipo)).toEqual(Array.from({length:result.filter(s=>typeof s.tipo==='number').length},(_,i)=>i+1));
+  expect(result.map(({id,weight,reps})=>({id,weight,reps}))).toEqual(data.map(({id,weight,reps})=>({id,weight,reps})));
+ }
+});
+test('delete and reorder followed by normalization keep numbers contiguous',()=>{
+ expect(normalizeSessionSetNumbers(sets.filter(s=>s.id!=='s2')).map(s=>s.tipo)).toEqual([1,2]);
+ const moved=normalizeSessionSetNumbers([sets[2],sets[0],sets[1]]);
+ expect(moved.map(s=>[s.id,s.tipo,s.weight])).toEqual([['s3',1,30],['s1',2,10],['s2',3,20]]);
+});
+test('AUDIT routine editor currently saves gaps after changing first set to warmup',async()=>{
+ const routine={id:'r',name:'R',muscleGroups:['pecho'],createdAt:'',exercises:[{id:'e',name:'Press',variant:'barra',muscleGroups:['pecho'],sets}]};
+ const updateRoutine=vi.fn(async (_value:any)=>undefined);
+ setMockParams({id:'r'});setMockData({exercises:[],getRoutine:()=>routine,getExercise:vi.fn(),updateRoutine});
+ const screen=render(React.createElement(Editor));
+ const control=screen.root.findAll((n:any)=>n.type==='HapticPressable'&&n.props.accessibilityLabel==='Calentamiento')[0];
+ act(()=>control.props.onPress());
+ await act(async()=>{await findButton(screen.root,'Guardar rutina').props.onPress();});
+ expect(updateRoutine.mock.calls[0][0].exercises[0].sets.map((s:any)=>s.tipo)).toEqual(['C',2,3]);
+});

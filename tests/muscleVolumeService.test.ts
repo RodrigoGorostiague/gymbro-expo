@@ -1,0 +1,11 @@
+import {beforeEach,expect,test,vi} from 'vitest';
+import {deriveMuscleVolume} from '../utils/muscleVolume';
+import {volumeNow,volumeSubject} from './fixtures/muscleVolume';
+const rpc=vi.hoisted(()=>vi.fn());
+vi.mock('../services/supabase',()=>({supabase:{rpc},supabaseConfigurationError:null}));
+import {getProfileMuscleVolume,parseMuscleVolume,saveMuscleVolumeGoals} from '../services/muscleVolume';
+beforeEach(()=>rpc.mockReset());
+test('does not reinterpret legacy points as series',()=>expect(()=>parseMuscleVolume({muscle_distribution:[]})).toThrow('versión compatible'));
+test('rejects wrong subject and malformed projections',async()=>{const v=deriveMuscleVolume([],volumeSubject,28,volumeNow);rpc.mockResolvedValue({data:v});await expect(getProfileMuscleVolume('other',28)).rejects.toThrow('no corresponde');expect(()=>parseMuscleVolume({...v,current:{...v.current,axes:[]}})).toThrow('incompleta');});
+test('hidden is distinct from unavailable',async()=>{rpc.mockResolvedValue({data:null});expect(await getProfileMuscleVolume(volumeSubject,28,true)).toBeNull();rpc.mockResolvedValue({error:{message:'unavailable'}});await expect(getProfileMuscleVolume(volumeSubject,28,true)).rejects.toThrow('unavailable');});
+test('saving goals preserves explicit privacy setting',async()=>{rpc.mockResolvedValue({error:null});await saveMuscleVolumeGoals({chest:12},false);expect(rpc).toHaveBeenCalledWith('save_muscle_volume_goals',{goals_input:{chest:12},share_input:false});});

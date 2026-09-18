@@ -1,53 +1,389 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { generateId } from './ids';
 import {
   ActiveWorkoutDraft,
+  CatalogLibrary,
+  CatalogSet,
+  CatalogImportPlan,
   Exercise,
   ExerciseCatalog,
+  ExerciseDefinition,
   ExerciseVariant,
   Mesocycle,
+  MesocycleLifecycleEvent,
   MesocycleStatus,
+  MESOCYCLE_STATUSES as CURRENT_MESOCYCLE_STATUSES,
   PlannedSession,
   PlannedSessionRef,
   Routine,
   ShopState,
+  LegacyAlias,
+  UserId,
   UserProfile,
   WORKOUT_ATTEMPT_VERSION,
   WorkoutAttempt,
   WorkoutSession,
 } from '../types';
+import { CANONICAL_EXERCISE_DEFINITIONS } from '../constants/exerciseDefinitions';
+import { isCanonicalMuscleGroup } from '../constants/muscleGroups';
 import { reconcileActiveWorkoutTiming } from './activeWorkoutTiming';
+import { createCatalogLibrary, deleteCustomDefinition, planRecipientImport } from './catalogLibrary';
 
 const KEYS = {
   user: '@gymbro/user',
   exercises: '@gymbro/exercises',
   exerciseCatalog: '@gymbro/exercise-catalog/v1',
+  catalogLibrary: (profile: UserId) => `@gymbro/catalog-library/v2/${profile}`,
+  catalogLibraryJournal: '@gymbro/catalog-library/v2/journal',
   routines: '@gymbro/routines',
   legacyMesocycles: '@gymbro/mesocycles',
   legacyMesocyclePrefix: '@gymbro/mesocycles/v1/',
   mesocycleReset: '@gymbro/migrations/mesocycle-schedule-reset-v1',
-  mesocycles: (profile: UserProfile) => `@gymbro/mesocycles/v2/${profile}`,
+  mesocycles: (profile: UserId) => `@gymbro/mesocycles/v2/${profile}`,
   sessions: '@gymbro/sessions',
+  uidSessions: (uid: UserId) => `@gymbro/sessions/v2/${uid}`,
   sessionMigration: '@gymbro/migrations/profile-attempts-v1',
   sessionQuarantine: '@gymbro/quarantine/ownerless-sessions-v1',
-  attempts: (profile: UserProfile) => `@gymbro/attempts/v1/${profile}`,
-  activeWorkout: (profile: UserProfile) => `@gymbro/active-workout/v1/${profile}`,
+  attempts: (profile: UserId) => `@gymbro/attempts/v1/${profile}`,
+  activeWorkout: (profile: UserId) => `@gymbro/active-workout/v1/${profile}`,
   hiddenSharedRoutineIds: '@gymbro/hiddenSharedRoutineIds',
-  shop: (profile: UserProfile) => `@gymbro/shop/${profile}`,
+  shop: (profile: UserId) => `@gymbro/shop/${profile}`,
+  uidMigration: (uid: UserId) => `@gymbro/migrations/uid-ownership-v1/${uid}`,
+  uidMigrationJournal: '@gymbro/migrations/uid-ownership-v1/journal',
   legacyShop: '@gymbro/shop',
+  releaseNotesSeen: (profile: UserId, version: string) => `@gymbro/release-notes/v1/${profile}/${version}`,
 };
+
+const TRAINING_CLEAN_SLATE_VERSION = 'training-clean-slate-v1';
+
+function isCustomDefinition(value: unknown, owner: UserId): value is ExerciseDefinition {
+  const definition = value as Partial<ExerciseDefinition> | null;
+  return !!definition && typeof definition.id === 'string' && !!definition.id.trim()
+    && definition.source?.kind === 'custom' && definition.source.owner === owner
+    && typeof definition.source.originId === 'string' && !!definition.source.originId.trim()
+    && typeof definition.name === 'string' && !!definition.name.trim()
+    && Array.isArray(definition.muscleGroups) && Array.isArray(definition.defaultSets)
+    && ['external-load', 'bodyweight', 'assisted'].includes(definition.loadMode ?? '')
+    && ['kg', 'lb'].includes(definition.loadUnit ?? '');
+}
+
+function parseCustomDefinitions(raw: string | null, owner: UserId): ExerciseDefinition[] {
+  if (!raw) return [];
+  try {
+    const value = JSON.parse(raw) as Partial<CatalogLibrary>;
+    return Array.isArray(value.definitions) ? value.definitions.filter((item) => isCustomDefinition(item, owner)) : [];
+  } catch {
+    return [];
+  }
+}
+
+function addCustomDefinitions(
+  definitionsByOwner: Map<UserId, Map<string, ExerciseDefinition>>,
+  owner: UserId,
+  definitions: ExerciseDefinition[],
+): void {
+  const definitionsById = definitionsByOwner.get(owner) ?? new Map<string, ExerciseDefinition>();
+  definitions.forEach((definition) => {
+    if (!definitionsById.has(definition.id)) definitionsById.set(definition.id, definition);
+  });
+  definitionsByOwner.set(owner, definitionsById);
+}
+
+export async function readLegacyCustomDefinitions(owner: UserId): Promise<ExerciseDefinition[]> {
+  const marker = `@gymbro/migrations/${TRAINING_CLEAN_SLATE_VERSION}`;
+  if (await AsyncStorage.getItem(marker)) return [];
+
+  const keys = await AsyncStorage.getAllKeys();
+  const customDefinitions = new Map<UserId, Map<string, ExerciseDefinition>>();
+  for (const key of keys.filter((item) => item.startsWith('@gymbro/catalog-library/v2/'))) {
+    const profile = key.slice('@gymbro/catalog-library/v2/'.length);
+    const definitions = parseCustomDefinitions(await AsyncStorage.getItem(key), profile);
+    addCustomDefinitions(customDefinitions, profile, definitions);
+  }
+  const journal = await AsyncStorage.getItem(KEYS.catalogLibraryJournal);
+  try {
+    const value = journal ? JSON.parse(journal) as Partial<CatalogLibraryJournal> : null;
+    if (value?.version === 1 && value.libraries && typeof value.libraries === 'object') {
+      Object.entries(value.libraries).forEach(([profile, library]) => {
+        if (library) addCustomDefinitions(customDefinitions, profile, parseCustomDefinitions(JSON.stringify(library), profile));
+      });
+    }
+  } catch {
+    // A corrupt journal is runtime state and is deleted without recovery.
+  }
+  return [...(customDefinitions.get(owner)?.values() ?? [])];
+}
+
+export async function wipeLegacyTrainingRuntimeState(): Promise<void> {
+  const marker = `@gymbro/migrations/${TRAINING_CLEAN_SLATE_VERSION}`;
+  if (await AsyncStorage.getItem(marker)) return;
+  const keys = await AsyncStorage.getAllKeys();
+  const runtimeKeys = keys.filter((key) => key === KEYS.routines
+    || key === KEYS.legacyMesocycles
+    || key === KEYS.sessions
+    || key === KEYS.sessionMigration
+    || key === KEYS.sessionQuarantine
+    || key === KEYS.catalogLibraryJournal
+    || key === KEYS.hiddenSharedRoutineIds
+    || key === KEYS.legacyShop
+    || key.startsWith('@gymbro/catalog-library/v2/')
+    || key.startsWith('@gymbro/mesocycles/')
+    || key.startsWith('@gymbro/attempts/')
+    || key.startsWith('@gymbro/active-workout/')
+    || key.startsWith('@gymbro/sessions/v2/')
+    || key.startsWith('@gymbro/shop/'));
+  if (runtimeKeys.length) await AsyncStorage.multiRemove(runtimeKeys);
+  await AsyncStorage.setItem(marker, 'complete');
+}
 
 const SESSION_MIGRATION_VERSION = 'profile-attempts-v1';
 let storageMigrationPromise: Promise<void> | null = null;
 let storageMigrationError: Error | null = null;
-const attemptMutationQueues = new Map<UserProfile, Promise<void>>();
-const shopMutationQueues = new Map<UserProfile, Promise<void>>();
-const rewardSagaQueues = new Map<UserProfile, Promise<void>>();
+const attemptMutationQueues = new Map<UserId, Promise<void>>();
+const shopMutationQueues = new Map<UserId, Promise<void>>();
+const rewardSagaQueues = new Map<UserId, Promise<void>>();
 let exerciseCatalogMutationQueue: Promise<void> = Promise.resolve();
+let catalogLibraryMutationQueue: Promise<void> = Promise.resolve();
 
 const EXERCISE_CATALOG_VERSION = 1 as const;
 const DEFAULT_EXERCISE_VARIANTS: ExerciseVariant[] = ['barra', 'mancuernas', 'polea', 'libre'];
 const DEFAULT_MESOCYCLE_CREATED_AT = new Date(0).toISOString();
-const MESOCYCLE_STATUSES: readonly MesocycleStatus[] = ['draft', 'active', 'completed', 'archived'];
+const MESOCYCLE_STATUSES: readonly MesocycleStatus[] = [...CURRENT_MESOCYCLE_STATUSES, 'archived'];
+
+const CATALOG_LIBRARY_OWNERS: readonly LegacyAlias[] = ['rodaja', 'brisas'];
+
+type CatalogLibraryJournal = { version: 1; libraries: Partial<Record<UserId, CatalogLibrary>> };
+
+const cloneStorageValue = <T,>(value: T): T => JSON.parse(JSON.stringify(value)) as T;
+
+function parseArray(value: string | null): unknown[] {
+  if (!value) return [];
+  const parsed: unknown = JSON.parse(value);
+  return Array.isArray(parsed) ? parsed : [];
+}
+
+function parseCatalogLibrary(value: string | null, owner: UserId): CatalogLibrary | null {
+  if (!value) return null;
+  const parsed: unknown = JSON.parse(value);
+  if (!parsed || typeof parsed !== 'object') return null;
+  const library = parsed as Partial<CatalogLibrary>;
+  if (library.version !== 2 || library.owner !== owner || !Array.isArray(library.definitions)
+    || !Array.isArray(library.routines) || !Array.isArray(library.mesocycles) || !Array.isArray(library.attempts)) {
+    return null;
+  }
+  return library as CatalogLibrary;
+}
+
+function normalizedLegacyName(value: string): string {
+  return value.normalize('NFD').replace(/\p{Diacritic}/gu, '').trim().replace(/\s+/gu, ' ').toLocaleLowerCase('en-US');
+}
+
+function legacySets(value: unknown): CatalogSet[] {
+  if (!Array.isArray(value)) return [];
+  return value.flatMap((set): CatalogSet[] => {
+    if (!set || typeof set !== 'object') return [];
+    const candidate = set as Partial<CatalogSet>;
+    if (!Number.isFinite(candidate.weight) || (candidate.weight ?? -1) < 0 || !Number.isFinite(candidate.reps)) return [];
+    return [{ id: typeof candidate.id === 'string' ? candidate.id : generateId(), tipo: candidate.tipo ?? candidate.reps!, weight: candidate.weight!, reps: candidate.reps! }];
+  });
+}
+
+function legacyDefinition(owner: UserId, exercise: Exercise): ExerciseDefinition {
+  const system = CANONICAL_EXERCISE_DEFINITIONS.find(
+    (definition) => normalizedLegacyName(definition.name) === normalizedLegacyName(exercise.name),
+  );
+  if (system) return cloneStorageValue(system);
+  const groups = exercise.muscleGroups.filter(isCanonicalMuscleGroup);
+  return {
+    id: `custom:${owner}:${exercise.id}`,
+    source: { kind: 'custom', owner, originId: exercise.id },
+    name: exercise.name,
+    muscleGroups: groups.length ? groups : ['fullBody'],
+    loadMode: exercise.loadMode ?? 'external-load',
+    loadUnit: exercise.loadUnit ?? 'kg',
+    variant: exercise.variant,
+    defaultSets: legacySets(exercise.defaultSets),
+  };
+}
+
+function snapshotDefinition(definition: ExerciseDefinition) {
+  return {
+    id: definition.id,
+    name: definition.name,
+    muscleGroups: [...definition.muscleGroups],
+    loadMode: definition.loadMode,
+    loadUnit: definition.loadUnit,
+    variant: definition.variant,
+  };
+}
+
+function projectLegacyRoutines(routines: Routine[], definitionsByLegacyId: Map<string, ExerciseDefinition>): Routine[] {
+  return routines.map((routine) => ({ ...cloneStorageValue(routine), exercises: routine.exercises.map((exercise) => {
+    const definition = exercise.catalogExerciseId ? definitionsByLegacyId.get(exercise.catalogExerciseId) : undefined;
+    return !definition ? cloneStorageValue(exercise) : {
+      ...cloneStorageValue(exercise),
+      catalogExerciseId: definition.id,
+      definitionId: definition.id,
+      definitionSnapshot: snapshotDefinition(definition),
+    };
+  }) }));
+}
+
+async function recoverCatalogLibraryJournal(): Promise<void> {
+  const raw = await AsyncStorage.getItem(KEYS.catalogLibraryJournal);
+  if (!raw) return;
+  const parsed: unknown = JSON.parse(raw);
+  if (!parsed || typeof parsed !== 'object' || (parsed as Partial<CatalogLibraryJournal>).version !== 1
+    || !((parsed as Partial<CatalogLibraryJournal>).libraries)) {
+    throw new Error('Catalog library journal is invalid.');
+  }
+  const journal = parsed as CatalogLibraryJournal;
+  for (const [owner, library] of Object.entries(journal.libraries)) {
+    if (!library || !parseCatalogLibrary(JSON.stringify(library), owner)) continue;
+    await AsyncStorage.setItem(KEYS.catalogLibrary(owner), JSON.stringify(library));
+  }
+  await AsyncStorage.removeItem(KEYS.catalogLibraryJournal);
+}
+
+async function commitCatalogLibraries(libraries: Partial<Record<UserId, CatalogLibrary>>): Promise<void> {
+  await AsyncStorage.setItem(KEYS.catalogLibraryJournal, JSON.stringify({ version: 1, libraries } satisfies CatalogLibraryJournal));
+  for (const [owner, library] of Object.entries(libraries)) {
+    if (library) await AsyncStorage.setItem(KEYS.catalogLibrary(owner), JSON.stringify(library));
+  }
+  await AsyncStorage.removeItem(KEYS.catalogLibraryJournal);
+}
+
+async function legacyExercises(): Promise<Exercise[]> {
+  const raw = await AsyncStorage.getItem(KEYS.exerciseCatalog) ?? await AsyncStorage.getItem(KEYS.exercises);
+  if (!raw) return [];
+  const parsed: unknown = JSON.parse(raw);
+  const exercises = Array.isArray(parsed) ? parsed : (parsed as Partial<ExerciseCatalog>).exercises;
+  return Array.isArray(exercises) ? exercises.filter((exercise): exercise is Exercise => !!exercise && typeof exercise === 'object'
+    && typeof (exercise as Partial<Exercise>).id === 'string' && typeof (exercise as Partial<Exercise>).name === 'string'
+    && typeof (exercise as Partial<Exercise>).variant === 'string' && Array.isArray((exercise as Partial<Exercise>).muscleGroups)) : [];
+}
+
+async function legacyMesocycles(owner: UserId): Promise<Mesocycle[]> {
+  const raw = await AsyncStorage.getItem(KEYS.mesocycles(owner))
+    ?? await AsyncStorage.getItem(`${KEYS.legacyMesocyclePrefix}${owner}`)
+    ?? await AsyncStorage.getItem(KEYS.legacyMesocycles);
+  return parseArray(raw) as Mesocycle[];
+}
+
+async function legacyAttempts(owner: UserId): Promise<WorkoutAttempt[]> {
+  return parseArray(await AsyncStorage.getItem(KEYS.attempts(owner))) as WorkoutAttempt[];
+}
+
+async function migrateCatalogLibraries(): Promise<void> {
+  await recoverCatalogLibraryJournal();
+  const existing = await Promise.all(CATALOG_LIBRARY_OWNERS.map(async (owner) => [owner,
+    parseCatalogLibrary(await AsyncStorage.getItem(KEYS.catalogLibrary(owner)), owner),
+  ] as const));
+  if (existing.every(([, library]) => library)) return;
+
+  const exercises = await legacyExercises();
+  const routines = parseArray(await AsyncStorage.getItem(KEYS.routines)) as Routine[];
+  const libraries: Partial<Record<UserId, CatalogLibrary>> = Object.fromEntries(existing) as Partial<Record<UserId, CatalogLibrary>>;
+  for (const owner of CATALOG_LIBRARY_OWNERS) {
+    if (libraries[owner]) continue;
+    const definitions = exercises.map((exercise) => legacyDefinition(owner, exercise));
+    const customDefinitions = definitions.filter((definition) => definition.source.kind === 'custom');
+    const byLegacyId = new Map(exercises.map((exercise, index) => [exercise.id, definitions[index]]));
+    libraries[owner] = createCatalogLibrary(owner, customDefinitions, projectLegacyRoutines(routines, byLegacyId), await legacyMesocycles(owner), await legacyAttempts(owner));
+  }
+  await commitCatalogLibraries(libraries);
+}
+
+export async function loadCatalogLibrary(owner: UserId): Promise<CatalogLibrary> {
+  const operation = catalogLibraryMutationQueue.then(async () => {
+    await migrateCatalogLibraries();
+    const stored = parseCatalogLibrary(await AsyncStorage.getItem(KEYS.catalogLibrary(owner)), owner);
+    if (stored) return stored;
+    const library = createCatalogLibrary(owner);
+    await AsyncStorage.setItem(KEYS.catalogLibrary(owner), JSON.stringify(library));
+    return library;
+  });
+  catalogLibraryMutationQueue = operation.then(() => undefined, () => undefined);
+  return operation;
+}
+
+const NORMALIZED_CATALOG_RESET_KEY = '@gymbro/migrations/normalized-catalog-v1';
+
+export async function resetLegacyTrainingDataForNormalizedCatalog(): Promise<void> {
+  if (await AsyncStorage.getItem(NORMALIZED_CATALOG_RESET_KEY)) return;
+  const keys = await AsyncStorage.getAllKeys();
+  const legacyTrainingKeys = keys.filter((key) => (
+    key === KEYS.routines
+    || key === KEYS.exercises
+    || key === KEYS.exerciseCatalog
+    || key === KEYS.catalogLibraryJournal
+    || key === KEYS.legacyMesocycles
+    || key === KEYS.sessions
+    || key === KEYS.sessionQuarantine
+    || key === KEYS.hiddenSharedRoutineIds
+    || key.startsWith('@gymbro/catalog-library/v2/')
+    || key.startsWith('@gymbro/mesocycles/')
+    || key.startsWith('@gymbro/attempts/')
+    || key.startsWith('@gymbro/active-workout/')
+    || key.startsWith('@gymbro/sessions/v2/')
+  ));
+  if (legacyTrainingKeys.length) await AsyncStorage.multiRemove(legacyTrainingKeys);
+  await AsyncStorage.setItem(NORMALIZED_CATALOG_RESET_KEY, new Date().toISOString());
+}
+
+export async function updateCatalogLibrary(
+  owner: UserId,
+  mutation: (library: CatalogLibrary) => CatalogLibrary,
+): Promise<CatalogLibrary> {
+  const operation = catalogLibraryMutationQueue.then(async () => {
+    await migrateCatalogLibraries();
+    const current = parseCatalogLibrary(await AsyncStorage.getItem(KEYS.catalogLibrary(owner)), owner);
+    if (!current) throw new Error('Catalog library is unavailable.');
+    const next = mutation(cloneStorageValue(current));
+    if (next.version !== 2 || next.owner !== owner) throw new Error('Catalog library mutation returned an invalid owner library.');
+    await commitCatalogLibraries({ [owner]: next });
+    return next;
+  });
+  catalogLibraryMutationQueue = operation.then(() => undefined, () => undefined);
+  return operation;
+}
+
+export async function deleteCatalogLibraryDefinition(
+  owner: UserId,
+  id: string,
+  replacementId?: string,
+): Promise<CatalogLibrary> {
+  const operation = catalogLibraryMutationQueue.then(async () => {
+    await migrateCatalogLibraries();
+    const current = parseCatalogLibrary(await AsyncStorage.getItem(KEYS.catalogLibrary(owner)), owner);
+    if (!current) throw new Error('Catalog library is unavailable.');
+    const next = deleteCustomDefinition(current, owner, id, replacementId);
+    await commitCatalogLibraries({ [owner]: next });
+    return next;
+  });
+  catalogLibraryMutationQueue = operation.then(() => undefined, () => undefined);
+  return operation;
+}
+
+export async function commitCatalogLibraryImport(
+  recipient: UserId,
+  plan: CatalogImportPlan,
+): Promise<ReturnType<typeof planRecipientImport>> {
+  const operation = catalogLibraryMutationQueue.then(async () => {
+    await migrateCatalogLibraries();
+    const current = parseCatalogLibrary(await AsyncStorage.getItem(KEYS.catalogLibrary(recipient)), recipient);
+    if (!current) throw new Error('Catalog library is unavailable.');
+    const result = planRecipientImport(current, plan);
+    await commitCatalogLibraries({ [recipient]: result.library });
+    return result;
+  });
+  catalogLibraryMutationQueue = operation.then(() => undefined, () => undefined);
+  return operation;
+}
+
+export async function commitImport(plan: CatalogImportPlan): Promise<ReturnType<typeof planRecipientImport>> {
+  return commitCatalogLibraryImport(plan.recipient, plan);
+}
 
 const STARTER_THEME_IDS = ['white', 'black', 'profile-rodaja', 'profile-brisas'] as const;
 
@@ -130,17 +466,80 @@ async function ensureStorageSchema(): Promise<void> {
   await storageMigrationPromise;
 }
 
-export async function saveUser(profile: UserProfile): Promise<void> {
-  await AsyncStorage.setItem(KEYS.user, profile);
-}
-
-export async function loadUser(): Promise<UserProfile | null> {
+export async function loadLegacyAlias(): Promise<LegacyAlias | null> {
   const value = await AsyncStorage.getItem(KEYS.user);
-  return value as UserProfile | null;
+  return value === 'rodaja' || value === 'brisas' ? value : null;
 }
 
-export async function clearUser(): Promise<void> {
-  await AsyncStorage.removeItem(KEYS.user);
+export async function hasSeenReleaseNotes(profile: UserId, version: string): Promise<boolean> {
+  return (await AsyncStorage.getItem(KEYS.releaseNotesSeen(profile, version))) === 'seen';
+}
+
+export async function markReleaseNotesSeen(profile: UserId, version: string): Promise<void> {
+  await AsyncStorage.setItem(KEYS.releaseNotesSeen(profile, version), 'seen');
+}
+
+type UidMigrationJournal = {
+  version: 1;
+  uid: UserId;
+  writes: Record<string, string>;
+};
+
+function migrateLibraryOwner(library: CatalogLibrary, uid: UserId): CatalogLibrary {
+  return {
+    ...cloneStorageValue(library),
+    owner: uid,
+    definitions: library.definitions.map((definition) => definition.source.kind === 'custom'
+      ? { ...definition, source: { ...definition.source, owner: uid } }
+      : definition),
+  };
+}
+
+async function commitUidMigration(journal: UidMigrationJournal): Promise<void> {
+  await AsyncStorage.setItem(KEYS.uidMigrationJournal, JSON.stringify(journal));
+  for (const [key, value] of Object.entries(journal.writes)) {
+    const current = await AsyncStorage.getItem(key);
+    if (current === null) await AsyncStorage.setItem(key, value);
+    if (await AsyncStorage.getItem(key) !== value) throw new Error('UID migration could not verify a copied record.');
+  }
+  await AsyncStorage.setItem(KEYS.uidMigration(journal.uid), 'complete');
+  await AsyncStorage.removeItem(KEYS.uidMigrationJournal);
+}
+
+export async function migrateLegacyAliasToUid(alias: LegacyAlias | null, uid: UserId): Promise<void> {
+  if (await AsyncStorage.getItem(KEYS.uidMigration(uid)) === 'complete') return;
+
+  const rawJournal = await AsyncStorage.getItem(KEYS.uidMigrationJournal);
+  if (rawJournal) {
+    const journal = JSON.parse(rawJournal) as UidMigrationJournal;
+    if (journal.version !== 1 || journal.uid !== uid || !journal.writes) throw new Error('UID migration journal is invalid.');
+    await commitUidMigration(journal);
+    return;
+  }
+
+  const writes: Record<string, string> = {};
+  if (alias) {
+    await migrateCatalogLibraries();
+    const legacyLibrary = parseCatalogLibrary(await AsyncStorage.getItem(KEYS.catalogLibrary(alias)), alias);
+    if (legacyLibrary) writes[KEYS.catalogLibrary(uid)] = JSON.stringify(migrateLibraryOwner(legacyLibrary, uid));
+
+    const legacyDraft = await AsyncStorage.getItem(KEYS.activeWorkout(alias));
+    if (legacyDraft) {
+      const draft = JSON.parse(legacyDraft) as ActiveWorkoutDraft;
+      if (isActiveWorkoutDraft(draft, alias)) {
+        writes[KEYS.activeWorkout(uid)] = JSON.stringify({ ...draft, owner: uid });
+      }
+    }
+
+    const legacySessions = parseArray(await AsyncStorage.getItem(KEYS.sessions))
+      .filter((session): session is WorkoutSession & { owner: LegacyAlias } =>
+        !!session && typeof session === 'object' && (session as { owner?: string }).owner === alias,
+      )
+      .map((session) => ({ ...session, owner: uid }));
+    if (legacySessions.length) writes[KEYS.uidSessions(uid)] = JSON.stringify(legacySessions);
+  }
+
+  await commitUidMigration({ version: 1, uid, writes });
 }
 
 export function normalizeExerciseVariant(value: string): ExerciseVariant {
@@ -399,6 +798,22 @@ function normalizeMesocycleStatus(value: unknown): MesocycleStatus {
     : 'draft';
 }
 
+function normalizeMesocycleLifecycleHistory(value: unknown): MesocycleLifecycleEvent[] | undefined {
+  if (!Array.isArray(value)) return undefined;
+  const events = value.flatMap((candidate): MesocycleLifecycleEvent[] => {
+    if (!candidate || typeof candidate !== 'object' || Array.isArray(candidate)) return [];
+    const event = candidate as Partial<MesocycleLifecycleEvent> & { shiftedPlannedSessionIds?: unknown };
+    if (typeof event.at !== 'string') return [];
+    if (event.type === 'completed' || event.type === 'cancelled') return [{ type: event.type, at: event.at }];
+    if (event.type === 'paused' && typeof event.localDate === 'string') return [{ type: 'paused', at: event.at, localDate: event.localDate }];
+    if (event.type === 'resumed' && typeof event.localDate === 'string' && typeof event.pauseStartedAt === 'string' && typeof event.pauseStartedDate === 'string' && Number.isInteger(event.shiftDays) && (event.shiftDays ?? -1) >= 0 && Array.isArray(event.shiftedPlannedSessionIds)) {
+      return [{ type: 'resumed', at: event.at, localDate: event.localDate, pauseStartedAt: event.pauseStartedAt, pauseStartedDate: event.pauseStartedDate, shiftDays: event.shiftDays!, shiftedPlannedSessionIds: event.shiftedPlannedSessionIds.filter((id): id is string => typeof id === 'string') }];
+    }
+    return [];
+  });
+  return events.length ? events : undefined;
+}
+
 function normalizePlannedSessionRef(
   value: unknown,
   fallbackRoutineId: string,
@@ -428,6 +843,54 @@ function normalizePlannedSessionRef(
   };
 }
 
+function normalizeRoutineSnapshot(value: unknown): Routine | undefined {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined;
+  const routine = value as Partial<Routine>;
+  if (typeof routine.id !== 'string' || !routine.id.trim() || typeof routine.name !== 'string' || !routine.name.trim()
+    || !Array.isArray(routine.muscleGroups) || !routine.muscleGroups.every((group) => typeof group === 'string')
+    || !Array.isArray(routine.exercises)) return undefined;
+  return routine as Routine;
+}
+
+function normalizePlannedSessionPlanningState(value: unknown): NonNullable<PlannedSession['planningState']> {
+  return value === 'in_progress' || value === 'skipped' || value === 'rescheduled' || value === 'cancelled'
+    ? value
+    : 'pending';
+}
+
+function normalizePlannedSessionTransition(value: unknown): PlannedSession['planningTransition'] {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined;
+  const transition = value as Partial<NonNullable<PlannedSession['planningTransition']>>;
+  if (typeof transition.at !== 'string') return undefined;
+  return {
+    from: normalizePlannedSessionPlanningState(transition.from),
+    to: normalizePlannedSessionPlanningState(transition.to),
+    at: transition.at,
+    reason: typeof transition.reason === 'string' ? transition.reason : undefined,
+  };
+}
+
+function plannedSessionLifecycleFields(session: Partial<PlannedSession>): {
+  planningState: NonNullable<PlannedSession['planningState']>;
+  planningTransition?: PlannedSession['planningTransition'];
+  recoveryForPlannedSessionId?: string;
+  recoveredByPlannedSessionId?: string;
+  isExtraordinary?: boolean;
+  scheduleShiftDays?: number;
+} {
+  const planningTransition = normalizePlannedSessionTransition(session.planningTransition);
+  const recoveryForPlannedSessionId = typeof session.recoveryForPlannedSessionId === 'string' ? session.recoveryForPlannedSessionId : undefined;
+  const recoveredByPlannedSessionId = typeof session.recoveredByPlannedSessionId === 'string' ? session.recoveredByPlannedSessionId : undefined;
+  return {
+    planningState: normalizePlannedSessionPlanningState(session.planningState),
+    ...(planningTransition ? { planningTransition } : {}),
+    ...(recoveryForPlannedSessionId ? { recoveryForPlannedSessionId } : {}),
+    ...(recoveredByPlannedSessionId ? { recoveredByPlannedSessionId } : {}),
+    ...(session.isExtraordinary === true ? { isExtraordinary: true } : {}),
+    ...(typeof session.scheduleShiftDays === 'number' && Number.isInteger(session.scheduleShiftDays) && session.scheduleShiftDays >= 0 ? { scheduleShiftDays: session.scheduleShiftDays } : {}),
+  };
+}
+
 function normalizePlannedSession(value: unknown, index: number): PlannedSession {
   const session = value && typeof value === 'object' && !Array.isArray(value)
     ? value as Partial<PlannedSession> & { routineId?: unknown; routineName?: unknown }
@@ -446,6 +909,8 @@ function normalizePlannedSession(value: unknown, index: number): PlannedSession 
     order: typeof session.order === 'number' && Number.isInteger(session.order) ? session.order : index + 1,
     progressionNote: typeof session.progressionNote === 'string' ? session.progressionNote : undefined,
     note: typeof session.note === 'string' ? session.note : undefined,
+    routineSnapshot: normalizeRoutineSnapshot(session.routineSnapshot),
+    ...plannedSessionLifecycleFields(session),
   };
 }
 
@@ -463,6 +928,8 @@ function normalizeMesocycleEntry(value: unknown, index: number): PlannedSession 
       order: typeof candidate.order === 'number' && Number.isInteger(candidate.order) ? candidate.order : index + 1,
       progressionNote: typeof candidate.progressionNote === 'string' ? candidate.progressionNote : undefined,
       note: typeof candidate.note === 'string' ? candidate.note : undefined,
+      routineSnapshot: normalizeRoutineSnapshot(candidate.routineSnapshot),
+      ...plannedSessionLifecycleFields(candidate),
     } : null;
   }
   return null;
@@ -486,16 +953,29 @@ function normalizeMesocycle(value: unknown, index: number): Mesocycle {
     && mesocycle.durationWeeks > 0
     ? mesocycle.durationWeeks
     : Math.max(weeks.length, 1);
+  const lifecycleHistory = normalizeMesocycleLifecycleHistory(mesocycle.lifecycleHistory);
+  const sharedFrom = mesocycle.sharedFrom && typeof mesocycle.sharedFrom === 'object'
+    && typeof mesocycle.sharedFrom.requestId === 'string' && typeof mesocycle.sharedFrom.senderId === 'string' && typeof mesocycle.sharedFrom.acceptedAt === 'string'
+    ? { ...mesocycle.sharedFrom }
+    : undefined;
 
   return {
     id: typeof mesocycle.id === 'string' ? mesocycle.id : `mesocycle-${index + 1}`,
+    ...(typeof mesocycle.version === 'number' && Number.isInteger(mesocycle.version) && mesocycle.version > 0 ? { version: mesocycle.version } : {}),
+    ...(typeof mesocycle.versionOf === 'string' ? { versionOf: mesocycle.versionOf } : {}),
+    ...(typeof mesocycle.previousVersionId === 'string' ? { previousVersionId: mesocycle.previousVersionId } : {}),
     name: typeof mesocycle.name === 'string' ? mesocycle.name : 'Untitled mesocycle',
     goal: typeof mesocycle.goal === 'string' ? mesocycle.goal : '',
     status: normalizeMesocycleStatus(mesocycle.status),
     weeks,
     durationWeeks: Math.max(requestedDuration, weeks.length),
     startDate: typeof mesocycle.startDate === 'string' ? mesocycle.startDate : undefined,
+    pausedAt: typeof mesocycle.pausedAt === 'string' ? mesocycle.pausedAt : undefined,
+    pausedOn: typeof mesocycle.pausedOn === 'string' ? mesocycle.pausedOn : undefined,
+    scheduleShiftDays: typeof mesocycle.scheduleShiftDays === 'number' && Number.isInteger(mesocycle.scheduleShiftDays) && mesocycle.scheduleShiftDays >= 0 ? mesocycle.scheduleShiftDays : undefined,
+    ...(lifecycleHistory ? { lifecycleHistory } : {}),
     createdAt: typeof mesocycle.createdAt === 'string' ? mesocycle.createdAt : DEFAULT_MESOCYCLE_CREATED_AT,
+    ...(sharedFrom ? { sharedFrom } : {}),
   };
 }
 
@@ -551,14 +1031,14 @@ export function assertRoutineMutationReady(isLoaded: boolean): void {
   if (!isLoaded) throw new Error('Los datos de las rutinas aún no terminaron de cargar.');
 }
 
-export async function saveSessions(sessions: WorkoutSession[]): Promise<void> {
+export async function saveSessions(sessions: WorkoutSession[], owner?: UserId): Promise<void> {
   await ensureStorageSchema();
-  await AsyncStorage.setItem(KEYS.sessions, JSON.stringify(sessions));
+  await AsyncStorage.setItem(owner ? KEYS.uidSessions(owner) : KEYS.sessions, JSON.stringify(sessions));
 }
 
-export async function loadSessions(): Promise<WorkoutSession[]> {
+export async function loadSessions(owner?: UserId): Promise<WorkoutSession[]> {
   await ensureStorageSchema();
-  const value = await AsyncStorage.getItem(KEYS.sessions);
+  const value = await AsyncStorage.getItem(owner ? KEYS.uidSessions(owner) : KEYS.sessions);
   return value ? JSON.parse(value) : [];
 }
 
@@ -631,7 +1111,14 @@ export async function loadAttempts(profile: UserProfile): Promise<WorkoutAttempt
 function isActiveWorkoutDraft(value: unknown, owner: UserProfile): value is ActiveWorkoutDraft {
   const draft = value as Partial<ActiveWorkoutDraft> | null;
   return !!draft && draft.version === 1 && draft.owner === owner && typeof draft.attemptId === 'string' && typeof draft.routineId === 'string'
-    && Number.isFinite(draft.startedAtMs) && Number.isFinite(draft.restTimerSeconds) && !!draft.completedSets && !!draft.setValues;
+    && Number.isFinite(draft.startedAtMs) && Number.isFinite(draft.restTimerSeconds) && !!draft.completedSets && !!draft.setValues
+    && (draft.pausedAtMs === undefined || Number.isFinite(draft.pausedAtMs))
+    && (draft.pausedDurationMs === undefined || Number.isFinite(draft.pausedDurationMs))
+    && (draft.pausedRestRemainingSeconds === undefined || Number.isFinite(draft.pausedRestRemainingSeconds))
+    && (draft.jointCancellationPending === undefined || draft.jointCancellationPending === true)
+    && (draft.routineSnapshot === undefined || (typeof draft.routineSnapshot === 'object' && draft.routineSnapshot !== null
+      && typeof draft.routineSnapshot.id === 'string' && typeof draft.routineSnapshot.name === 'string'
+      && Array.isArray(draft.routineSnapshot.exercises)));
 }
 export async function loadActiveWorkoutDraft(owner: UserProfile, nowMs = Date.now()): Promise<ActiveWorkoutDraft | null> {
   const raw = await AsyncStorage.getItem(KEYS.activeWorkout(owner));
@@ -728,6 +1215,7 @@ export function deleteAttempt(profile: UserProfile, id: string): Promise<Workout
 function immutableAttemptShape(attempt: WorkoutAttempt): unknown {
   return {
     ...attempt,
+    recapPublicationKey: null,
     completedAt: null,
     durationSeconds: null,
     restTimerSeconds: null,
@@ -751,15 +1239,6 @@ export function updateAttempt(profile: UserProfile, edited: WorkoutAttempt): Pro
     }
     return current.map((attempt) => attempt.id === edited.id ? reconciled : attempt);
   });
-}
-
-export async function saveHiddenSharedRoutineIds(shareIds: string[]): Promise<void> {
-  await AsyncStorage.setItem(KEYS.hiddenSharedRoutineIds, JSON.stringify(shareIds));
-}
-
-export async function loadHiddenSharedRoutineIds(): Promise<string[]> {
-  const value = await AsyncStorage.getItem(KEYS.hiddenSharedRoutineIds);
-  return value ? JSON.parse(value) : [];
 }
 
 export async function saveShop(profile: UserProfile, state: ShopState): Promise<void> {
@@ -845,6 +1324,4 @@ export async function loadEquippedThemes(): Promise<Record<UserProfile, string |
   };
 }
 
-export function generateId(): string {
-  return `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
-}
+export { generateId };

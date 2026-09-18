@@ -1,10 +1,10 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
-  Alert,
   KeyboardAvoidingView,
   Platform,
   ScrollView,
   StyleSheet,
+  Text,
   View,
 } from 'react-native';
 import { router } from 'expo-router';
@@ -12,49 +12,56 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { DualLoginBackground } from '../components/login/DualLoginBackground';
 import { DualLoginFooter } from '../components/login/DualLoginFooter';
 import { DualLoginHeader } from '../components/login/DualLoginHeader';
-import { LoginFormPanel } from '../components/login/LoginFormPanel';
-import { getRandomWelcomeMessage } from '../constants/welcome';
+import { AuthMode, LoginFormPanel } from '../components/login/LoginFormPanel';
 import { useAuth } from '../context/AuthContext';
-import { useLoginThemes } from '../hooks/useLoginThemes';
-import { UserProfile } from '../types';
-
-function resolveActiveProfile(username: string): UserProfile | null {
-  const value = username.trim().toLowerCase();
-  if (value === 'rodaja' || value.startsWith('rod')) return 'rodaja';
-  if (value === 'brisas' || value.startsWith('bri')) return 'brisas';
-  return null;
-}
+import { LOGIN_THEMES } from '../constants/loginBrand';
+import { getOwnOnboarding } from '../services/onboarding';
 
 export default function LoginScreen() {
-  const { user, isLoading, login, setWelcomeMessage } = useAuth();
-  const loginThemes = useLoginThemes();
-  const [username, setUsername] = useState('');
+  const { user, isLoading, authError, login, register, sendPasswordReset } = useAuth();
+  const loginThemes = LOGIN_THEMES;
+  const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
-
-  const activeProfile = useMemo(() => resolveActiveProfile(username), [username]);
+  const [mode, setMode] = useState<AuthMode>('signIn');
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [feedback, setFeedback] = useState<{ tone: 'error' | 'success'; message: string } | null>(null);
 
   useEffect(() => {
-    if (!isLoading && user) {
-      router.replace('/(tabs)/routines');
-    }
+    if (isLoading || !user) return;
+    void getOwnOnboarding().then((onboarding) => {
+      router.replace(onboarding.completed ? '/(tabs)/train' : '/onboarding');
+    }).catch(() => router.replace('/(tabs)/train'));
   }, [user, isLoading]);
 
-  const handleLogin = () => {
-    const success = login(username.trim(), password);
-    if (!success) {
-      Alert.alert('Error', 'Usuario o contraseña incorrectos');
-      return;
-    }
-
-    if (username.trim().toLowerCase() === 'brisas') {
-      setWelcomeMessage(getRandomWelcomeMessage());
-    }
-
-    router.replace('/(tabs)/routines');
+  const changeMode = (nextMode: AuthMode) => {
+    setMode(nextMode);
+    setFeedback(null);
   };
 
-  const handleSelectProfile = (profile: UserProfile) => {
-    setUsername(profile);
+  const submit = async () => {
+    setIsSubmitting(true);
+    setFeedback(null);
+    try {
+      if (mode === 'signIn') {
+        const error = await login(email, password);
+        if (error) setFeedback({ tone: 'error', message: error });
+        return;
+      }
+      if (mode === 'signUp') {
+        const result = await register(email, password);
+        if (result.error) setFeedback({ tone: 'error', message: result.error });
+        else if (result.emailConfirmationRequired) setFeedback({ tone: 'success', message: 'Revisá tu correo para confirmar la cuenta antes de ingresar.' });
+        return;
+      }
+      const error = await sendPasswordReset(email);
+      setFeedback(error
+        ? { tone: 'error', message: error }
+        : { tone: 'success', message: 'Si existe una cuenta con ese correo, te enviamos un enlace de recuperación.' });
+    } catch {
+      setFeedback({ tone: 'error', message: 'No pudimos completar la solicitud. Intentá nuevamente.' });
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   return (
@@ -74,24 +81,26 @@ export default function LoginScreen() {
             <DualLoginHeader
               rodaja={loginThemes.rodaja}
               brisas={loginThemes.brisas}
-              activeProfile={activeProfile}
             />
 
             <LoginFormPanel
               rodaja={loginThemes.rodaja}
               brisas={loginThemes.brisas}
-              activeProfile={activeProfile}
-              username={username}
+              mode={mode}
+              email={email}
               password={password}
-              onUsernameChange={setUsername}
+              isSubmitting={isSubmitting}
+              feedback={feedback}
+              onEmailChange={setEmail}
               onPasswordChange={setPassword}
-              onSelectProfile={handleSelectProfile}
-              onSubmit={handleLogin}
+              onModeChange={changeMode}
+              onSubmit={() => void submit()}
             />
 
             <DualLoginFooter rodaja={loginThemes.rodaja} brisas={loginThemes.brisas} />
           </ScrollView>
         </KeyboardAvoidingView>
+        {authError ? <Text style={styles.configError}>{authError}</Text> : null}
       </SafeAreaView>
     </View>
   );
@@ -113,5 +122,11 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     paddingHorizontal: 22,
     paddingVertical: 16,
+  },
+  configError: {
+    color: '#FCA5A5',
+    paddingHorizontal: 22,
+    paddingBottom: 16,
+    textAlign: 'center',
   },
 });

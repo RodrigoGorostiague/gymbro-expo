@@ -1,0 +1,62 @@
+import React from 'react';
+import { Modal, StyleSheet, Text, View } from 'react-native';
+import { useTheme } from '../context/ThemeContext';
+import { HapticPressable } from './HapticPressable';
+
+export function AppNoticeModal({
+  visible,
+  title,
+  message,
+  changes = [],
+  highlight,
+  version,
+  celebration,
+  actionLabel = 'Entendido',
+  onClose,
+}: {
+  visible: boolean;
+  title: string;
+  message: string;
+  changes?: readonly string[];
+  highlight?: string;
+  version?: string;
+  celebration?: React.ReactNode;
+  actionLabel?: string;
+  onClose: () => void;
+}) {
+  const { theme } = useTheme();
+
+  return (
+    <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
+      <View style={styles.backdrop}>
+        <View accessibilityRole="alert" style={[styles.card, { backgroundColor: theme.tabBarBackground, borderColor: theme.accent }]}>
+          {highlight ? <View style={[styles.highlight, { backgroundColor: theme.primary }]}><Text style={[styles.highlightText, { color: theme.onPrimary }]}>{highlight}</Text></View> : null}
+          {version ? <Text style={[styles.version, { color: theme.textMuted }]}>VERSION {version}</Text> : null}
+          <Text accessibilityRole="header" style={[styles.title, { color: theme.text }]}>{title}</Text>
+          <Text style={[styles.message, { color: theme.textMuted }]}>{message}</Text>
+          {celebration}
+          {changes.length ? <View style={styles.changes}>{changes.map((change) => <View key={change} style={styles.change}><Text style={[styles.changeBullet, { color: theme.primary }]}>•</Text><Text style={[styles.changeText, { color: theme.textMuted }]}>{change}</Text></View>)}</View> : null}
+          <HapticPressable accessibilityRole="button" accessibilityLabel={actionLabel} onPress={onClose} style={[styles.action, { backgroundColor: theme.primary }]}>
+            <Text style={[styles.actionText, { color: theme.onPrimary }]}>{actionLabel}</Text>
+          </HapticPressable>
+        </View>
+      </View>
+    </Modal>
+  );
+}
+
+const styles = StyleSheet.create({
+  backdrop: { alignItems: 'center', backgroundColor: 'rgba(0, 0, 0, 0.62)', flex: 1, justifyContent: 'center', padding: 24 },
+  card: { alignItems: 'center', borderRadius: 24, borderWidth: 1.5, gap: 14, maxWidth: 360, padding: 24, width: '100%' },
+  highlight: { borderRadius: 999, paddingHorizontal: 16, paddingVertical: 8 },
+  highlightText: { fontSize: 22, fontWeight: '900', letterSpacing: 0.5 },
+  version: { fontSize: 12, fontWeight: '800', letterSpacing: 1 },
+  title: { fontSize: 24, fontWeight: '900', textAlign: 'center' },
+  message: { fontSize: 16, lineHeight: 23, textAlign: 'center' },
+  changes: { alignSelf: 'stretch', gap: 8 },
+  change: { flexDirection: 'row', gap: 8 },
+  changeBullet: { fontSize: 18, fontWeight: '900', lineHeight: 22 },
+  changeText: { flex: 1, fontSize: 14, lineHeight: 21 },
+  action: { alignItems: 'center', borderRadius: 14, marginTop: 4, paddingHorizontal: 24, paddingVertical: 13, width: '100%' },
+  actionText: { fontSize: 16, fontWeight: '900' },
+});

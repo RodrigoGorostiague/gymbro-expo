@@ -10,9 +10,28 @@ const createHost = (name: string) => {
 export const Alert = {
   alert: vi.fn(),
 };
+export const ActivityIndicator = createHost('ActivityIndicator');
+export const Image = createHost('Image');
+export const Switch = createHost('Switch');
+class AnimatedValue {
+  constructor(public value: number) {}
+  interpolate() { return this; }
+  setValue(value: number) { this.value = value; }
+}
+const animation = () => ({ start: (callback?: (result: { finished: boolean }) => void) => callback?.({ finished: true }), stop: vi.fn() });
+export const Animated = {
+  Value: AnimatedValue,
+  View: createHost('AnimatedView'),
+  timing: animation,
+  spring: animation,
+  loop: animation,
+};
+export const Easing = { linear: (value: number) => value };
 
 const appStateListeners = new Set<(state: string) => void>();
+const hardwareBackListeners = new Set<() => boolean>();
 export const AppState = {
+  currentState: 'active',
   addEventListener: vi.fn((_event: 'change', listener: (state: string) => void) => {
     appStateListeners.add(listener);
     return { remove: () => appStateListeners.delete(listener) };
@@ -28,17 +47,36 @@ export function __resetAppState() {
   AppState.addEventListener.mockClear();
 }
 
+export const BackHandler = {
+  addEventListener: vi.fn((_event: 'hardwareBackPress', listener: () => boolean) => {
+    hardwareBackListeners.add(listener);
+    return { remove: () => hardwareBackListeners.delete(listener) };
+  }),
+};
+
+export function __emitHardwareBackPress() {
+  return [...hardwareBackListeners].reverse().some((listener) => listener());
+}
+
+export function __resetBackHandler() {
+  hardwareBackListeners.clear();
+  BackHandler.addEventListener.mockClear();
+}
+
 export const Dimensions = { get: () => ({ width: 390, height: 844 }) };
-export const FlatList = ({ data, renderItem, keyExtractor, ...props }: any) => React.createElement(
+export const FlatList = ({ data, renderItem, keyExtractor, ListHeaderComponent, ListFooterComponent, ...props }: any) => React.createElement(
   'FlatList',
   props,
+  ListHeaderComponent,
   (data ?? []).map((item: any, index: number) => {
     const child = renderItem({ item, index });
     const key = keyExtractor ? keyExtractor(item, index) : index;
     return React.createElement(React.Fragment, { key }, child);
   }),
+  ListFooterComponent,
 );
 export const KeyboardAvoidingView = createHost('KeyboardAvoidingView');
+export const Modal = createHost('Modal');
 export const Platform = { OS: 'ios' };
 export const Pressable = ({ children, ...props }: any) => React.createElement(
   'Pressable',
@@ -55,3 +93,6 @@ export const Text = createHost('Text');
 export const TextInput = ({ children, ...props }: any) => React.createElement('TextInput', props, children);
 export const Vibration = { vibrate: vi.fn() };
 export const View = createHost('View');
+
+export const Share = { share: vi.fn(async () => ({ action: 'sharedAction' })) };
+export const AccessibilityInfo = { isReduceMotionEnabled: vi.fn(async () => false), addEventListener: vi.fn(() => ({ remove: vi.fn() })) };

@@ -1,8 +1,8 @@
 import React from 'react';
 import TestRenderer, { act, type ReactTestInstance, type ReactTestRenderer } from 'react-test-renderer';
-import { vi } from 'vitest';
+import { afterEach, vi } from 'vitest';
 import { __blurFocus, __setParams, router as expoRouter } from './expoRouterStub';
-import { Alert as nativeAlert, __resetAppState } from './reactNativeStub';
+import { Alert as nativeAlert, __resetAppState, __resetBackHandler } from './reactNativeStub';
 
 declare global {
   // eslint-disable-next-line no-var
@@ -61,9 +61,15 @@ function dataContextMock() {
   };
 }
 
+function authContextMock() {
+  return {
+    useAuth: () => ({ user: 'rodaja' }),
+  };
+}
+
 function appNavBarMock() {
   return {
-  AppNavBar: ({ backLabel = '← Volver', onBack, trailing }: any) => React.createElement(
+  AppNavBar: ({ backLabel = 'Volver', onBack, trailing }: any) => React.createElement(
     'AppNavBar',
     { backLabel, onBack },
     React.createElement('Text', null, backLabel),
@@ -86,13 +92,13 @@ function appScreenHeaderMock() {
 
 function exercisePickerMock() {
   return {
-  ExercisePicker: ({ visible }: any) => React.createElement('ExercisePicker', { visible }),
+  ExercisePicker: (props: any) => React.createElement('ExercisePicker', props),
   };
 }
 
 function muscleGroupSelectorMock() {
   return {
-  MuscleGroupSelector: ({ value }: any) => React.createElement('MuscleGroupSelector', { value }),
+  MuscleGroupSelector: (props: any) => React.createElement('MuscleGroupSelector', props),
   };
 }
 
@@ -134,6 +140,8 @@ vi.mock('../../context/ThemeContext', themeContextMock);
 vi.mock('../../../context/ThemeContext', themeContextMock);
 vi.mock('../../context/DataContext', dataContextMock);
 vi.mock('../../../context/DataContext', dataContextMock);
+vi.mock('../../context/AuthContext', authContextMock);
+vi.mock('../../../context/AuthContext', authContextMock);
 vi.mock('../../components/AppNavBar', appNavBarMock);
 vi.mock('../../../components/AppNavBar', appNavBarMock);
 vi.mock('../../components/AppScreenHeader', appScreenHeaderMock);
@@ -148,14 +156,22 @@ vi.mock('../../components/HapticPressable', hapticPressableMock);
 vi.mock('../../../components/HapticPressable', hapticPressableMock);
 vi.mock('../../components/UI', uiMock);
 vi.mock('../../../components/UI', uiMock);
+vi.mock('../../components/ProfileAvatar', () => ({ ProfileAvatar: createHost('ProfileAvatar') }));
+vi.mock('../../context/SocialContext', () => ({ useSocial: () => ({ circle: vi.fn(async () => ({ profiles: [], nextCursor: null })) }) }));
+
+const mountedRenderers = new Set<ReactTestRenderer>();
 
 export function resetRuntimeHarness() {
+  act(() => { mountedRenderers.forEach((renderer) => renderer.unmount()); });
+  mountedRenderers.clear();
   __blurFocus();
   __resetAppState();
+  __resetBackHandler();
   __setParams({});
   currentTheme = baseTheme;
   currentData = {};
   mockAlert.alert.mockReset();
+  mockRouter.navigate.mockReset();
   mockRouter.push.mockReset();
   mockRouter.replace.mockReset();
   mockRouter.back.mockReset();
@@ -168,7 +184,7 @@ export function setMockParams(params: Record<string, unknown>) {
 }
 
 export function setMockData(data: Record<string, unknown>) {
-  currentData = data;
+  currentData = { prepareOnlineWorkout: async () => ({ ...(currentData.activeWorkoutDraft as object), transportMode: 'online' }), ...data };
 }
 
 export function render(element: React.ReactElement): ReactTestRenderer {
@@ -176,6 +192,7 @@ export function render(element: React.ReactElement): ReactTestRenderer {
   act(() => {
     renderer = TestRenderer.create(element);
   });
+  mountedRenderers.add(renderer);
   return renderer;
 }
 
@@ -218,3 +235,6 @@ export function findButtons(root: ReactTestInstance, title: string): ReactTestIn
 export function findInputs(root: ReactTestInstance, predicate: (node: ReactTestInstance) => boolean) {
   return root.findAll((node) => (node.type as any) === 'GlassInput' && predicate(node));
 }
+
+// Finish pending test-owned trees before async state updates can see the next test's mocks.
+afterEach(() => resetRuntimeHarness());

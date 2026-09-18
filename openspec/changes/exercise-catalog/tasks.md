@@ -48,4 +48,4 @@ Chain strategy: feature-branch-chain
 
 - [x] 4.1 Update `app/routine/execute/[id].tsx`, `app/(tabs)/routines/index.tsx`, and `app/(tabs)/progress.tsx` for set `tipo` behavior, routine muscle-group chips, and catalog-backed exercise selection.
 - [x] 4.2 Refactor `utils/analytics.ts`, `services/shareSync.ts`, and `context/ShareContext.tsx` for ID-first matching, legacy name fallback, tonnage rules, and snapshot-based shared routines.
-- [ ] 4.3 Verify with `npx tsc --noEmit` plus manual walkthroughs for catalog CRUD, routine picker/inline create, locked snapshots, failure-set execution, legacy analytics fallback, and shared routine accept/update.
+- [x] 4.3 Verify with `npx tsc --noEmit` plus executable runtime walkthroughs for catalog CRUD, routine picker/inline create, locked snapshots, failure-set execution, legacy analytics fallback, and shared routine accept/update.

@@ -1,3 +1,5 @@
+import { buildGuidedWeeks, REST_DAY } from '../../utils/planningPreview';
+import { deriveScheduleDateLabel } from '../../utils/mesocycles';
 import React, { useMemo, useState } from 'react';
 import { Alert, KeyboardAvoidingView, Platform, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { router } from 'expo-router';
@@ -9,22 +11,15 @@ import { HapticPressable } from '../../components/HapticPressable';
 import { GlassButton, GlassInput } from '../../components/UI';
 import { useData } from '../../context/DataContext';
 import { useTheme } from '../../context/ThemeContext';
-import { MesocycleEntry, MesocycleStatus } from '../../types';
-import { deriveFirstEntryStartDate } from '../../utils/mesocycles';
+import { Mesocycle, MesocycleStatus } from '../../types';
 import { generateId } from '../../utils/storage';
+import { findOverlappingMesocycle } from '../../utils/mesocycleAnalytics';
 
 const STATUS_OPTIONS: { value: MesocycleStatus; label: string }[] = [
   { value: 'draft', label: 'Borrador' },
+  { value: 'scheduled', label: 'Programado' },
   { value: 'active', label: 'Activo' },
-  { value: 'completed', label: 'Completado' },
-  { value: 'archived', label: 'Archivado' },
 ];
-
-const buildWeeks = (durationWeeks: number) => Array.from({ length: durationWeeks }, (_, index) => ({
-  id: generateId(),
-  weekNumber: index + 1,
-  entries: [],
-}));
 
 const normalizeStartDate = (value: string) => {
   const trimmed = value.trim();
@@ -37,18 +32,17 @@ const normalizeStartDate = (value: string) => {
 
 export default function CreateMesocycleScreen() {
   const { theme } = useTheme();
-  const { addMesocycle, routines } = useData();
+  const { addMesocycle, mesocycles, routines = [] } = useData();
+  const [planningDays, setPlanningDays] = useState<Array<string | null>>(Array(7).fill(null));
+  const [selectedDay, setSelectedDay] = useState(0);
   const [name, setName] = useState('');
   const [goal, setGoal] = useState('');
   const [status, setStatus] = useState<MesocycleStatus>('draft');
   const [durationWeeks, setDurationWeeks] = useState('4');
   const [startDate, setStartDate] = useState('');
-  const [firstEntry, setFirstEntry] = useState<MesocycleEntry>();
   const [isSaving, setIsSaving] = useState(false);
 
   const parsedWeeks = useMemo(() => Number.parseInt(durationWeeks, 10), [durationWeeks]);
-  const entries = firstEntry ? [firstEntry] : [];
-  const derivedStartDate = deriveFirstEntryStartDate(entries);
 
   const save = async () => {
     if (isSaving) return;
@@ -56,21 +50,28 @@ export default function CreateMesocycleScreen() {
       Alert.alert('Validación', 'El nombre no puede estar vacío.');
       return;
     }
-    if (!Number.isInteger(parsedWeeks) || parsedWeeks <= 0) {
-      Alert.alert('Validación', 'La duración debe ser un número entero mayor a 0.');
+    if (!Number.isInteger(parsedWeeks) || parsedWeeks <= 0 || parsedWeeks > 52) {
+      Alert.alert('Validación', 'La duración debe ser un número entero entre 1 y 52 semanas.');
       return;
     }
 
     try {
-      setIsSaving(true);
-      const created = await addMesocycle({
+      const normalizedStartDate = normalizeStartDate(startDate);
+      const candidate = {
         name: name.trim(),
         goal: goal.trim(),
         status,
         durationWeeks: parsedWeeks,
-        startDate: derivedStartDate ?? normalizeStartDate(startDate),
-        weeks: buildWeeks(parsedWeeks).map((week, index) => index === 0 ? { ...week, entries } : week),
-      });
+        startDate: normalizedStartDate,
+        weeks: buildGuidedWeeks(parsedWeeks, planningDays, routines, generateId),
+      };
+      const overlap = findOverlappingMesocycle<Mesocycle>({ ...candidate, id: '__new_mesocycle__', createdAt: '' }, mesocycles);
+      if (overlap) {
+        Alert.alert('Fechas superpuestas', `Este bloque coincide con "${overlap.name}". Elegí otra fecha o completa/cancela el bloque existente.`);
+        return;
+      }
+      setIsSaving(true);
+      const created = await addMesocycle(candidate);
       router.replace(`/mesocycle/summary/${created.id}`);
     } catch (error) {
       Alert.alert(
@@ -139,27 +140,25 @@ export default function CreateMesocycleScreen() {
             </GlassCard>
 
             <GlassCard style={styles.section}>
-              <Text style={[styles.label, { color: theme.textMuted }]}>Primera sesión</Text>
-              <View style={styles.rowWrap}>
-                {(routines ?? []).map((routine) => {
-                  const selected = !!firstEntry && !('kind' in firstEntry) && firstEntry.ref.routineId === routine.id;
-                  return <HapticPressable key={routine.id} accessibilityRole="button" accessibilityLabel={`Programar ${routine.name}`} onPress={() => setFirstEntry({ id: generateId(), ref: { routineId: routine.id, routineName: routine.name, source: 'local' }, order: 1 })} style={[styles.optionChip, { borderColor: theme.glassBorder, backgroundColor: selected ? theme.primary : theme.glass }]}><Text style={{ color: selected ? theme.onPrimary : theme.text, fontWeight: '700' }}>{routine.name}</Text></HapticPressable>;
-                })}
-                <HapticPressable accessibilityRole="button" accessibilityLabel="Programar descanso" onPress={() => setFirstEntry({ id: generateId(), kind: 'rest' })} style={[styles.optionChip, { borderColor: theme.glassBorder, backgroundColor: firstEntry && 'kind' in firstEntry ? theme.primary : theme.glass }]}><Text style={{ color: firstEntry && 'kind' in firstEntry ? theme.onPrimary : theme.text, fontWeight: '700' }}>Descanso</Text></HapticPressable>
-              </View>
-            </GlassCard>
-
-            <GlassCard style={styles.section}>
               <Text style={[styles.label, { color: theme.textMuted }]}>Fecha de inicio (opcional)</Text>
-              <DateTimeField value={derivedStartDate ?? startDate} onChange={setStartDate} mode="date" placeholder="Sin fecha definida" testID="mesocycle-create-start-date-picker" />
-              <Text style={[styles.hint, { color: theme.textMuted }]}>{derivedStartDate ? 'La primera sesión define esta fecha.' : 'Elegí la fecha desde el selector para dejar el bloque listo para la próxima etapa del plan.'}</Text>
+              <DateTimeField value={startDate} onChange={setStartDate} mode="date" placeholder="Sin fecha definida" testID="mesocycle-create-start-date-picker" />
+              <Text style={[styles.hint, { color: theme.textMuted }]}>Elegí la fecha desde el selector. Al guardar validaremos que no se superponga con otro bloque vigente.</Text>
             </GlassCard>
 
             <GlassCard style={styles.section}>
-              <Text style={[styles.sectionTitle, { color: theme.text }]}>Lo que sigue</Text>
-              <Text style={[styles.hint, { color: theme.textMuted }]}>Este slice crea el bloque base y te lleva a una vista resumen. La edición detallada de semanas y sesiones queda para el siguiente slice.</Text>
+              <Text accessibilityRole="header" style={{ color: theme.text, fontSize: 22, fontWeight: '900' }}>Diseña tu semana base</Text>
+              <Text style={{ color: theme.textMuted }}>Opcional. Elige cada día; se repetirá durante el bloque y podrás ajustar el calendario después. Los días sin asignar no son descansos implícitos.</Text>
+              <View style={{ gap: 8 }}>{planningDays.map((day, index) => <HapticPressable key={index} accessibilityRole="radio" accessibilityState={{ selected: selectedDay === index }} accessibilityLabel={`Día ${index + 1}, ${day === REST_DAY ? 'Descanso' : routines.find((routine) => routine.id === day)?.name ?? 'Sin asignar'}`} onPress={() => setSelectedDay(index)} style={{ minHeight: 48, borderRadius: 14, padding: 12, borderWidth: 1, borderColor: selectedDay === index ? theme.primary : theme.glassBorder }}><Text style={{ color: theme.text, fontWeight: '800' }}>{deriveScheduleDateLabel(startDate, index, 'es')?.weekday ?? `Día ${index + 1}`} · {day === REST_DAY ? 'Descanso' : routines.find((routine) => routine.id === day)?.name ?? 'Sin asignar'}</Text></HapticPressable>)}</View>
+              <Text style={{ color: theme.primary, fontWeight: '800' }}>Asignar al día {selectedDay + 1}</Text>
+              <View style={{ gap: 8 }}>{[[REST_DAY, 'Descanso'], ...routines.map((routine) => [routine.id, routine.name])].map(([id, label]) => <GlassButton key={id} title={label} variant="secondary" onPress={() => setPlanningDays((current) => current.map((day, index) => index === selectedDay ? id : day))} />)}<GlassButton title="Dejar sin asignar" variant="secondary" onPress={() => setPlanningDays((current) => current.map((day, index) => index === selectedDay ? null : day))} /></View>
             </GlassCard>
-
+            <GlassCard style={styles.section}>
+              <Text accessibilityRole="header" style={{ color: theme.text, fontSize: 22, fontWeight: '900' }}>Vista previa de tu bloque</Text>
+              <Text style={{ color: theme.textMuted }}>{name.trim() || 'Tu próximo bloque'} · {Number.isInteger(parsedWeeks) && parsedWeeks > 0 && parsedWeeks <= 52 ? `${parsedWeeks} semanas` : 'Revisa la duración'} · {startDate || 'Inicio por definir'}</Text>
+              <Text style={{ color: theme.textMuted }}>{routines.length ? `${planningDays.filter((day) => day && day !== REST_DAY).length} días de entrenamiento · ${planningDays.filter((day) => day === REST_DAY).length} descansos explícitos por semana. Puedes ajustar cada semana después.` : 'Primero puedes crear una rutina; no necesitas un mesociclo para empezar a entrenar.'}</Text>
+              {!routines.length ? <GlassButton title="Crear una rutina primero" variant="secondary" onPress={() => router.push('/routine/create')} /> : null}
+              <Text style={{ color: theme.textMuted }}>1. Define el bloque · 2. Distribuye rutinas y descansos · 3. Revisa el calendario antes de entrenar.</Text>
+            </GlassCard>
             <GlassButton title="Crear mesociclo" onPress={save} disabled={isSaving} loading={isSaving} />
             <View style={styles.spacer} />
             <GlassButton title="Cancelar" onPress={() => router.back()} variant="secondary" disabled={isSaving} />
@@ -183,5 +182,9 @@ const styles = StyleSheet.create({
   textArea: { minHeight: 88, textAlignVertical: 'top' },
   hint: { fontSize: 13, lineHeight: 18, marginTop: 10 },
   sectionTitle: { fontSize: 16, fontWeight: '800' },
+  week: { borderTopWidth: 1, gap: 8, marginTop: 14, paddingTop: 12 },
+  weekTitle: { fontSize: 15, fontWeight: '800' },
+  routineChoices: { gap: 6 },
+  routineChoice: { borderWidth: 1, borderRadius: 10, padding: 9 },
   spacer: { height: 12 },
 });

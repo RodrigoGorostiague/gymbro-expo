@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "1074930468676",
+    "project_id": "gym-bro-5453d",
+    "storage_bucket": "gym-bro-5453d.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:1074930468676:android:36adee611b942bb1fb3911",
+        "android_client_info": {
+          "package_name": "com.wagiri.gymbro"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyBTiLMrhDX84z8OLWQNLjAHmbBYPIJxDbk"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

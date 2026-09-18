@@ -7,73 +7,81 @@ import {
   SHOP_CATEGORIES,
   SHOP_THEMES,
 } from '../constants/shopThemes';
+import { getShopBackground } from '../constants/backgrounds';
 import { PARTNER_PROFILE } from '../constants/kiss';
 import { subscribeToEquippedThemes, syncEquippedTheme } from '../services/themeSync';
-import { ShopState, UserProfile } from '../types';
-import { shouldAwardWeeklyGoalBonus } from '../utils/gems';
-import { loadShop, mutateShop, recoverPendingAttemptRewards } from '../utils/storage';
+import { UserProfile } from '../types';
+import { acknowledgeReleaseUpdates, claimPendingReleaseUpdates, claimWelcomeGemReward, loadRewardWallet, purchaseRewardBackground, purchaseRewardFrame, purchaseRewardTheme, ReleaseUpdate, RewardWallet, updateRewardBackgroundPreferences, updateRewardWalletPreferences } from '../services/rewardWallet';
 import { useAuth } from './AuthContext';
 import { useData } from './DataContext';
+import { syncOwnPresentationTheme } from '../services/socialGraph';
+import { PROFILE_FRAMES } from '../constants/profileFrames';
+import { CURRENT_RELEASE } from '../constants/release';
 
-const DEFAULT_SHOP: ShopState = {
-  gems: 0,
-  rewardReceiptIds: [],
-  purchasedThemeIds: ['white', 'black', 'profile-rodaja', 'profile-brisas'],
+const DEFAULT_SHOP: RewardWallet = {
+  balance: 0,
+  purchasedThemeIds: [],
+  purchasedFrameIds: [],
+  purchasedTitleIds: [],
+  purchasedBackgroundIds: [],
   equippedThemeId: null,
+  equippedBackgroundId: null,
   combineWithPartner: false,
-  weeklyGoal: { bonusWeekKey: null, lastWeekWorkouts: 0 },
 };
 
 interface ShopContextValue {
   gems: number;
   purchasedThemeIds: string[];
+  purchasedFrameIds: string[];
+  purchasedBackgroundIds: string[];
   equippedThemeId: string | null;
+  equippedBackgroundId: string | null;
   selfEquippedThemeId: string | null;
   partnerEquippedThemeId: string | null;
   combineWithPartner: boolean;
   previewThemeId: string | null;
+  previewBackgroundId: string | null;
   isLoading: boolean;
-  retryPendingRewards: () => Promise<void>;
-  awardGems: (amount: number) => Promise<void>;
-  purchaseTheme: (themeId: string) => boolean;
+  hydratedUserId: string | null;
+  purchaseTheme: (themeId: string) => Promise<boolean>;
+  purchaseFrame: (frameId: string) => Promise<boolean>;
+  purchaseBackground: (backgroundId: string) => Promise<boolean>;
   equipTheme: (themeId: string) => void;
   unequipTheme: () => void;
   setCombineWithPartner: (value: boolean) => void;
   startPreview: (themeId: string) => void;
   stopPreview: () => void;
+  equipBackground: (backgroundId: string) => Promise<boolean>;
+  unequipBackground: () => void;
+  startBackgroundPreview: (backgroundId: string) => void;
+  stopBackgroundPreview: () => void;
+  welcomeGemReward: number | null;
+  dismissWelcomeGemReward: () => void;
+  releaseUpdates: ReleaseUpdate[];
+  dismissReleaseUpdates: () => Promise<void>;
 }
 
 const PREVIEW_DURATION_MS = 5000;
 
 const ShopContext = createContext<ShopContextValue | null>(null);
 
-export async function loadRecoveredShop(profile: UserProfile): Promise<ShopState> {
-  const persisted = await loadShop(profile);
-  try {
-    return (await recoverPendingAttemptRewards(profile)).shop;
-  } catch {
-    return loadShop(profile).catch(() => persisted);
-  }
-}
-
-export function applyThemePurchase(current: Readonly<ShopState>, themeId: string, price: number): ShopState {
-  if (current.purchasedThemeIds.includes(themeId) || current.gems < price) return current;
-  return {
-    ...current,
-    gems: current.gems - price,
-    purchasedThemeIds: [...current.purchasedThemeIds, themeId],
-    equippedThemeId: themeId,
-  };
-}
-
 export function ShopProvider({ children }: { children: React.ReactNode }) {
   const { user } = useAuth();
   const { attempts } = useData();
-  const [shop, setShop] = useState<ShopState>(DEFAULT_SHOP);
+  const backgroundAccount = useRef({ user });
+  if (backgroundAccount.current.user !== user) backgroundAccount.current = { user };
+
+  const [shop, setShop] = useState<RewardWallet>(DEFAULT_SHOP);
   const [partnerEquippedThemeId, setPartnerEquippedThemeId] = useState<string | null>(null);
   const [previewThemeId, setPreviewThemeId] = useState<string | null>(null);
+  const [previewBackgroundId, setPreviewBackgroundId] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+  const [hydratedUserId, setHydratedUserId] = useState<string | null>(null);
+  const [welcomeGemReward, setWelcomeGemReward] = useState<number | null>(null);
+  const [releaseUpdates, setReleaseUpdates] = useState<ReleaseUpdate[]>([]);
   const previewTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const backgroundPreviewTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const walletRequestRef = useRef(0);
 
   const partner: UserProfile | null = user ? PARTNER_PROFILE[user] : null;
 
@@ -81,6 +89,12 @@ export function ShopProvider({ children }: { children: React.ReactNode }) {
     if (previewTimerRef.current) {
       clearTimeout(previewTimerRef.current);
       previewTimerRef.current = null;
+    }
+  }, []);
+  const clearBackgroundPreviewTimer = useCallback(() => {
+    if (backgroundPreviewTimerRef.current) {
+      clearTimeout(backgroundPreviewTimerRef.current);
+      backgroundPreviewTimerRef.current = null;
     }
   }, []);
 
@@ -95,37 +109,52 @@ export function ShopProvider({ children }: { children: React.ReactNode }) {
     [clearPreviewTimer],
   );
 
-  useEffect(() => () => clearPreviewTimer(), [clearPreviewTimer]);
-
-  const retryPendingRewards = useCallback(async () => {
-    if (!user) return;
-    setIsLoading(true);
-    try {
-      const recovered = await loadRecoveredShop(user);
-      setShop(recovered);
-      syncEquippedTheme(user, recovered.equippedThemeId);
-    } finally {
-      setIsLoading(false);
-    }
-  }, [user]);
+  useEffect(() => () => { clearPreviewTimer(); clearBackgroundPreviewTimer(); }, [clearBackgroundPreviewTimer, clearPreviewTimer]);
 
   useEffect(() => {
     if (!user) {
+      walletRequestRef.current += 1;
       setShop(DEFAULT_SHOP);
+      setWelcomeGemReward(null);
+      setReleaseUpdates([]);
       setPartnerEquippedThemeId(null);
       setIsLoading(false);
+      setHydratedUserId(null);
       return;
     }
 
-    void retryPendingRewards();
-  }, [user, attempts, retryPendingRewards]);
+    const request = walletRequestRef.current + 1;
+    walletRequestRef.current = request;
+    let active = true;
+    const isInitialLoad = hydratedUserId !== user;
+    if (isInitialLoad) setIsLoading(true);
+    void (async () => {
+      try {
+        const { claimed } = await claimWelcomeGemReward().catch(() => ({ claimed: false }));
+        const release = await claimPendingReleaseUpdates(CURRENT_RELEASE.sequence).catch(() => null);
+        const loaded = release?.wallet ?? await loadRewardWallet();
+        if (!active || walletRequestRef.current !== request) return;
+        setShop(loaded);
+        setWelcomeGemReward(claimed ? 250 : null);
+        setReleaseUpdates(release?.releases ?? []);
+        syncEquippedTheme(user, loaded.equippedThemeId);
+        void syncOwnPresentationTheme(loaded.equippedThemeId).catch(() => undefined);
+      } catch {
+        // Keep the safe empty wallet until a future dependency change retries the claim.
+      } finally {
+        if (active && walletRequestRef.current === request && isInitialLoad) {
+          setIsLoading(false);
+          setHydratedUserId(user);
+        }
+      }
+    })();
+    return () => {
+      active = false;
+    };
+  }, [user, attempts]);
 
   useEffect(() => {
     if (!partner) return;
-
-    loadShop(partner).then((loaded) => {
-      setPartnerEquippedThemeId(loaded.equippedThemeId);
-    });
 
     const unsub = subscribeToEquippedThemes((remote) => {
       if (remote[partner] !== undefined) {
@@ -136,60 +165,42 @@ export function ShopProvider({ children }: { children: React.ReactNode }) {
     return unsub;
   }, [partner]);
 
-  const persist = useCallback(
-    (mutation: (current: Readonly<ShopState>) => ShopState) => {
-      if (!user) return Promise.resolve();
-      return mutateShop(user, mutation).then((next) => {
-        setShop(next);
-        syncEquippedTheme(user, next.equippedThemeId);
-      });
-    },
-    [user],
-  );
-
-  const awardGems = useCallback(
-    (amount: number) => {
-      if (!user || amount <= 0) return Promise.resolve();
-      return persist((current) => ({ ...current, gems: current.gems + amount }));
-    },
-    [persist, user],
-  );
-
-  useEffect(() => {
-    if (isLoading || !user) return;
-
-    const check = shouldAwardWeeklyGoalBonus(attempts, shop.weeklyGoal.bonusWeekKey);
-    if (!check.award) return;
-
-    persist((current) => current.weeklyGoal.bonusWeekKey === check.weekKey ? current : {
-      ...current,
-      gems: current.gems + GEM_REWARDS.weeklyGoalImprovement,
-      weeklyGoal: { bonusWeekKey: check.weekKey, lastWeekWorkouts: check.lastWeek },
+  const persistPreferences = useCallback((equippedThemeId: string | null, combineWithPartner: boolean) => {
+    if (!user) return Promise.resolve();
+    return updateRewardWalletPreferences(equippedThemeId, combineWithPartner).then((next) => {
+      setShop(next);
+      syncEquippedTheme(user, next.equippedThemeId);
+      void syncOwnPresentationTheme(next.equippedThemeId).catch(() => undefined);
     });
-    Alert.alert(
-      'Objetivo semanal superado',
-      `Superaste la semana anterior (${check.lastWeek} → ${check.currentWeek} rutinas). +${GEM_REWARDS.weeklyGoalImprovement} gemas`,
-    );
-  }, [isLoading, attempts, shop.weeklyGoal.bonusWeekKey, persist, shop, user]);
+  }, [user]);
+  const persistBackgroundPreferences = useCallback((equippedBackgroundId: string | null) => {
+    const account = backgroundAccount.current;
+    if (!user) return Promise.resolve(false);
+    return updateRewardBackgroundPreferences(equippedBackgroundId).then((next) => {
+      if (backgroundAccount.current !== account) return false;
+      setShop(next);
+      return next.equippedBackgroundId === equippedBackgroundId;
+    });
+  }, [user]);
 
   const equipTheme = useCallback(
     (themeId: string) => {
       if (!shop.purchasedThemeIds.includes(themeId) && !isProfileThemeId(themeId)) return;
       endPreview(false);
-      persist((current) => ({ ...current, equippedThemeId: themeId }));
+      void persistPreferences(themeId, shop.combineWithPartner);
     },
-    [shop, persist, endPreview],
+    [shop, persistPreferences, endPreview],
   );
 
   const unequipTheme = useCallback(() => {
-    persist((current) => ({ ...current, equippedThemeId: null }));
-  }, [persist]);
+    void persistPreferences(null, shop.combineWithPartner);
+  }, [persistPreferences, shop.combineWithPartner]);
 
   const setCombineWithPartner = useCallback(
     (value: boolean) => {
-      persist((current) => ({ ...current, combineWithPartner: value }));
+      void persistPreferences(shop.equippedThemeId, value);
     },
-    [shop, persist],
+    [shop, persistPreferences],
   );
 
   const startPreview = useCallback(
@@ -209,8 +220,38 @@ export function ShopProvider({ children }: { children: React.ReactNode }) {
     endPreview(false);
   }, [endPreview]);
 
+  const equipBackground = useCallback(async (backgroundId: string): Promise<boolean> => {
+    if (!shop.purchasedBackgroundIds.includes(backgroundId)) return false;
+    clearBackgroundPreviewTimer();
+    setPreviewBackgroundId(null);
+    try { return await persistBackgroundPreferences(backgroundId); }
+    catch { return false; }
+  }, [clearBackgroundPreviewTimer, persistBackgroundPreferences, shop.purchasedBackgroundIds]);
+
+  const unequipBackground = useCallback(() => {
+    void persistBackgroundPreferences(null).catch(() => {
+      Alert.alert('No se pudo quitar el fondo', 'Inténtalo nuevamente.');
+    });
+  }, [persistBackgroundPreferences]);
+
+  const startBackgroundPreview = useCallback((backgroundId: string) => {
+    if (!getShopBackground(backgroundId)) return;
+    clearBackgroundPreviewTimer();
+    setPreviewBackgroundId(backgroundId);
+    backgroundPreviewTimerRef.current = setTimeout(() => {
+      backgroundPreviewTimerRef.current = null;
+      setPreviewBackgroundId(null);
+      Alert.alert('Finalizó la vista previa', 'Comprá el fondo para seguir usándolo.');
+    }, PREVIEW_DURATION_MS);
+  }, [clearBackgroundPreviewTimer]);
+
+  const stopBackgroundPreview = useCallback(() => {
+    clearBackgroundPreviewTimer();
+    setPreviewBackgroundId(null);
+  }, [clearBackgroundPreviewTimer]);
+
   const purchaseTheme = useCallback(
-    (themeId: string): boolean => {
+    async (themeId: string): Promise<boolean> => {
       const themeItem = getShopTheme(themeId);
       if (!themeItem) return false;
 
@@ -219,38 +260,92 @@ export function ShopProvider({ children }: { children: React.ReactNode }) {
         return true;
       }
 
-      if (shop.gems < themeItem.price) {
-        Alert.alert('Gemas insuficientes', `Necesitas ${themeItem.price} gemas para "${themeItem.name}".`);
+      try {
+        const next = await purchaseRewardTheme(themeId);
+        setShop(next);
+        syncEquippedTheme(user!, next.equippedThemeId);
+        void syncOwnPresentationTheme(next.equippedThemeId).catch(() => undefined);
+        endPreview(false);
+        Alert.alert('Compra exitosa', `Desbloqueaste el tema "${themeItem.name}".`);
+        return true;
+      } catch (error) {
+        Alert.alert('No se pudo comprar', error instanceof Error ? error.message : 'Inténtalo nuevamente.');
         return false;
       }
-
-      persist((current) => applyThemePurchase(current, themeId, themeItem.price));
-      endPreview(false);
-      Alert.alert('Compra exitosa', `Desbloqueaste el tema "${themeItem.name}".`);
-      return true;
     },
-    [shop, persist, equipTheme, endPreview],
+    [shop, equipTheme, endPreview, user],
   );
+
+  const purchaseFrame = useCallback(async (frameId: string): Promise<boolean> => {
+    const frame = PROFILE_FRAMES.find((candidate) => candidate.id === frameId);
+    if (!frame || frame.kind !== 'shop') return false;
+    if (shop.purchasedFrameIds.includes(frameId)) return true;
+    try {
+      const next = await purchaseRewardFrame(frameId);
+      setShop(next);
+      Alert.alert('Compra exitosa', `Desbloqueaste el marco "${frame.label}".`);
+      return true;
+    } catch (error) {
+      Alert.alert('No se pudo comprar', error instanceof Error ? error.message : 'Inténtalo nuevamente.');
+      return false;
+    }
+  }, [shop.purchasedFrameIds]);
+
+  const purchaseBackground = useCallback(async (backgroundId: string): Promise<boolean> => {
+    const background = getShopBackground(backgroundId);
+    if (!background) return false;
+    if (shop.purchasedBackgroundIds.includes(backgroundId)) {
+      return equipBackground(backgroundId);
+    }
+    try {
+      const next = await purchaseRewardBackground(backgroundId);
+      setShop(next);
+      stopBackgroundPreview();
+      Alert.alert('Compra exitosa', `Desbloqueaste el fondo "${background.name}".`);
+      return true;
+    } catch (error) {
+      Alert.alert('No se pudo comprar', error instanceof Error ? error.message : 'Inténtalo nuevamente.');
+      return false;
+    }
+  }, [equipBackground, shop.purchasedBackgroundIds, stopBackgroundPreview]);
 
   return (
     <ShopContext.Provider
       value={{
-        gems: shop.gems,
+        gems: shop.balance,
         purchasedThemeIds: shop.purchasedThemeIds,
+        purchasedFrameIds: shop.purchasedFrameIds,
+        purchasedBackgroundIds: shop.purchasedBackgroundIds,
         equippedThemeId: shop.equippedThemeId,
+        equippedBackgroundId: shop.equippedBackgroundId,
         selfEquippedThemeId: shop.equippedThemeId,
         partnerEquippedThemeId,
         combineWithPartner: shop.combineWithPartner,
         previewThemeId,
+        previewBackgroundId,
         isLoading,
-        retryPendingRewards,
-        awardGems,
+        hydratedUserId,
         purchaseTheme,
+        purchaseFrame,
+        purchaseBackground,
         equipTheme,
         unequipTheme,
         setCombineWithPartner,
         startPreview,
         stopPreview,
+        equipBackground,
+        unequipBackground,
+        startBackgroundPreview,
+        stopBackgroundPreview,
+        welcomeGemReward,
+        dismissWelcomeGemReward: () => setWelcomeGemReward(null),
+        releaseUpdates,
+        dismissReleaseUpdates: async () => {
+          const versions = releaseUpdates.map((release) => release.version);
+          setReleaseUpdates([]);
+          if (!versions.length) return;
+          try { await acknowledgeReleaseUpdates(versions); } catch { setReleaseUpdates((current) => current.length ? current : releaseUpdates); }
+        },
       }}
     >
       {children}

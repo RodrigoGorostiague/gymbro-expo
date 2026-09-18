@@ -1,8 +1,9 @@
+import { getSensoryPreferences } from './sensoryPreferences';
 import * as Haptics from 'expo-haptics';
 import { Platform, Vibration } from 'react-native';
 
 export function vibrateButtonPress(): void {
-  if (Platform.OS === 'web') return;
+  if (Platform.OS === 'web' || !getSensoryPreferences().haptics) return;
 
   void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {
     Vibration.vibrate(10);
@@ -10,7 +11,7 @@ export function vibrateButtonPress(): void {
 }
 
 export function vibrateRestTimerComplete(): void {
-  if (Platform.OS === 'web') return;
+  if (Platform.OS === 'web' || !getSensoryPreferences().haptics) return;
 
   void (async () => {
     try {

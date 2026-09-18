@@ -1,17 +1,18 @@
 import { doc, onSnapshot, setDoc, serverTimestamp } from 'firebase/firestore';
 import { UserProfile } from '../types';
-import { FIREBASE_COLLECTIONS } from '../constants/kiss';
-import { getDb, isFirebaseConfigured } from './kissSync';
+import { getFirestoreDb } from './firebase';
+
+const EQUIPPED_THEMES_COLLECTION = 'equippedThemes';
 
 export async function syncEquippedTheme(
   profile: UserProfile,
   themeId: string | null,
 ): Promise<void> {
-  const firestore = getDb();
+  const firestore = getFirestoreDb();
   if (!firestore) return;
 
   try {
-    await setDoc(doc(firestore, FIREBASE_COLLECTIONS.equippedThemes, profile), {
+    await setDoc(doc(firestore, EQUIPPED_THEMES_COLLECTION, profile), {
       themeId,
       updatedAt: serverTimestamp(),
     });
@@ -23,13 +24,13 @@ export async function syncEquippedTheme(
 export function subscribeToEquippedThemes(
   onUpdate: (themes: Partial<Record<UserProfile, string | null>>) => void,
 ): () => void {
-  const firestore = getDb();
+  const firestore = getFirestoreDb();
   if (!firestore) return () => undefined;
 
   const profiles: UserProfile[] = ['rodaja', 'brisas'];
   const unsubs = profiles.map((profile) =>
     onSnapshot(
-      doc(firestore, FIREBASE_COLLECTIONS.equippedThemes, profile),
+      doc(firestore, EQUIPPED_THEMES_COLLECTION, profile),
       (snap) => {
         if (!snap.exists()) return;
         const themeId = (snap.data().themeId as string | null | undefined) ?? null;

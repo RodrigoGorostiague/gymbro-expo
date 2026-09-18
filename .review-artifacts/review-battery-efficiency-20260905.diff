@@ -1,0 +1,808 @@
+diff --git a/app/(tabs)/_layout.tsx b/app/(tabs)/_layout.tsx
+index 39c5e16..4e0fb75 100644
+--- a/app/(tabs)/_layout.tsx
++++ b/app/(tabs)/_layout.tsx
+@@ -6,7 +6,7 @@ import { BlurView } from 'expo-blur';
+ import { LinearGradient } from 'expo-linear-gradient';
+ import { Ionicons } from '@expo/vector-icons';
+ import Svg, { Circle } from 'react-native-svg';
+-import Animated, { Easing, interpolate, useAnimatedStyle, useSharedValue, withRepeat, withTiming } from 'react-native-reanimated';
++import Animated, { cancelAnimation, Easing, interpolate, useAnimatedStyle, useSharedValue, withRepeat, withTiming } from 'react-native-reanimated';
+ import { ThemePreviewBar } from '../../components/ThemePreviewBar';
+ import { useAuth } from '../../context/AuthContext';
+ import { useTheme } from '../../context/ThemeContext';
+@@ -15,6 +15,7 @@ import { getCommunityBadgeCounts } from '../../services/communityBadge';
+ import { useData } from '../../context/DataContext';
+ import { hasActiveWorkoutReentryIntegrity } from '../../utils/activeWorkoutReentry';
+ import { deriveMesocycleDayGuidance } from '../../utils/mesocycles';
++import { useAnimationActivity } from '../../hooks/useAnimationActivity';
+ 
+ type TabIconName = keyof typeof Ionicons.glyphMap;
+ 
+@@ -78,12 +79,15 @@ function ActiveWorkoutTabButton() {
+     : null;
+   const onTrainTab = segments.at(-1) === 'train';
+   const dailyRoutinePulse = useSharedValue(0);
++  const pulseActive = useAnimationActivity(Boolean(plannedRoutine && !resumableDraft));
+ 
+   useEffect(() => {
+-    dailyRoutinePulse.value = plannedRoutine && !resumableDraft
++    cancelAnimation(dailyRoutinePulse);
++    dailyRoutinePulse.value = pulseActive
+       ? withRepeat(withTiming(1, { duration: 900, easing: Easing.inOut(Easing.sin) }), -1, true)
+-      : withTiming(0, { duration: 180 });
+-  }, [dailyRoutinePulse, plannedRoutine, resumableDraft]);
++      : 0;
++    return () => cancelAnimation(dailyRoutinePulse);
++  }, [dailyRoutinePulse, pulseActive]);
+ 
+   const dailyRoutinePulseStyle = useAnimatedStyle(() => ({
+     opacity: interpolate(dailyRoutinePulse.value, [0, 1], [0.4, 1]),
+diff --git a/app/(tabs)/shop.tsx b/app/(tabs)/shop.tsx
+index ae08be8..fae6037 100644
+--- a/app/(tabs)/shop.tsx
++++ b/app/(tabs)/shop.tsx
+@@ -1,4 +1,4 @@
+-import React, { useEffect, useState, useTransition } from 'react';
++import React, { useCallback, useEffect, useState, useTransition } from 'react';
+ import { ActivityIndicator, Alert, FlatList, StyleSheet, Text, View } from 'react-native';
+ import { Ionicons } from '@expo/vector-icons';
+ import { LinearGradient } from 'expo-linear-gradient';
+@@ -233,7 +233,7 @@ function FrameCard({ item, onBuy }: { item: Extract<(typeof PROFILE_FRAMES)[numb
+   </GlassCard>;
+ }
+ 
+-function BackgroundCard({ item, previewing, onPreview, onAction }: { item: ShopBackground; previewing: boolean; onPreview: () => void; onAction: () => void }) {
++function BackgroundCard({ item, previewing, visible, onPreview, onAction }: { item: ShopBackground; previewing: boolean; visible: boolean; onPreview: () => void; onAction: () => void }) {
+   const { theme } = useTheme();
+   const { gems, purchasedBackgroundIds, equippedBackgroundId } = useShop();
+   const owned = purchasedBackgroundIds.includes(item.id);
+@@ -243,7 +243,7 @@ function BackgroundCard({ item, previewing, onPreview, onAction }: { item: ShopB
+     <GlassCard style={styles.themeCardInner}>
+       <HapticPressable onPress={onPreview}>
+         <View style={styles.themeRow}>
+-          <View style={styles.preview}><BackgroundEngine backgroundId={item.id} parallax={false} /></View>
++          <View style={styles.preview}><BackgroundEngine animate={previewing && visible} backgroundId={item.id} parallax={false} /></View>
+           <View style={styles.themeInfo}>
+             <View style={styles.themeTitleRow}><Text style={[styles.themeName, { color: theme.text }]}>{item.name}</Text><View style={[styles.rarityBadge, { backgroundColor: `${RARITY_COLORS[item.rarity]}30`, borderColor: RARITY_COLORS[item.rarity] }]}><Text style={[styles.rarityLabel, { color: RARITY_COLORS[item.rarity] }]}>{item.rarity}</Text></View></View>
+             <Text style={[styles.themeDesc, { color: theme.textMuted }]}>{item.description}</Text>
+@@ -283,8 +283,25 @@ export default function ShopScreen() {
+   } = useShop();
+   const [activeTab, setActiveTab] = useState<ShopTab>('themes');
+   const [requestedTab, setRequestedTab] = useState<ShopTab | null>(null);
++  const [visibleItemIds, setVisibleItemIds] = useState<ReadonlySet<string>>(() => new Set());
+   const [isTabTransitionPending, startTabTransition] = useTransition();
+ 
++  const handleViewableItemsChanged = useCallback(({ viewableItems }: { viewableItems: Array<{ isViewable?: boolean; item: ShopCatalogItem }> }) => {
++    setVisibleItemIds(new Set(viewableItems.filter(({ isViewable }) => isViewable).map(({ item }) => item.id)));
++  }, []);
++
++  useEffect(() => {
++    if (!requestedTab || requestedTab === activeTab) {
++      if (requestedTab === activeTab) setRequestedTab(null);
++      return;
++    }
++
++    const frame = requestAnimationFrame(() => {
++      startTabTransition(() => setActiveTab(requestedTab));
++    });
++    return () => cancelAnimationFrame(frame);
++  }, [activeTab, requestedTab, startTabTransition]);
++
+   if (!user) return null;
+ 
+   const showGemsHelp = () => {
+@@ -338,18 +355,6 @@ export default function ShopScreen() {
+     Alert.alert('Comprar fondo', `¿Comprar "${background.name}" por ${background.price} gema?`, [{ text: 'Cancelar', style: 'cancel' }, { text: 'Comprar', onPress: () => { void purchaseBackground(background.id); } }]);
+   };
+ 
+-  useEffect(() => {
+-    if (!requestedTab || requestedTab === activeTab) {
+-      if (requestedTab === activeTab) setRequestedTab(null);
+-      return;
+-    }
+-
+-    const frame = requestAnimationFrame(() => {
+-      startTabTransition(() => setActiveTab(requestedTab));
+-    });
+-    return () => cancelAnimationFrame(frame);
+-  }, [activeTab, requestedTab, startTabTransition]);
+-
+   const catalogItems = getCatalogItems(activeTab);
+   const isSwitchingTab = requestedTab !== null && requestedTab !== activeTab;
+   const tabLabels: Readonly<Record<ShopTab, string>> = {
+@@ -412,6 +417,7 @@ export default function ShopScreen() {
+           keyExtractor={(item) => item.id}
+           initialNumToRender={6}
+           maxToRenderPerBatch={6}
++          onViewableItemsChanged={handleViewableItemsChanged}
+           windowSize={5}
+           ListHeaderComponent={catalogHeader}
+           ListFooterComponent={activeTab === 'themes' && hasCustomTheme ? <GlassButton title="Usar tema de perfil" onPress={unequipTheme} variant="secondary" /> : null}
+@@ -432,7 +438,7 @@ export default function ShopScreen() {
+             }
+             if (item.type === 'theme') return <ThemeCard item={item.item} user={user} previewing={previewThemeId === item.item.id} onPreview={() => startPreview(item.item.id)} onAction={() => handleBuyOrEquip(item.item.id)} />;
+             if (item.type === 'frame') return <FrameCard item={item.item} onBuy={() => Alert.alert('Comprar marco', `¿Comprar "${item.item.label}" por ${item.item.price} gemas?`, [{ text: 'Cancelar', style: 'cancel' }, { text: 'Comprar', onPress: () => { void purchaseFrame(item.item.id); } }])} />;
+-            if (item.type === 'background') return <BackgroundCard item={item.item} previewing={previewBackgroundId === item.item.id} onPreview={() => startBackgroundPreview(item.item.id)} onAction={() => handleBuyOrEquipBackground(item.item)} />;
++            if (item.type === 'background') return <BackgroundCard item={item.item} previewing={previewBackgroundId === item.item.id} visible={visibleItemIds.has(item.id)} onPreview={() => startBackgroundPreview(item.item.id)} onAction={() => handleBuyOrEquipBackground(item.item)} />;
+             return <GlassCard style={styles.comingSoon}><Text style={[styles.sectionTitle, { color: theme.text }]}>Títulos próximamente</Text><Text style={[styles.sectionSubtitle, { color: theme.textMuted }]}>La tienda de títulos llegará en una próxima actualización.</Text></GlassCard>;
+           }}
+         />
+diff --git a/app/routine/execute/[id].tsx b/app/routine/execute/[id].tsx
+index 62184cf..21e50fe 100644
+--- a/app/routine/execute/[id].tsx
++++ b/app/routine/execute/[id].tsx
+@@ -54,7 +54,8 @@ import { appendSessionExercise, hasCompletedSessionExerciseSet, moveWorkoutExerc
+ import { getShopTheme } from '../../../constants/shopThemes';
+ import { LinearGradient } from 'expo-linear-gradient';
+ import { Ionicons } from '@expo/vector-icons';
+-import Animated, { Easing, FadeIn, ZoomIn, useAnimatedStyle, useSharedValue, withRepeat, withTiming } from 'react-native-reanimated';
++import Animated, { cancelAnimation, Easing, FadeIn, ZoomIn, useAnimatedStyle, useSharedValue, withRepeat, withTiming } from 'react-native-reanimated';
++import { useAnimationActivity } from '../../../hooks/useAnimationActivity';
+ 
+ function readSingleParam(value: string | string[] | undefined): string | undefined {
+   if (typeof value === 'string') {
+@@ -138,10 +139,13 @@ function jointProgress(routine: Routine, completedSets: Record<SetKey, boolean>)
+ 
+ function WorkoutSaveIndicator({ visible, color, textColor }: { visible: boolean; color: string; textColor: string }) {
+   const rotation = useSharedValue(0);
++  const animationActive = useAnimationActivity(visible);
+ 
+   useEffect(() => {
+-    rotation.value = withRepeat(withTiming(360, { duration: 1_100, easing: Easing.linear }), -1, false);
+-  }, [rotation]);
++    cancelAnimation(rotation);
++    rotation.value = animationActive ? withRepeat(withTiming(360, { duration: 1_100, easing: Easing.linear }), -1, false) : 0;
++    return () => cancelAnimation(rotation);
++  }, [animationActive, rotation]);
+ 
+   const iconStyle = useAnimatedStyle(() => ({ transform: [{ rotate: `${rotation.value}deg` }] }));
+ 
+diff --git a/components/AnimatedOrb.tsx b/components/AnimatedOrb.tsx
+index 006dc54..c458023 100644
+--- a/components/AnimatedOrb.tsx
++++ b/components/AnimatedOrb.tsx
+@@ -1,6 +1,7 @@
+ import React, { useEffect } from 'react';
+ import { StyleSheet } from 'react-native';
+ import Animated, {
++  cancelAnimation,
+   Easing,
+   interpolate,
+   useAnimatedStyle,
+@@ -12,6 +13,7 @@ import Animated, {
+ } from 'react-native-reanimated';
+ 
+ interface AnimatedOrbProps {
++  active?: boolean;
+   color: string;
+   size: number;
+   left: number;
+@@ -19,10 +21,15 @@ interface AnimatedOrbProps {
+   delay?: number;
+ }
+ 
+-export function AnimatedOrb({ color, size, left, top, delay = 0 }: AnimatedOrbProps) {
++export function AnimatedOrb({ active = true, color, size, left, top, delay = 0 }: AnimatedOrbProps) {
+   const drift = useSharedValue(0);
+ 
+   useEffect(() => {
++    cancelAnimation(drift);
++    if (!active) {
++      drift.value = 0;
++      return;
++    }
+     drift.value = withDelay(
+       delay,
+       withRepeat(
+@@ -34,7 +41,8 @@ export function AnimatedOrb({ color, size, left, top, delay = 0 }: AnimatedOrbPr
+         false,
+       ),
+     );
+-  }, [delay, drift]);
++    return () => cancelAnimation(drift);
++  }, [active, delay, drift]);
+ 
+   const style = useAnimatedStyle(() => ({
+     transform: [
+diff --git a/components/AppThemeLoadingOverlay.tsx b/components/AppThemeLoadingOverlay.tsx
+index 824eecf..937be5b 100644
+--- a/components/AppThemeLoadingOverlay.tsx
++++ b/components/AppThemeLoadingOverlay.tsx
+@@ -1,10 +1,11 @@
+ import React, { useEffect } from 'react';
+ import { Image, StyleSheet, View } from 'react-native';
+-import Animated, { Easing, useAnimatedStyle, useSharedValue, withRepeat, withTiming } from 'react-native-reanimated';
++import Animated, { cancelAnimation, Easing, useAnimatedStyle, useSharedValue, withRepeat, withTiming } from 'react-native-reanimated';
+ import { useAuth } from '../context/AuthContext';
+ import { useData } from '../context/DataContext';
+ import { useShop } from '../context/ShopContext';
+ import { useTheme } from '../context/ThemeContext';
++import { useAnimationActivity } from '../hooks/useAnimationActivity';
+ 
+ const gymbroIcon = process.env.NODE_ENV === 'test' ? 0 : require('../assets/gymbro-icon.png');
+ 
+@@ -14,16 +15,20 @@ export function AppThemeLoadingOverlay() {
+   const { hydratedUserId: shopHydratedUserId } = useShop();
+   const { theme } = useTheme();
+   const rotation = useSharedValue(0);
++  const visible = Boolean(user && (dataHydratedUserId !== user || shopHydratedUserId !== user));
++  const animationActive = useAnimationActivity(visible);
+ 
+   useEffect(() => {
+-    rotation.value = withRepeat(withTiming(360, { duration: 1_100, easing: Easing.linear }), -1, false);
+-  }, [rotation]);
++    cancelAnimation(rotation);
++    rotation.value = animationActive ? withRepeat(withTiming(360, { duration: 1_100, easing: Easing.linear }), -1, false) : 0;
++    return () => cancelAnimation(rotation);
++  }, [animationActive, rotation]);
+ 
+   const iconStyle = useAnimatedStyle(() => ({
+     transform: [{ perspective: 900 }, { rotateY: `${rotation.value}deg` }],
+   }));
+ 
+-  if (!user || (dataHydratedUserId === user && shopHydratedUserId === user)) return null;
++  if (!visible) return null;
+ 
+   return (
+     <View
+diff --git a/components/BackgroundEngine.tsx b/components/BackgroundEngine.tsx
+index 29760d6..bd16b33 100644
+--- a/components/BackgroundEngine.tsx
++++ b/components/BackgroundEngine.tsx
+@@ -1,13 +1,14 @@
+-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+-import { AppState, Platform, StyleSheet, View } from 'react-native';
++import React, { useCallback, useEffect, useMemo } from 'react';
++import { Platform, StyleSheet, View } from 'react-native';
+ import { Image } from 'expo-image';
+ import { Accelerometer, DeviceMotion } from 'expo-sensors';
+-import Animated, { Easing, ReduceMotion, useAnimatedStyle, useReducedMotion, useSharedValue, withRepeat, withTiming } from 'react-native-reanimated';
++import Animated, { cancelAnimation, Easing, ReduceMotion, useAnimatedStyle, useSharedValue, withRepeat, withTiming } from 'react-native-reanimated';
+ import { LinearGradient } from 'expo-linear-gradient';
+ import { BackgroundRendererKind, getShopBackground } from '../constants/backgrounds';
+ import { BackgroundLayerSource, BackgroundLoadError, useBackgroundLayers } from '../services/backgrounds';
+ import { useBackgroundParallaxPreference } from '../context/BackgroundParallaxContext';
+ import { BACKGROUND_PARALLAX_DEPTHS, BACKGROUND_PARALLAX_INTERVAL_MS, mapAccelerometerToParallax, mapDeviceMotionToParallax, shouldActivateBackgroundParallax } from '../utils/backgroundParallax';
++import { useAnimationActivity } from '../hooks/useAnimationActivity';
+ 
+ type LayerSource = BackgroundLayerSource;
+ 
+@@ -36,9 +37,11 @@ function MotionLayer({ backgroundId, source, index, animate, parallaxX, parallax
+   }));
+ 
+   useEffect(() => {
++    cancelAnimation(progress);
+     progress.value = animate
+       ? withRepeat(withTiming(1, { duration: 8500 + index * 1200, easing: Easing.inOut(Easing.sin), reduceMotion: ReduceMotion.System }), -1, true)
+-      : withTiming(0, { duration: 180, reduceMotion: ReduceMotion.System });
++      : 0;
++    return () => cancelAnimation(progress);
+   }, [animate, index, progress]);
+ 
+   return <Animated.View pointerEvents="none" style={[styles.layer, style]}>
+@@ -62,26 +65,19 @@ const renderers: Record<BackgroundRendererKind, BackgroundRenderer> = {
+   'layered-image': layeredImageRenderer,
+ };
+ 
+-export function BackgroundEngine({ backgroundId, onError, parallax = true }: { backgroundId: string | null; onError?: (error: BackgroundLoadError) => void; parallax?: boolean }) {
++export function BackgroundEngine({ backgroundId, onError, parallax = true, animate = true }: { backgroundId: string | null; onError?: (error: BackgroundLoadError) => void; parallax?: boolean; animate?: boolean }) {
+   const background = getShopBackground(backgroundId);
+   const { layers: sources, error } = useBackgroundLayers(background?.id);
+-  const reduceMotion = useReducedMotion();
+-  const [active, setActive] = useState(AppState.currentState === 'active');
++  const animationActive = useAnimationActivity(animate);
+   const { enabled, isReady } = useBackgroundParallaxPreference();
+   const parallaxX = useSharedValue(0);
+   const parallaxY = useSharedValue(0);
+ 
+-  useEffect(() => {
+-    const subscription = AppState.addEventListener('change', (state) => setActive(state === 'active'));
+-    return () => subscription.remove();
+-  }, []);
+-
+   const motionEnabled = shouldActivateBackgroundParallax({
+     backgroundActive: Boolean(background) && parallax,
+-    appActive: active,
++    animationActive,
+     enabled,
+     preferencesReady: isReady,
+-    reduceMotion,
+     supportedPlatform: Platform.OS === 'ios' || Platform.OS === 'android',
+   });
+ 
+@@ -139,8 +135,10 @@ export function BackgroundEngine({ backgroundId, onError, parallax = true }: { b
+     return () => {
+       mounted = false;
+       subscription?.remove();
+-      parallaxX.value = withTiming(0, { duration: 180, reduceMotion: ReduceMotion.System });
+-      parallaxY.value = withTiming(0, { duration: 180, reduceMotion: ReduceMotion.System });
++      cancelAnimation(parallaxX);
++      cancelAnimation(parallaxY);
++      parallaxX.value = 0;
++      parallaxY.value = 0;
+     };
+   }, [motionEnabled, parallaxX, parallaxY]);
+ 
+@@ -157,7 +155,7 @@ export function BackgroundEngine({ backgroundId, onError, parallax = true }: { b
+   }, [error, reportError]);
+ 
+   if (!background || !renderer) return null;
+-  return <>{renderer({ backgroundId: background.id, layers, fallback: background.fallback, animate: active && !reduceMotion, parallaxX, parallaxY, onError: reportError })}</>;
++  return <>{renderer({ backgroundId: background.id, layers, fallback: background.fallback, animate: animationActive, parallaxX, parallaxY, onError: reportError })}</>;
+ }
+ 
+ const styles = StyleSheet.create({
+diff --git a/components/GlassCard.tsx b/components/GlassCard.tsx
+index 03e5d36..7677ac2 100644
+--- a/components/GlassCard.tsx
++++ b/components/GlassCard.tsx
+@@ -3,6 +3,7 @@ import { Dimensions, StyleSheet, View, ViewStyle, StyleProp } from 'react-native
+ import { BlurView } from 'expo-blur';
+ import { LinearGradient } from 'expo-linear-gradient';
+ import Animated, {
++  cancelAnimation,
+   Easing,
+   interpolate,
+   useAnimatedStyle,
+@@ -16,6 +17,7 @@ import { DualLoginBackground } from './login/DualLoginBackground';
+ import { ThemeDecorations } from './ThemeDecorations';
+ import { BackgroundEngine } from './BackgroundEngine';
+ import type { AppTheme } from '../types';
++import { useAnimationActivity } from '../hooks/useAnimationActivity';
+ 
+ const { width: W, height: H } = Dimensions.get('window');
+ 
+@@ -28,14 +30,21 @@ function SingleThemeBackground({ children, theme: themeOverride }: ThemeBackgrou
+   const { theme: activeTheme, backgroundId } = useTheme();
+   const theme = themeOverride ?? activeTheme;
+   const breath = useSharedValue(0);
++  const animationActive = useAnimationActivity();
+ 
+   useEffect(() => {
++    cancelAnimation(breath);
++    if (!animationActive) {
++      breath.value = 0;
++      return;
++    }
+     breath.value = withRepeat(
+       withTiming(1, { duration: 5200, easing: Easing.inOut(Easing.quad) }),
+       -1,
+       true,
+     );
+-  }, [breath]);
++    return () => cancelAnimation(breath);
++  }, [animationActive, breath]);
+ 
+   const gradientStyle = useAnimatedStyle(() => ({
+     transform: [{ scale: interpolate(breath.value, [0, 1], [1, 1.04]) }],
+@@ -56,9 +65,9 @@ function SingleThemeBackground({ children, theme: themeOverride }: ThemeBackgrou
+       {!themeOverride ? <BackgroundEngine backgroundId={backgroundId} /> : null}
+ 
+       <View style={styles.orbLayer} pointerEvents="none">
+-        <AnimatedOrb color={theme.primary} size={W * 0.55} left={W * 0.45} top={-H * 0.06} delay={0} />
+-        <AnimatedOrb color={theme.accent} size={W * 0.28} left={-W * 0.08} top={H * 0.22} delay={500} />
+-        <AnimatedOrb color={theme.secondary} size={W * 0.18} left={W * 0.62} top={H * 0.58} delay={900} />
++        <AnimatedOrb active={animationActive} color={theme.primary} size={W * 0.55} left={W * 0.45} top={-H * 0.06} delay={0} />
++        <AnimatedOrb active={animationActive} color={theme.accent} size={W * 0.28} left={-W * 0.08} top={H * 0.22} delay={500} />
++        <AnimatedOrb active={animationActive} color={theme.secondary} size={W * 0.18} left={W * 0.62} top={H * 0.58} delay={900} />
+       </View>
+ 
+       {theme.decoration ? (
+diff --git a/components/SelectablePulse.tsx b/components/SelectablePulse.tsx
+index e122377..51a3a52 100644
+--- a/components/SelectablePulse.tsx
++++ b/components/SelectablePulse.tsx
+@@ -11,6 +11,7 @@ import Animated, {
+   withTiming,
+ } from 'react-native-reanimated';
+ import { AppTheme } from '../types';
++import { useAnimationActivity } from '../hooks/useAnimationActivity';
+ 
+ type PulseTheme = Pick<AppTheme, 'primary' | 'accent'>;
+ 
+@@ -30,9 +31,11 @@ export function SelectablePulse({
+   borderRadius = 20,
+ }: SelectablePulseProps) {
+   const pulse = useSharedValue(0);
++  const animationActive = useAnimationActivity(selected);
+ 
+   useEffect(() => {
+-    if (selected) {
++    cancelAnimation(pulse);
++    if (animationActive) {
+       pulse.value = withRepeat(
+         withSequence(
+           withTiming(1, { duration: 900, easing: Easing.inOut(Easing.sin) }),
+@@ -42,10 +45,10 @@ export function SelectablePulse({
+         false,
+       );
+     } else {
+-      cancelAnimation(pulse);
+-      pulse.value = withTiming(0, { duration: 200 });
++      pulse.value = 0;
+     }
+-  }, [selected, pulse]);
++    return () => cancelAnimation(pulse);
++  }, [animationActive, pulse]);
+ 
+   const animatedStyle = useAnimatedStyle(() => {
+     if (!selected) {
+diff --git a/components/login/DualLoginBackground.tsx b/components/login/DualLoginBackground.tsx
+index 9173be0..dab9e2b 100644
+--- a/components/login/DualLoginBackground.tsx
++++ b/components/login/DualLoginBackground.tsx
+@@ -1,9 +1,10 @@
+ import React, { useEffect } from 'react';
+ import { Dimensions, StyleSheet, View } from 'react-native';
+ import { LinearGradient } from 'expo-linear-gradient';
+-import Animated, { Easing, interpolate, useAnimatedStyle, useSharedValue, withRepeat, withTiming } from 'react-native-reanimated';
++import Animated, { cancelAnimation, Easing, interpolate, useAnimatedStyle, useSharedValue, withRepeat, withTiming } from 'react-native-reanimated';
+ import { AnimatedOrb } from '../AnimatedOrb';
+ import type { AppTheme } from '../../types';
++import { useAnimationActivity } from '../../hooks/useAnimationActivity';
+ 
+ const { width: W, height: H } = Dimensions.get('window');
+ 
+@@ -11,14 +12,19 @@ interface DualLoginBackgroundProps { rodaja: AppTheme; brisas: AppTheme; }
+ 
+ export function DualLoginBackground({ rodaja, brisas }: DualLoginBackgroundProps) {
+   const breath = useSharedValue(0);
+-  useEffect(() => { breath.value = withRepeat(withTiming(1, { duration: 4200, easing: Easing.inOut(Easing.quad) }), -1, true); }, [breath]);
++  const animationActive = useAnimationActivity();
++  useEffect(() => {
++    cancelAnimation(breath);
++    breath.value = animationActive ? withRepeat(withTiming(1, { duration: 4200, easing: Easing.inOut(Easing.quad) }), -1, true) : 0;
++    return () => cancelAnimation(breath);
++  }, [animationActive, breath]);
+   const auraStyle = useAnimatedStyle(() => ({ opacity: interpolate(breath.value, [0, 1], [0.28, 0.68]), transform: [{ scale: 1 + breath.value * 0.1 }] }));
+   return <View style={StyleSheet.absoluteFill} pointerEvents="none">
+     <LinearGradient colors={['#070707', '#17120A', '#090909']} style={StyleSheet.absoluteFill} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} />
+     <Animated.View style={[styles.aura, { backgroundColor: rodaja.primary }, auraStyle]} />
+-    <AnimatedOrb color={rodaja.primary} size={150} left={W * 0.04} top={H * 0.12} />
+-    <AnimatedOrb color={brisas.primary} size={76} left={W * 0.72} top={H * 0.18} delay={500} />
+-    <AnimatedOrb color={rodaja.accent} size={44} left={W * 0.6} top={H * 0.7} delay={950} />
++    <AnimatedOrb active={animationActive} color={rodaja.primary} size={150} left={W * 0.04} top={H * 0.12} />
++    <AnimatedOrb active={animationActive} color={brisas.primary} size={76} left={W * 0.72} top={H * 0.18} delay={500} />
++    <AnimatedOrb active={animationActive} color={rodaja.accent} size={44} left={W * 0.6} top={H * 0.7} delay={950} />
+   </View>;
+ }
+ 
+diff --git a/hooks/useAnimationActivity.ts b/hooks/useAnimationActivity.ts
+new file mode 100644
+index 0000000..0b6f8e7
+--- /dev/null
++++ b/hooks/useAnimationActivity.ts
+@@ -0,0 +1,36 @@
++import { useContext, useEffect, useState } from 'react';
++import { AppState } from 'react-native';
++import { NavigationContext } from 'expo-router/react-navigation';
++import { useReducedMotion } from 'react-native-reanimated';
++import { shouldRunAnimations } from '../utils/animationActivity';
++
++export function useAnimationActivity(enabled = true) {
++  const navigation = useContext(NavigationContext);
++  const reduceMotion = useReducedMotion();
++  const [appActive, setAppActive] = useState(AppState.currentState === 'active');
++  const [navigationFocused, setNavigationFocused] = useState(() => navigation?.isFocused() ?? true);
++
++  useEffect(() => {
++    if (!enabled) return undefined;
++    setAppActive(AppState.currentState === 'active');
++    const subscription = AppState.addEventListener('change', (state) => setAppActive(state === 'active'));
++    return () => subscription.remove();
++  }, [enabled]);
++
++  useEffect(() => {
++    if (!enabled) return undefined;
++    if (!navigation) {
++      setNavigationFocused(true);
++      return undefined;
++    }
++    setNavigationFocused(navigation.isFocused());
++    const unsubscribeFocus = navigation.addListener('focus', () => setNavigationFocused(true));
++    const unsubscribeBlur = navigation.addListener('blur', () => setNavigationFocused(false));
++    return () => {
++      unsubscribeFocus();
++      unsubscribeBlur();
++    };
++  }, [enabled, navigation]);
++
++  return shouldRunAnimations({ appActive, enabled, navigationFocused, reduceMotion });
++}
+diff --git a/tests/animationActivity.test.ts b/tests/animationActivity.test.ts
+new file mode 100644
+index 0000000..20aa289
+--- /dev/null
++++ b/tests/animationActivity.test.ts
+@@ -0,0 +1,60 @@
++import React from 'react';
++import TestRenderer, { act } from 'react-test-renderer';
++import { describe, expect, test, vi } from 'vitest';
++import { NavigationContext } from 'expo-router/react-navigation';
++import { __emitAppState, __resetAppState } from './helpers/reactNativeStub';
++import { shouldRunAnimations } from '../utils/animationActivity';
++import { useAnimationActivity } from '../hooks/useAnimationActivity';
++
++globalThis.IS_REACT_ACT_ENVIRONMENT = true;
++
++function ActivityProbe({ enabled = true }: { enabled?: boolean }) {
++  return React.createElement('ActivityProbe', { active: useAnimationActivity(enabled) });
++}
++
++const activityNode = (tree: TestRenderer.ReactTestRenderer) => tree.root.find((node) => String(node.type) === 'ActivityProbe');
++
++describe('animation activity', () => {
++  test('requires an active app, focused route, enabled surface, and unrestricted motion', () => {
++    const active = { appActive: true, navigationFocused: true, reduceMotion: false };
++    expect(shouldRunAnimations(active)).toBe(true);
++    expect(shouldRunAnimations({ ...active, appActive: false })).toBe(false);
++    expect(shouldRunAnimations({ ...active, navigationFocused: false })).toBe(false);
++    expect(shouldRunAnimations({ ...active, reduceMotion: true })).toBe(false);
++    expect(shouldRunAnimations({ ...active, enabled: false })).toBe(false);
++  });
++
++  test('is safe outside navigation and stops for hidden or inactive surfaces', () => {
++    __resetAppState();
++    let tree!: TestRenderer.ReactTestRenderer;
++    act(() => { tree = TestRenderer.create(React.createElement(ActivityProbe)); });
++    expect(activityNode(tree).props.active).toBe(true);
++
++    act(() => { tree.update(React.createElement(ActivityProbe, { enabled: false })); });
++    expect(activityNode(tree).props.active).toBe(false);
++    act(() => { __emitAppState('background'); });
++    expect(activityNode(tree).props.active).toBe(false);
++    act(() => { tree.unmount(); });
++  });
++
++  test('tracks route focus when navigation is available', () => {
++    let focused = true;
++    const listeners = new Map<string, () => void>();
++    const navigation = {
++      isFocused: () => focused,
++      addListener: vi.fn((event: string, listener: () => void) => {
++        listeners.set(event, listener);
++        return () => { listeners.delete(event); };
++      }),
++    };
++    let tree!: TestRenderer.ReactTestRenderer;
++    act(() => {
++      tree = TestRenderer.create(React.createElement(NavigationContext.Provider, { value: navigation as unknown as React.ContextType<typeof NavigationContext> }, React.createElement(ActivityProbe)));
++    });
++    expect(activityNode(tree).props.active).toBe(true);
++    focused = false;
++    act(() => { listeners.get('blur')?.(); });
++    expect(activityNode(tree).props.active).toBe(false);
++    act(() => { tree.unmount(); });
++  });
++});
+diff --git a/tests/appThemeLoadingOverlay.test.ts b/tests/appThemeLoadingOverlay.test.ts
+index 05aa896..a994008 100644
+--- a/tests/appThemeLoadingOverlay.test.ts
++++ b/tests/appThemeLoadingOverlay.test.ts
+@@ -1,6 +1,7 @@
+ import React from 'react';
+ import TestRenderer, { act } from 'react-test-renderer';
+ import { beforeEach, describe, expect, test, vi } from 'vitest';
++import { withRepeat } from 'react-native-reanimated';
+ 
+ globalThis.IS_REACT_ACT_ENVIRONMENT = true;
+ 
+@@ -17,6 +18,7 @@ import { AppThemeLoadingOverlay } from '../components/AppThemeLoadingOverlay';
+ 
+ describe('AppThemeLoadingOverlay', () => {
+   beforeEach(() => {
++    vi.clearAllMocks();
+     auth.user = 'member-1';
+     data.hydratedUserId = null;
+     shop.hydratedUserId = null;
+@@ -48,6 +50,7 @@ describe('AppThemeLoadingOverlay', () => {
+     let tree: TestRenderer.ReactTestRenderer;
+     act(() => { tree = TestRenderer.create(React.createElement(AppThemeLoadingOverlay)); });
+     expect(tree!.toJSON()).toBeNull();
++    expect(withRepeat).not.toHaveBeenCalled();
+ 
+     auth.user = 'member-1';
+     data.hydratedUserId = 'member-1';
+diff --git a/tests/backgroundParallax.test.ts b/tests/backgroundParallax.test.ts
+index 6a1afa0..b0b7457 100644
+--- a/tests/backgroundParallax.test.ts
++++ b/tests/backgroundParallax.test.ts
+@@ -1,25 +1,25 @@
+ import { describe, expect, test } from 'vitest';
+-import { BACKGROUND_PARALLAX_DEPTHS, mapAccelerometerToParallax, mapDeviceMotionToParallax, shouldActivateBackgroundParallax } from '../utils/backgroundParallax';
++import { BACKGROUND_PARALLAX_DEPTHS, BACKGROUND_PARALLAX_INTERVAL_MS, mapAccelerometerToParallax, mapDeviceMotionToParallax, shouldActivateBackgroundParallax } from '../utils/backgroundParallax';
+ 
+ describe('background parallax', () => {
+   const activeConditions = {
+     backgroundActive: true,
+-    appActive: true,
++    animationActive: true,
+     enabled: true,
+     preferencesReady: true,
+-    reduceMotion: false,
+     supportedPlatform: true,
+   };
+ 
+-  test('does not activate when disabled, reduced motion is requested, or the sensor platform is unavailable', () => {
++  test('does not activate when animation is inactive, disabled, or the sensor platform is unavailable', () => {
+     expect(shouldActivateBackgroundParallax({ ...activeConditions, enabled: false })).toBe(false);
+-    expect(shouldActivateBackgroundParallax({ ...activeConditions, reduceMotion: true })).toBe(false);
++    expect(shouldActivateBackgroundParallax({ ...activeConditions, animationActive: false })).toBe(false);
+     expect(shouldActivateBackgroundParallax({ ...activeConditions, supportedPlatform: false })).toBe(false);
+     expect(shouldActivateBackgroundParallax({ ...activeConditions, backgroundActive: false })).toBe(false);
+     expect(shouldActivateBackgroundParallax(activeConditions)).toBe(true);
+   });
+ 
+   test('maps beta and gamma into clamped, smoothed tilt values with four distinct layer depths', () => {
++    expect(BACKGROUND_PARALLAX_INTERVAL_MS).toBe(120);
+     expect(BACKGROUND_PARALLAX_DEPTHS).toEqual([4, 10, 20, 32]);
+     expect(mapDeviceMotionToParallax({ beta: 0.7, gamma: -0.7 })).toEqual({ x: -0.18, y: 0.18 });
+     expect(mapDeviceMotionToParallax({ beta: 0.35, gamma: 0 }, { x: 0.5, y: -0.5 })).toMatchObject({ x: expect.closeTo(0.41), y: expect.closeTo(-0.23) });
+diff --git a/tests/helpers/navigationStub.ts b/tests/helpers/navigationStub.ts
+new file mode 100644
+index 0000000..b70e7ac
+--- /dev/null
++++ b/tests/helpers/navigationStub.ts
+@@ -0,0 +1,3 @@
++import { createContext } from 'react';
++
++export const NavigationContext = createContext<any>(undefined);
+diff --git a/tests/helpers/reanimatedStub.ts b/tests/helpers/reanimatedStub.ts
+index ea27509..8f1cafd 100644
+--- a/tests/helpers/reanimatedStub.ts
++++ b/tests/helpers/reanimatedStub.ts
+@@ -1,4 +1,5 @@
+ import React from 'react';
++import { vi } from 'vitest';
+ 
+ const View = ({ children, ...props }: any) => React.createElement('AnimatedView', props, children);
+ 
+@@ -21,7 +22,7 @@ export const useReducedMotion = () => false;
+ export const ReduceMotion = { System: 'system' };
+ export const cancelAnimation = () => undefined;
+ export const withDelay = (_delay: number, value: any) => value;
+-export const withRepeat = (value: any) => value;
++export const withRepeat = vi.fn((value: any) => value);
+ export const withSequence = (...values: any[]) => values[0];
+ export const withSpring = (value: any) => value;
+ export const withTiming = (value: any, _config?: unknown, callback?: (finished: boolean) => void) => {
+diff --git a/tests/shopScreen.test.ts b/tests/shopScreen.test.ts
+index fd065f0..f249e53 100644
+--- a/tests/shopScreen.test.ts
++++ b/tests/shopScreen.test.ts
+@@ -1,9 +1,11 @@
+ import React from 'react';
+ import TestRenderer, { act } from 'react-test-renderer';
+ import { beforeEach, describe, expect, test, vi } from 'vitest';
++import { SHOP_BACKGROUNDS } from '../constants/backgrounds';
+ 
+ globalThis.IS_REACT_ACT_ENVIRONMENT = true;
+ 
++const auth = vi.hoisted(() => ({ user: 'rodaja' as string | null }));
+ const shop = vi.hoisted(() => ({
+   gems: 800,
+   purchasedThemeIds: [] as string[],
+@@ -28,7 +30,7 @@ function host(name: string) {
+   return ({ children, ...props }: any) => React.createElement(name, props, children);
+ }
+ 
+-vi.mock('../context/AuthContext', () => ({ useAuth: () => ({ user: 'rodaja' }) }));
++vi.mock('../context/AuthContext', () => ({ useAuth: () => auth }));
+ vi.mock('../context/ShopContext', () => ({ useShop: () => shop }));
+ vi.mock('../context/ThemeContext', () => ({ useTheme: () => ({ theme: {
+   primary: '#7C3AED', accent: '#A855F7', text: '#FFFFFF', textMuted: '#94A3B8', onPrimary: '#111827',
+@@ -51,6 +53,7 @@ describe('ShopScreen', () => {
+   let scheduledFrame: FrameRequestCallback | null = null;
+ 
+   beforeEach(() => {
++    auth.user = 'rodaja';
+     scheduledFrame = null;
+     vi.stubGlobal('requestAnimationFrame', (callback: FrameRequestCallback) => {
+       scheduledFrame = callback;
+@@ -83,5 +86,39 @@ describe('ShopScreen', () => {
+     expect(list.props.initialNumToRender).toBe(6);
+     expect(list.props.maxToRenderPerBatch).toBe(6);
+     expect(list.props.windowSize).toBe(5);
++    expect(list.props.onViewableItemsChanged).toBeTypeOf('function');
++  });
++
++  test('preserves hook order across authentication transitions', () => {
++    auth.user = null;
++    let screen!: TestRenderer.ReactTestRenderer;
++    act(() => { screen = TestRenderer.create(React.createElement(ShopScreen)); });
++    expect(screen.toJSON()).toBeNull();
++
++    auth.user = 'rodaja';
++    expect(() => act(() => { screen.update(React.createElement(ShopScreen)); })).not.toThrow();
++    expect(screen.root.find((node) => (node.type as unknown) === 'FlatList')).toBeDefined();
++
++    auth.user = null;
++    expect(() => act(() => { screen.update(React.createElement(ShopScreen)); })).not.toThrow();
++    expect(screen.toJSON()).toBeNull();
++  });
++
++  test('animates only the selected visible background preview', () => {
++    let screen!: TestRenderer.ReactTestRenderer;
++    act(() => { screen = TestRenderer.create(React.createElement(ShopScreen)); });
++    act(() => { screen.root.findByProps({ testID: 'shop-tab-backgrounds' }).props.onPress(); });
++    act(() => { scheduledFrame?.(0); });
++    const list = screen.root.find((node) => (node.type as unknown) === 'FlatList');
++    const background = SHOP_BACKGROUNDS[0];
++    shop.previewBackgroundId = background.id;
++    act(() => {
++      list.props.onViewableItemsChanged({ viewableItems: [{ isViewable: true, item: { id: background.id, type: 'background', item: background } }] });
++      screen.update(React.createElement(ShopScreen));
++    });
++
++    const engines = screen.root.findAll((node) => (node.type as unknown) === 'BackgroundEngine');
++    expect(engines.filter((engine) => engine.props.animate)).toHaveLength(1);
++    expect(engines.find((engine) => engine.props.backgroundId === background.id)?.props.animate).toBe(true);
+   });
+ });
+diff --git a/utils/animationActivity.ts b/utils/animationActivity.ts
+new file mode 100644
+index 0000000..f227c87
+--- /dev/null
++++ b/utils/animationActivity.ts
+@@ -0,0 +1,13 @@
++export function shouldRunAnimations({
++  appActive,
++  enabled = true,
++  navigationFocused = true,
++  reduceMotion,
++}: {
++  appActive: boolean;
++  enabled?: boolean;
++  navigationFocused?: boolean;
++  reduceMotion: boolean;
++}) {
++  return enabled && appActive && navigationFocused && !reduceMotion;
++}
+diff --git a/utils/backgroundParallax.ts b/utils/backgroundParallax.ts
+index c266bdd..86106ec 100644
+--- a/utils/backgroundParallax.ts
++++ b/utils/backgroundParallax.ts
+@@ -1,5 +1,5 @@
+ export const BACKGROUND_PARALLAX_DEPTHS = [4, 10, 20, 32] as const;
+-export const BACKGROUND_PARALLAX_INTERVAL_MS = 60;
++export const BACKGROUND_PARALLAX_INTERVAL_MS = 120;
+ 
+ const MAX_TILT_RADIANS = 0.35;
+ const MAX_TILT_SINE = Math.sin(MAX_TILT_RADIANS);
+@@ -17,20 +17,18 @@ export function clamp(value: number, minimum = -1, maximum = 1) {
+ 
+ export function shouldActivateBackgroundParallax({
+   backgroundActive,
+-  appActive,
++  animationActive,
+   enabled,
+   preferencesReady,
+-  reduceMotion,
+   supportedPlatform,
+ }: {
+   backgroundActive: boolean;
+-  appActive: boolean;
++  animationActive: boolean;
+   enabled: boolean;
+   preferencesReady: boolean;
+-  reduceMotion: boolean;
+   supportedPlatform: boolean;
+ }) {
+-  return backgroundActive && appActive && enabled && preferencesReady && !reduceMotion && supportedPlatform;
++  return backgroundActive && animationActive && enabled && preferencesReady && supportedPlatform;
+ }
+ 
+ export function mapDeviceMotionToParallax(
+diff --git a/vitest.config.ts b/vitest.config.ts
+index 2eb6681..7697063 100644
+--- a/vitest.config.ts
++++ b/vitest.config.ts
+@@ -11,6 +11,7 @@ export default defineConfig({
+   },
+   resolve: {
+     alias: {
++       'expo-router/react-navigation': resolve(rootDir, 'tests/helpers/navigationStub.ts'),
+        'expo-router': resolve(rootDir, 'tests/helpers/expoRouterStub.ts'),
+        'expo-image': resolve(rootDir, 'tests/helpers/expoImageStub.tsx'),
+        'expo-sensors': resolve(rootDir, 'tests/helpers/expoSensorsStub.ts'),

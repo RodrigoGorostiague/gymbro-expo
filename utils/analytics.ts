@@ -1,4 +1,4 @@
-import { ExerciseLoadMode, LoadUnit, MuscleGroup, SetPerformance, UserProfile, WorkoutAttempt, WorkoutSession } from '../types';
+import { BodyMetric, ExerciseLoadMode, LoadUnit, MuscleGroup, SetPerformance, UserProfile, WorkoutAttempt, WorkoutSession } from '../types';
 import { getExerciseExposure, getEligiblePerformances } from './workoutAttempts';
 
 export interface PeriodRange {
@@ -54,12 +54,13 @@ function localDay(date: Date, offset: number): Date {
   return new Date(date.getFullYear(), date.getMonth(), date.getDate() + offset);
 }
 
-export function getDefaultComparisonPeriods(now: Date = new Date()): ComparisonPeriods {
-  const currentStart = localDay(now, -6);
+export function getDefaultComparisonPeriods(now: Date = new Date(), periodDays = 7): ComparisonPeriods {
+  const days = Math.max(1, Math.floor(periodDays));
+  const currentStart = localDay(now, -(days - 1));
   const currentEnd = localDay(now, 1);
   return {
     current: { start: currentStart, end: currentEnd },
-    previous: { start: localDay(currentStart, -7), end: currentStart },
+    previous: { start: localDay(currentStart, -days), end: currentStart },
   };
 }
 
@@ -75,12 +76,19 @@ function comparison(current: number | null, previous: number | null): SignalComp
   };
 }
 
+/** Sum recorded duration using the existing core-progress validity rule. */
+export function sumAttemptDurationSeconds(attempts: readonly WorkoutAttempt[]): number {
+  return attempts.reduce((sum, attempt) => sum + (Number.isFinite(attempt.durationSeconds) && attempt.durationSeconds > 0
+    ? attempt.durationSeconds : 0), 0);
+}
+
 export function selectCoreProgressSignals(
   attempts: readonly WorkoutAttempt[],
   owner: UserProfile,
   now: Date = new Date(),
+  periodDays = 7,
 ): CoreProgressSignals {
-  const periods = getDefaultComparisonPeriods(now);
+  const periods = getDefaultComparisonPeriods(now, periodDays);
   const current = { ...emptySignals() };
   const previous = { ...emptySignals() };
 
@@ -96,9 +104,7 @@ export function selectCoreProgressSignals(
     if (!target) continue;
 
     target.attempts += 1;
-    if (Number.isFinite(attempt.durationSeconds) && attempt.durationSeconds > 0) {
-      target.durationSeconds += attempt.durationSeconds;
-    }
+    target.durationSeconds += sumAttemptDurationSeconds([attempt]);
     target.validSets += attempt.completion.validSets;
     target.plannedSets += attempt.completion.plannedSets;
   }
@@ -185,6 +191,8 @@ export interface PerformancePartition {
 }
 
 function performanceValues(value: SetPerformance): Record<string, number> {
+  if (value.durationSeconds !== undefined) return { durationSeconds: value.durationSeconds };
+  if (value.bodyweightUnspecified) return { reps: value.reps };
   if (value.mode === 'external-load') return { reps: value.reps, load: value.load, volume: value.reps * value.load };
   if (value.mode === 'bodyweight') return { reps: value.reps, bodyweight: value.bodyweight };
   return { reps: value.reps, assistance: value.assistance };
@@ -196,9 +204,10 @@ export function selectExercisePerformance(
   exerciseId: string | null,
   now: Date = new Date(),
   chartLimit = 8,
+  periodDays = 7,
 ): { state: AdvancedDataState; partitions: readonly PerformancePartition[] } {
   if (exerciseId === null) return { state: 'unknown', partitions: [] };
-  const periods = getDefaultComparisonPeriods(now);
+  const periods = getDefaultComparisonPeriods(now, periodDays);
   const grouped = new Map<string, { mode: ExerciseLoadMode; unit: LoadUnit; points: PerformancePoint[] }>();
   let matched = false;
   for (const attempt of attempts) {
@@ -212,7 +221,7 @@ export function selectExercisePerformance(
       if (exercise.exerciseId !== exerciseId) continue;
       matched = true;
       for (const value of getEligiblePerformances(exercise.sets)) {
-        const key = `${exerciseId}:${value.mode}:${value.unit}`;
+        const key = `${exerciseId}:${value.mode}:${value.unit}${value.durationSeconds !== undefined ? ':duration' : ''}${value.bodyweightIncluded ? ':added' : ''}${value.bodyweightUnspecified ? ':unweighed' : ''}`;
         const partition = attemptPartitions.get(key) ?? { mode: value.mode, unit: value.unit, values: [] };
         partition.values.push(performanceValues(value));
         attemptPartitions.set(key, partition);
@@ -256,8 +265,9 @@ export function selectWeightedExposure(
   attempts: readonly WorkoutAttempt[],
   owner: UserProfile,
   now: Date = new Date(),
+  periodDays = 7,
 ) {
-  const periods = getDefaultComparisonPeriods(now);
+  const periods = getDefaultComparisonPeriods(now, periodDays);
   const result: Record<'current' | 'previous', Partial<Record<MuscleGroup, number>>> = { current: {}, previous: {} };
   for (const attempt of attempts) {
     if (attempt.owner !== owner) continue;
@@ -287,9 +297,10 @@ export function selectRoutineDetails(
   owner: UserProfile,
   routineId: string | null,
   now: Date = new Date(),
+  periodDays = 7,
 ) {
   if (routineId === null) return { state: 'unknown' as const, current: null, previous: null };
-  const periods = getDefaultComparisonPeriods(now);
+  const periods = getDefaultComparisonPeriods(now, periodDays);
   const summarize = (start: Date, end: Date) => {
     const values = attempts.filter((attempt) => attempt.owner === owner && attempt.routineId === routineId
       && new Date(attempt.completedAt) >= start && new Date(attempt.completedAt) < end);
@@ -467,4 +478,148 @@ export function getWeeklyWorkoutsCount(sessions: WorkoutSession[]): number {
   weekEnd.setHours(23, 59, 59, 999);
 
   return sessions.filter((s) => isInRange(s.completedAt, weekStart, weekEnd)).length;
+}
+
+export interface TrainingStatisticsSummary {
+  sessions: number;
+  plannedSets: number;
+  completedSets: number;
+  effectiveSets: number;
+  repetitions: number;
+  volumeByUnit: Partial<Record<LoadUnit, number>>;
+  maxLoadByUnit: Partial<Record<LoadUnit, number>>;
+  records: number;
+  muscles: Record<MuscleGroup, { direct: number; indirect: number; weightedSets: number; weightedVolume: number; frequency: number }>;
+  patterns: Record<string, { effectiveSets: number; repetitions: number; volume: number; exercises: number }>;
+}
+
+function performanceLoad(performance: SetPerformance): number | null {
+  if (performance.mode !== 'external-load' || performance.durationSeconds !== undefined || performance.bodyweightIncluded) return null;
+  return performance.load;
+}
+
+function emptySummary(): TrainingStatisticsSummary {
+  return {
+    sessions: 0, plannedSets: 0, completedSets: 0, effectiveSets: 0, repetitions: 0,
+    volumeByUnit: {}, maxLoadByUnit: {}, records: 0, muscles: {}, patterns: {},
+  };
+}
+
+/** Summarizes immutable attempt snapshots. It deliberately skips dimensions absent from legacy attempts. */
+export function selectTrainingStatistics(
+  attempts: readonly WorkoutAttempt[],
+  owner: UserProfile,
+  start: Date,
+  end: Date,
+): TrainingStatisticsSummary {
+  const summary = emptySummary();
+  const seenExercisesByPattern = new Map<string, Set<string>>();
+  const trainedMusclesByDay = new Map<string, Set<string>>();
+  const previousBest = new Map<string, { load: number; volume: number; e1rm: number }>();
+
+  for (const attempt of attempts.filter((value) => value.owner === owner).sort((a, b) => a.completedAt.localeCompare(b.completedAt))) {
+    const date = new Date(attempt.completedAt);
+    if (!Number.isFinite(date.getTime())) continue;
+    const inRange = date >= start && date < end;
+    const day = date.toISOString().slice(0, 10);
+    if (inRange) {
+      summary.sessions += 1;
+      summary.plannedSets += attempt.completion.plannedSets;
+      summary.completedSets += attempt.completion.validSets;
+    }
+
+    for (const exercise of attempt.exercises) {
+      const eligible = getEligiblePerformances(exercise.sets);
+      const current = { load: 0, volume: 0, e1rm: 0 };
+      for (const performance of eligible) {
+        const load = performanceLoad(performance);
+        if (load === null) continue;
+        const volume = load * performance.reps;
+        current.load = Math.max(current.load, load);
+        current.volume += volume;
+        if (performance.durationSeconds === undefined && !performance.bodyweightIncluded && performance.reps > 0 && performance.reps <= 12) current.e1rm = Math.max(current.e1rm, load * (1 + performance.reps / 30));
+      }
+      const key = `${exercise.exerciseId ?? exercise.recordedName}:${eligible[0]?.mode ?? ''}:${eligible[0]?.unit ?? ''}`;
+      const before = previousBest.get(key);
+      if (inRange && before && (current.load > before.load || current.volume > before.volume || current.e1rm > before.e1rm)) summary.records += 1;
+      previousBest.set(key, {
+        load: Math.max(before?.load ?? 0, current.load), volume: Math.max(before?.volume ?? 0, current.volume), e1rm: Math.max(before?.e1rm ?? 0, current.e1rm),
+      });
+
+      if (!inRange || eligible.length === 0) continue;
+      summary.effectiveSets += eligible.length;
+      for (const performance of eligible) {
+        summary.repetitions += performance.reps;
+        const load = performanceLoad(performance);
+        if (load === null) continue;
+        summary.volumeByUnit[performance.unit] = (summary.volumeByUnit[performance.unit] ?? 0) + load * performance.reps;
+        summary.maxLoadByUnit[performance.unit] = Math.max(summary.maxLoadByUnit[performance.unit] ?? 0, load);
+      }
+
+      const participations = exercise.catalog?.muscleParticipations ?? (exercise.attribution
+        ? [
+          ...(exercise.attribution ? [{ muscleGroupId: exercise.attribution.primary, role: 'Principal' as const, relevance: exercise.attribution.weights?.[exercise.attribution.primary] ?? 1, originalLabel: exercise.attribution.primary }] : []),
+          ...(exercise.attribution?.secondary ?? []).map((muscle) => ({ muscleGroupId: muscle, role: 'Secundario' as const, relevance: exercise.attribution?.weights?.[muscle] ?? 0.4, originalLabel: muscle })),
+        ] : []);
+      for (const participation of participations) {
+        const entry = summary.muscles[participation.muscleGroupId] ?? { direct: 0, indirect: 0, weightedSets: 0, weightedVolume: 0, frequency: 0 };
+        const weightedSets = eligible.length * participation.relevance;
+        const weightedVolume = eligible.reduce((total, performance) => total + (performanceLoad(performance) ?? 0) * performance.reps, 0) * participation.relevance;
+        entry.weightedSets += weightedSets;
+        entry.weightedVolume += weightedVolume;
+        if (participation.relevance >= 0.7) entry.direct += weightedSets;
+        else if (participation.relevance >= 0.2) entry.indirect += weightedSets;
+        summary.muscles[participation.muscleGroupId] = entry;
+        const days = trainedMusclesByDay.get(participation.muscleGroupId) ?? new Set<string>();
+        if (weightedSets >= 0.5) days.add(day);
+        trainedMusclesByDay.set(participation.muscleGroupId, days);
+      }
+
+      const pattern = exercise.catalog?.movementPattern;
+      if (pattern) {
+        const entry = summary.patterns[pattern] ?? { effectiveSets: 0, repetitions: 0, volume: 0, exercises: 0 };
+        entry.effectiveSets += eligible.length;
+        entry.repetitions += eligible.reduce((total, performance) => total + performance.reps, 0);
+        entry.volume += eligible.reduce((total, performance) => total + (performanceLoad(performance) ?? 0) * performance.reps, 0);
+        const exercises = seenExercisesByPattern.get(pattern) ?? new Set<string>();
+        exercises.add(exercise.exerciseId ?? exercise.recordedName);
+        seenExercisesByPattern.set(pattern, exercises);
+        summary.patterns[pattern] = entry;
+      }
+    }
+  }
+  for (const [muscle, days] of trainedMusclesByDay) {
+    const entry = summary.muscles[muscle];
+    if (entry) entry.frequency = days.size;
+  }
+  for (const [pattern, exercises] of seenExercisesByPattern) {
+    const entry = summary.patterns[pattern];
+    if (entry) entry.exercises = exercises.size;
+  }
+  return summary;
+}
+
+export function bodyWeightAt(metrics: readonly BodyMetric[], at: string): number | null {
+  const target = Date.parse(at);
+  if (!Number.isFinite(target)) return null;
+  return metrics.filter((metric) => metric.metricType === 'body_weight' && Date.parse(metric.measuredAt) <= target)
+    .sort((a, b) => b.measuredAt.localeCompare(a.measuredAt))[0]?.value ?? null;
+}
+
+/** Adds each original muscle association at most once for a parent-group view. */
+export function aggregateMuscleStatistics(
+  muscles: TrainingStatisticsSummary['muscles'],
+  muscleIds: readonly MuscleGroup[],
+): { direct: number; indirect: number; weightedSets: number; weightedVolume: number; frequency: number } {
+  const result = { direct: 0, indirect: 0, weightedSets: 0, weightedVolume: 0, frequency: 0 };
+  for (const id of new Set(muscleIds)) {
+    const value = muscles[id];
+    if (!value) continue;
+    result.direct += value.direct;
+    result.indirect += value.indirect;
+    result.weightedSets += value.weightedSets;
+    result.weightedVolume += value.weightedVolume;
+    result.frequency = Math.max(result.frequency, value.frequency);
+  }
+  return result;
 }

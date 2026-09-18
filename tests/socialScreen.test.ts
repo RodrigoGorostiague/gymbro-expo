@@ -1,0 +1,694 @@
+import React from 'react';
+import TestRenderer, { act } from 'react-test-renderer';
+import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
+import type { CommunityBadgeCounts } from '../services/communityBadge';
+
+globalThis.IS_REACT_ACT_ENVIRONMENT = true;
+
+const social = vi.hoisted(() => ({
+  ownProfile: { uid: 'member-1', alias: 'Blocker', categories: {}, categoryVisibility: {}, autoShareCompletedWorkouts: true },
+  refreshOwnProfile: vi.fn().mockResolvedValue(undefined),
+  saveProfile: vi.fn(),
+  discover: vi.fn().mockResolvedValue({ profiles: [], nextCursor: null }),
+  search: vi.fn().mockResolvedValue({ profiles: [], nextCursor: null }),
+  circle: vi.fn().mockResolvedValue({ profiles: [], nextCursor: null }),
+  requests: vi.fn().mockResolvedValue({ profiles: [], nextCursor: null }),
+  blockedUsers: vi.fn().mockResolvedValue({ profiles: [{ uid: 'blocked-1', alias: 'Blocked athlete', categories: { style: 'strength' } }], nextCursor: null }),
+  command: vi.fn().mockResolvedValue({ targetId: 'blocked-1' }),
+  getProfileInsights: vi.fn().mockResolvedValue({ muscleDistribution: [{ id: 'chest', label: 'Pecho', value: 8 }] }),
+  getWorkoutRecaps: vi.fn(),
+  getCommunityActivities: vi.fn().mockResolvedValue({ activities: [], nextCursor: null }),
+  createWorkoutRecap: vi.fn(),
+  deleteWorkoutRecap: vi.fn(),
+  failedAutoRecapSessionIds: new Set<string>(),
+  clearFailedAutoRecapSession: vi.fn(),
+  realtimeRevision: 0,
+}));
+const alert = vi.hoisted(() => vi.fn());
+const feedServices = vi.hoisted(() => ({
+  listJointWorkoutPosts: vi.fn(async () => []),
+  listWorkoutStartActivities: vi.fn(async (): Promise<any[]> => []),
+  getCommunityBadgeCounts: vi.fn(async (): Promise<CommunityBadgeCounts | null> => null),
+}));
+
+vi.mock('react-native', async () => {
+  const ReactModule = await import('react');
+  const host = (name: string) => ({ children, ...props }: { children?: React.ReactNode }) => ReactModule.createElement(name, props, children);
+  return {
+    Alert: { alert },
+    AppState: { currentState: 'active', addEventListener: () => ({ remove() {} }) },
+    AccessibilityInfo: { isReduceMotionEnabled: async () => false, addEventListener: () => ({ remove() {} }) },
+    Image: host('Image'),
+    RefreshControl: host('RefreshControl'),
+    Platform: { OS: 'ios', Version: '17' },
+    ScrollView: host('ScrollView'),
+    FlatList: ({ data, renderItem, ListHeaderComponent, ListFooterComponent, ...props }: any) => ReactModule.createElement('FlatList', props, ListHeaderComponent, data.map((item: any, index: number) => ReactModule.createElement(ReactModule.Fragment, { key: index }, renderItem({ item, index }))), ListFooterComponent),
+    StyleSheet: { create: <T,>(styles: T) => styles },
+    Switch: host('Switch'),
+    Text: host('Text'),
+    View: host('View'),
+  };
+});
+const auth = vi.hoisted(() => ({ user: 'member-1' }));
+vi.mock('../context/AuthContext', () => ({ useAuth: () => auth }));
+vi.mock('../context/SocialContext', () => ({ useSocial: () => social }));
+vi.mock('../services/onboarding', () => ({ getOwnOnboarding: vi.fn(async () => ({ sex: 'male' })) }));
+const workoutData = vi.hoisted(() => ({ sessions: [] as Array<Record<string, unknown>>, isLoading: false, dataState: 'ready', experienceProgress: null as any, retryData: vi.fn(), ensureRecapPublicationKey: vi.fn() }));
+vi.mock('../context/DataContext', () => ({ useData: () => workoutData }));
+vi.mock('../services/workoutRecapFeed', () => ({ recapInputFromSession: vi.fn() }));
+vi.mock('../services/jointWorkouts', () => ({ listJointWorkoutPosts: feedServices.listJointWorkoutPosts }));
+vi.mock('../services/workoutStartActivity', async (importOriginal) => ({ ...await importOriginal<typeof import('../services/workoutStartActivity')>(), listWorkoutStartActivities: feedServices.listWorkoutStartActivities }));
+vi.mock('../services/communityBadge', () => ({ getCommunityBadgeCounts: feedServices.getCommunityBadgeCounts }));
+vi.mock('../context/ThemeContext', () => ({
+  useTheme: () => ({ theme: { text: '#111', textMuted: '#666', primary: '#00f', success: '#0a0' } }),
+}));
+vi.mock('../context/ShopContext', () => ({ useShop: () => ({ purchasedFrameIds: [] }) }));
+vi.mock('../components/AppScreenHeader', () => ({ AppScreenHeader: () => null }));
+vi.mock('../components/MuscleVolumeCard', () => ({ MuscleVolumeCard: (props: Record<string,unknown>) => React.createElement('MuscleVolumeCard', props) }));
+vi.mock('../components/MuscleDistributionRadar', async () => {
+  const ReactModule = await import('react');
+  return { MuscleDistributionRadar: (props: Record<string, unknown>) => ReactModule.createElement('MuscleDistributionRadar', props) };
+});
+vi.mock('../components/ProfileAvatar', async () => {
+  const ReactModule = await import('react');
+  return { ProfileAvatar: (props: Record<string, unknown>) => ReactModule.createElement('ProfileAvatar', props) };
+});
+vi.mock('expo-linear-gradient', async () => {
+  const ReactModule = await import('react');
+  return { LinearGradient: ({ children, ...props }: { children?: React.ReactNode } & Record<string, unknown>) => ReactModule.createElement('LinearGradient', props, children) };
+});
+vi.mock('../components/AppNavBar', () => ({ AppNavBar: () => null }));
+vi.mock('../components/HapticPressable', async () => {
+  const ReactModule = await import('react');
+  return { HapticPressable: ({ children, ...props }: { children: React.ReactNode }) => ReactModule.createElement('HapticPressable', props, children) };
+});
+vi.mock('../components/GlassCard', async () => {
+  const ReactModule = await import('react');
+  return {
+    GlassCard: ({ children }: { children: React.ReactNode }) => ReactModule.createElement('GlassCard', null, children),
+    ThemeBackground: ({ children }: { children: React.ReactNode }) => ReactModule.createElement('ThemeBackground', null, children),
+  };
+});
+vi.mock('../components/UI', async () => {
+  const ReactModule = await import('react');
+  return {
+    GlassButton: (props: { title: string; onPress: () => void }) => ReactModule.createElement('GlassButton', props),
+    GlassInput: (props: Record<string, unknown>) => ReactModule.createElement('GlassInput', props),
+  };
+});
+
+import SocialScreen from '../app/social/index';
+import ProfileScreen from '../app/profile/index';
+import RequestsScreen from '../app/community/requests';
+import CommunityFeedScreen from '../app/community/feed';
+
+describe('Community feed', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    auth.user = 'member-1';
+    social.refreshOwnProfile.mockResolvedValue(undefined);
+    social.saveProfile.mockImplementation(async (input) => ({ ...social.ownProfile, ...input, alias: input.alias.trim() }));
+    if (!social.ownProfile) social.ownProfile = { uid: 'member-1', alias: 'Blocker', categories: {}, categoryVisibility: {}, autoShareCompletedWorkouts: true } as typeof social.ownProfile;
+    social.discover.mockResolvedValue({ profiles: [], nextCursor: null });
+    social.circle.mockResolvedValue({ profiles: [], nextCursor: null });
+    social.requests.mockResolvedValue({ profiles: [], nextCursor: null });
+    social.blockedUsers.mockResolvedValue({ profiles: [{ uid: 'blocked-1', alias: 'Blocked athlete', categories: { style: 'strength' } }], nextCursor: null });
+    social.command.mockResolvedValue({ targetId: 'blocked-1' });
+    social.getProfileInsights.mockResolvedValue({ muscleDistribution: [{ id: 'chest', label: 'Pecho', value: 8 }] });
+    social.getWorkoutRecaps.mockResolvedValue({ recaps: [], nextCursor: null });
+    social.getCommunityActivities.mockResolvedValue({ activities: [], nextCursor: null });
+    Object.assign(social.ownProfile, {
+      uid: 'member-1', alias: 'Blocker', categories: {}, categoryVisibility: {}, autoShareCompletedWorkouts: true,
+      shareRoutineTemplate: true, shareMesocycleTemplate: true, sharePerformedSetDetails: true,
+    });
+    social.ownProfile.autoShareCompletedWorkouts = true;
+    social.failedAutoRecapSessionIds = new Set<string>();
+    workoutData.sessions = [];
+    workoutData.isLoading = false;
+    workoutData.dataState = 'ready';
+    workoutData.experienceProgress = null;
+    feedServices.listJointWorkoutPosts.mockResolvedValue([]);
+    feedServices.listWorkoutStartActivities.mockResolvedValue([]);
+    feedServices.getCommunityBadgeCounts.mockResolvedValue(null);
+  });
+
+  afterEach(() => { vi.useRealTimers(); });
+
+  test('does not expose manual publishing when automatic sharing is disabled', async () => {
+    social.ownProfile.autoShareCompletedWorkouts = false;
+    workoutData.sessions = [{
+      id: 'session-1', routineId: 'routine-1', routineName: 'Upper', completedAt: '2026-08-01T10:00:00Z',
+      durationSeconds: 600, restTimerSeconds: 0, exercises: [],
+    }];
+    let tree: TestRenderer.ReactTestRenderer;
+
+    await act(async () => { tree = TestRenderer.create(React.createElement(SocialScreen)); });
+
+    expect(tree!.root.findAll((node) => String(node.type) === 'GlassButton' && String(node.props.title).includes('Compartir:'))).toHaveLength(0);
+    expect(tree!.root.findAll((node) => String(node.type) === 'GlassButton' && node.props.title === 'Publicar resumen')).toHaveLength(0);
+  });
+
+  test('renders own recaps without a feature flag or accepted connections', async () => {
+    social.getWorkoutRecaps.mockResolvedValue({
+      recaps: [{
+        id: 'recap-1', authorAlias: 'Blocker', routineName: 'Upper', completedAt: '2026-08-01T10:00:00Z',
+        durationSeconds: 600, exerciseCount: 3, muscleGroupIds: ['pecho'], metrics: { volume: 1200 }, caption: null, createdAt: '2026-08-01T10:00:00Z', templateAvailable: false, mesocycleAvailable: false, isAuthor: true,
+      }],
+      nextCursor: null,
+    });
+    let tree: TestRenderer.ReactTestRenderer;
+
+    await act(async () => { tree = TestRenderer.create(React.createElement(SocialScreen)); });
+
+    expect(social.getWorkoutRecaps).toHaveBeenCalled();
+    expect(tree!.root.findAll((node) => String(node.type) === 'Text').map((node) => node.children.join(''))).toEqual(expect.arrayContaining(['Tu círculo en movimiento', 'Upper']));
+    expect(tree!.root.findAll((node) => String(node.type) === 'GlassButton' && node.props.title === 'Eliminar publicación')).toHaveLength(1);
+    expect(tree!.root.findAll((node) => String(node.type) === 'Text').map((node) => node.children.join(''))).toContain('Ver entrenamiento completo');
+  });
+
+  test('retains the last successful feed when refresh fails and retries in place', async () => {
+    social.getWorkoutRecaps.mockResolvedValueOnce({ recaps: [{
+      id: 'retained', authorAlias: 'Athlete', routineName: 'Retained session', completedAt: '2026-08-01T10:00:00Z',
+      durationSeconds: 600, exerciseCount: 1, muscleGroupIds: [], metrics: {}, caption: null,
+      createdAt: '2026-08-01T10:00:00Z', templateAvailable: false, isAuthor: true,
+    }], nextCursor: null });
+    let tree!: TestRenderer.ReactTestRenderer;
+    await act(async () => { tree = TestRenderer.create(React.createElement(CommunityFeedScreen)); });
+    social.getWorkoutRecaps.mockRejectedValueOnce(new Error('Offline'));
+    await act(async () => { tree.root.find((node) => String(node.type) === 'FlatList').props.refreshControl.props.onRefresh(); });
+    const texts = tree.root.findAll((node) => String(node.type) === 'Text').map((node) => node.children.join(''));
+    expect(texts).toContain('Retained session');
+    expect(texts.some((text) => text.includes('última actualización disponible'))).toBe(true);
+    expect(tree.root.findAll((node) => String(node.type) === 'GlassButton' && node.props.title === 'Reintentar')).toHaveLength(1);
+    act(() => tree.unmount());
+  });
+
+  test('keeps joint posts visible when the recap endpoint fails', async () => {
+    social.getWorkoutRecaps.mockRejectedValueOnce(new Error('Recap service unavailable'));
+    feedServices.listJointWorkoutPosts.mockResolvedValueOnce([{id:'joint-barrier',createdAt:'2026-09-11T10:00:00Z',updatedAt:'2026-09-11T10:00:00Z',participants:[]}] as never[]);
+    let tree!: TestRenderer.ReactTestRenderer;
+    await act(async () => { tree = TestRenderer.create(React.createElement(CommunityFeedScreen)); });
+    expect(tree.root.findAll((node) => node.props.workoutId === 'joint-barrier').length).toBeGreaterThan(0);
+    expect(tree.root.findAll((node) => String(node.type) === 'Text').some(node => node.children.join('').includes('Recap service unavailable'))).toBe(true);
+    act(() => tree.unmount());
+  });
+
+  test('renders joint posts immediately despite a hung recap endpoint and bounds refresh time', async () => {
+    vi.useFakeTimers();
+    let rejectLate!: (error: Error) => void;
+    social.getWorkoutRecaps.mockImplementationOnce(() => new Promise((_resolve, reject) => { rejectLate = reject; }));
+    feedServices.listJointWorkoutPosts.mockResolvedValueOnce([{id:'joint-fast',createdAt:'2026-09-11T10:00:00Z',updatedAt:'2026-09-11T10:00:00Z',participants:[]}] as never[]);
+    let tree!: TestRenderer.ReactTestRenderer;
+    await act(async () => { tree = TestRenderer.create(React.createElement(CommunityFeedScreen)); });
+    expect(tree.root.findAll((node) => node.props.workoutId === 'joint-fast').length).toBeGreaterThan(0);
+    expect(tree.root.find((node) => String(node.type) === 'FlatList').props.refreshControl.props.refreshing).toBe(true);
+    await act(async () => { await vi.advanceTimersByTimeAsync(10_000); });
+    expect(tree.root.find((node) => String(node.type) === 'FlatList').props.refreshControl.props.refreshing).toBe(false);
+    expect(tree.root.findAll((node) => String(node.type) === 'Text').map(node => node.children.join('')).join(' ')).toContain('tardó demasiado');
+    await act(async () => { rejectLate(new Error('Late failure must stay handled')); });
+    expect(tree.root.findAll((node) => String(node.type) === 'Text').map(node => node.children.join('')).join(' ')).not.toContain('Late failure must stay handled');
+    act(() => tree.unmount());
+    expect(vi.getTimerCount()).toBe(0);
+    vi.useRealTimers();
+  });
+
+  test('cleans hung feed timers on unmount and ignores later completion', async () => {
+    vi.useFakeTimers();
+    let resolveLate!: (value: any) => void;
+    social.getWorkoutRecaps.mockImplementationOnce(() => new Promise((resolve) => { resolveLate = resolve; }));
+    let tree!: TestRenderer.ReactTestRenderer;
+    await act(async () => { tree = TestRenderer.create(React.createElement(CommunityFeedScreen)); });
+    expect(vi.getTimerCount()).toBeGreaterThan(0);
+    await act(async () => tree.unmount());
+    expect(vi.getTimerCount()).toBe(0);
+    await act(async () => { resolveLate({recaps:[],nextCursor:'stale'}); });
+    expect(vi.getTimerCount()).toBe(0);
+    vi.useRealTimers();
+  });
+
+  test('retains unsaved identity fields across profile refresh and section navigation', async () => {
+    let tree!: TestRenderer.ReactTestRenderer;
+    await act(async () => { tree = TestRenderer.create(React.createElement(ProfileScreen)); });
+    const select = (name: string) => tree.root.find((node) => String(node.type) === 'HapticPressable' && node.props.accessibilityLabel === name).props.onPress();
+    act(() => select('Identidad'));
+    const bio = () => tree.root.find((node) => String(node.type) === 'GlassInput' && node.props.placeholder === 'Sobre ti');
+    act(() => bio().props.onChangeText('Unsaved athlete bio'));
+    social.ownProfile = { ...social.ownProfile, alias: 'Remote alias', categories: { about: 'Remote bio' } };
+    await act(async () => { tree.update(React.createElement(ProfileScreen)); });
+    expect(bio().props.value).toBe('Unsaved athlete bio');
+    act(() => select('Privacidad'));
+    act(() => select('Identidad'));
+    expect(bio().props.value).toBe('Unsaved athlete bio');
+    expect(tree.root.findAll((node) => String(node.type) === 'GlassButton' && node.props.title === 'Guardar cambios')).toHaveLength(1);
+    act(() => tree.unmount());
+  });
+
+  test('normalizes an accepted save and clears pending state', async () => {
+    let tree!: TestRenderer.ReactTestRenderer;
+    await act(async () => { tree = TestRenderer.create(React.createElement(ProfileScreen)); });
+    act(() => tree.root.find((node) => String(node.type) === 'HapticPressable' && node.props.accessibilityLabel === 'Identidad').props.onPress());
+    const alias = () => tree.root.find((node) => String(node.type) === 'GlassInput' && node.props.placeholder === 'Alias público');
+    act(() => alias().props.onChangeText(' Alice '));
+    await act(async () => { tree.root.find((node) => String(node.type) === 'GlassButton' && node.props.title === 'Guardar cambios').props.onPress(); });
+    expect(alias().props.value).toBe('Alice');
+    expect(tree.root.findAll((node) => String(node.type) === 'GlassButton' && node.props.title === 'Guardar cambios')).toHaveLength(0);
+    act(() => tree.unmount());
+  });
+
+  test('hydrates an external refresh when the editor is clean', async () => {
+    let tree!: TestRenderer.ReactTestRenderer;
+    await act(async () => { tree = TestRenderer.create(React.createElement(ProfileScreen)); });
+    social.ownProfile = { ...social.ownProfile, alias: 'External update' };
+    await act(async () => { tree.update(React.createElement(ProfileScreen)); });
+    act(() => tree.root.find((node) => String(node.type) === 'HapticPressable' && node.props.accessibilityLabel === 'Identidad').props.onPress());
+    expect(tree.root.find((node) => String(node.type) === 'GlassInput' && node.props.placeholder === 'Alias público').props.value).toBe('External update');
+    expect(tree.root.findAll((node) => String(node.type) === 'GlassButton' && node.props.title === 'Guardar cambios')).toHaveLength(0);
+    act(() => tree.unmount());
+  });
+
+  test('keeps a rejected save dirty and retains newer edits during a successful asynchronous save', async () => {
+    let tree!: TestRenderer.ReactTestRenderer;
+    await act(async () => { tree = TestRenderer.create(React.createElement(ProfileScreen)); });
+    act(() => tree.root.find((node) => String(node.type) === 'HapticPressable' && node.props.accessibilityLabel === 'Identidad').props.onPress());
+    const alias = () => tree.root.find((node) => String(node.type) === 'GlassInput' && node.props.placeholder === 'Alias público');
+    const save = () => tree.root.find((node) => String(node.type) === 'GlassButton' && node.props.title === 'Guardar cambios');
+    act(() => alias().props.onChangeText(' Alice '));
+    social.saveProfile.mockRejectedValueOnce(new Error('Offline'));
+    await act(async () => { save().props.onPress(); });
+    expect(alias().props.value).toBe(' Alice ');
+    expect(save()).toBeTruthy();
+    let resolve!: (value: any) => void;
+    social.saveProfile.mockImplementationOnce(() => new Promise((done) => { resolve = done; }));
+    act(() => save().props.onPress());
+    act(() => alias().props.onChangeText('Bob'));
+    await act(async () => { resolve({ ...social.ownProfile, alias: 'Alice' }); });
+    expect(alias().props.value).toBe('Bob');
+    expect(save()).toBeTruthy();
+    act(() => tree.unmount());
+  });
+
+  test('shows an owner-only training summary and explicit editing actions before any form', async () => {
+    workoutData.sessions = [{ id: 'owner-session', routineName: 'Leg strength', completedAt: '2026-08-01T10:00:00Z', durationSeconds: 1800 }];
+    let tree!: TestRenderer.ReactTestRenderer;
+    await act(async () => { tree = TestRenderer.create(React.createElement(ProfileScreen)); });
+    const texts = tree.root.findAll((node) => String(node.type) === 'Text').map((node) => node.children.join(''));
+    expect(texts).toContain('Resumen privado de tu historial disponible');
+    expect(texts).toContain('Leg strength');
+    expect(tree.root.findAll((node) => String(node.type) === 'GlassInput')).toHaveLength(0);
+    act(() => tree.root.find((node) => String(node.type) === 'HapticPressable' && node.props.accessibilityLabel === 'Editar identidad').props.onPress());
+    expect(tree.root.findAll((node) => String(node.type) === 'GlassInput')).toHaveLength(2);
+    act(() => tree.unmount());
+  });
+
+  test('shows data loading and recovery instead of an invented zero-history state', async () => {
+    workoutData.isLoading = true;
+    let tree!: TestRenderer.ReactTestRenderer;
+    await act(async () => { tree = TestRenderer.create(React.createElement(ProfileScreen)); });
+    const texts = () => tree.root.findAll((node) => String(node.type) === 'Text').map((node) => node.children.join(''));
+    expect(texts()).toContain('Cargando tu recorrido…');
+    expect(texts()).not.toContain('Empieza tu próxima historia');
+    workoutData.isLoading = false;
+    workoutData.dataState = 'error';
+    await act(async () => { tree.update(React.createElement(ProfileScreen)); });
+    act(() => tree.root.find((node) => String(node.type) === 'GlassButton' && node.props.title === 'Reintentar historial').props.onPress());
+    expect(workoutData.retryData).toHaveBeenCalledOnce();
+    act(() => tree.unmount());
+  });
+
+  test('exposes real level progress as an accessible progressbar', async () => {
+    workoutData.experienceProgress = { level: 5, rank: 'Intermedio', totalXp: 1200, xpIntoLevel: 50, xpForNextLevel: 100 };
+    let tree!: TestRenderer.ReactTestRenderer;
+    await act(async () => { tree = TestRenderer.create(React.createElement(ProfileScreen)); });
+    const progress = tree.root.find((node) => String(node.type) === 'View' && node.props.accessibilityRole === 'progressbar');
+    expect(progress.props.accessibilityValue).toEqual({ min: 0, max: 100, now: 50, text: '50 de 100 XP para el nivel 6' });
+    act(() => tree.unmount());
+  });
+
+  test('discards only after confirmation and restores the hydrated baseline', async () => {
+    let tree!: TestRenderer.ReactTestRenderer;
+    await act(async () => { tree = TestRenderer.create(React.createElement(ProfileScreen)); });
+    act(() => tree.root.find((node) => String(node.type) === 'HapticPressable' && node.props.accessibilityLabel === 'Identidad').props.onPress());
+    const alias = () => tree.root.find((node) => String(node.type) === 'GlassInput' && node.props.placeholder === 'Alias público');
+    act(() => alias().props.onChangeText('Draft'));
+    act(() => tree.root.find((node) => String(node.type) === 'HapticPressable' && node.props.accessibilityLabel === 'Descartar cambios').props.onPress());
+    expect(alias().props.value).toBe('Draft');
+    const buttons = alert.mock.calls.at(-1)![2];
+    expect(buttons[0].style).toBe('cancel');
+    act(() => buttons[1].onPress());
+    expect(alias().props.value).toBe('Blocker');
+    expect(social.saveProfile).not.toHaveBeenCalled();
+    expect(tree.root.findAll((node) => String(node.type) === 'GlassButton' && node.props.title === 'Guardar cambios')).toHaveLength(0);
+    act(() => tree.unmount());
+  });
+
+  test.each([false, true])('discard restores refreshed identity and privacy, including refresh while confirmation is open (%s)', async (refreshWhileOpen) => {
+    let tree!: TestRenderer.ReactTestRenderer;
+    await act(async () => { tree = TestRenderer.create(React.createElement(ProfileScreen)); });
+    const select = (label: string) => tree.root.find((node) => String(node.type) === 'HapticPressable' && node.props.accessibilityLabel === label).props.onPress();
+    act(() => select('Identidad'));
+    const alias = () => tree.root.find((node) => String(node.type) === 'GlassInput' && node.props.placeholder === 'Alias público');
+    act(() => alias().props.onChangeText('Local draft'));
+    if (refreshWhileOpen) act(() => select('Descartar cambios'));
+    social.ownProfile = { ...social.ownProfile, alias: 'Latest remote identity', categories: { about: 'Latest remote biography' }, categoryVisibility: { about: false }, autoShareCompletedWorkouts: false };
+    await act(async () => { tree.update(React.createElement(ProfileScreen)); });
+    expect(alias().props.value).toBe('Local draft');
+    if (!refreshWhileOpen) act(() => select('Descartar cambios'));
+    act(() => alert.mock.calls.at(-1)![2][1].onPress());
+    expect(alias().props.value).toBe('Latest remote identity');
+    expect(tree.root.find((node) => String(node.type) === 'GlassInput' && node.props.placeholder === 'Sobre ti').props.value).toBe('Latest remote biography');
+    expect(tree.root.find((node) => String(node.type) === 'Switch' && node.props.accessibilityLabel === 'Mostrar descripción').props.value).toBe(false);
+    act(() => select('Privacidad'));
+    expect(tree.root.find((node) => String(node.type) === 'Switch' && node.props.accessibilityLabel === 'Publicar resúmenes automáticamente').props.value).toBe(false);
+    expect(tree.root.findAll((node) => String(node.type) === 'GlassButton' && node.props.title === 'Guardar cambios')).toHaveLength(0);
+    act(() => select('Identidad'));
+    act(() => alias().props.onChangeText('Next edit'));
+    await act(async () => tree.root.find((node) => String(node.type) === 'GlassButton' && node.props.title === 'Guardar cambios').props.onPress());
+    expect(social.saveProfile).toHaveBeenLastCalledWith(expect.objectContaining({ autoShareCompletedWorkouts: false, categoryVisibility: { about: false } }));
+    act(() => tree.unmount());
+  });
+
+  test('a pending save from a previous account cannot replace the next account editor', async () => {
+    let resolve!: (value: any) => void;
+    social.saveProfile.mockImplementationOnce(() => new Promise((done) => { resolve = done; }));
+    let tree!: TestRenderer.ReactTestRenderer;
+    await act(async () => { tree = TestRenderer.create(React.createElement(ProfileScreen)); });
+    const select = () => tree.root.find((node) => String(node.type) === 'HapticPressable' && node.props.accessibilityLabel === 'Identidad').props.onPress();
+    act(select);
+    const alias = () => tree.root.find((node) => String(node.type) === 'GlassInput' && node.props.placeholder === 'Alias público');
+    act(() => alias().props.onChangeText('Account one draft'));
+    act(() => tree.root.find((node) => String(node.type) === 'GlassButton' && node.props.title === 'Guardar cambios').props.onPress());
+    auth.user = 'member-2';
+    social.ownProfile = { ...social.ownProfile, uid: 'member-2', alias: 'Account two' };
+    await act(async () => { tree.update(React.createElement(ProfileScreen)); });
+    act(select);
+    await act(async () => resolve({ uid: 'member-1', alias: 'Account one accepted' }));
+    expect(alias().props.value).toBe('Account two');
+    expect(alert).not.toHaveBeenCalledWith('Perfil guardado', expect.anything());
+    act(() => tree.unmount());
+  });
+
+  test('renders author avatar and the author theme mix on each recap', async () => {
+    social.getWorkoutRecaps.mockResolvedValue({
+      recaps: [{
+        id: 'recap-presentation', authorAlias: 'Brisas', authorAvatarId: 'capybara-mark', authorThemeId: 'profile-brisas', routineName: 'Upper', completedAt: '2026-08-01T10:00:00Z',
+        durationSeconds: 600, exerciseCount: 3, muscleGroupIds: [], metrics: {}, caption: null, createdAt: '2026-08-01T10:00:00Z', templateAvailable: false, mesocycleAvailable: false, isAuthor: false,
+      }],
+      nextCursor: null,
+    });
+    let tree: TestRenderer.ReactTestRenderer;
+
+    await act(async () => { tree = TestRenderer.create(React.createElement(CommunityFeedScreen)); });
+
+    expect(tree!.root.find((node) => String(node.type) === 'ProfileAvatar').props.avatarId).toBe('capybara-mark');
+    expect(tree!.root.find((node) => String(node.type) === 'LinearGradient').props.colors).toEqual(['#D63384', '#FF85C0', '#9B59B6']);
+    expect(tree!.root.findAll((node) => String(node.type) === 'Text').map((node) => node.children.join(''))).toContain('Brisas');
+  });
+
+  test('keeps a joint shortcut and consolidates pending destinations into one inbox', async () => {
+    feedServices.getCommunityBadgeCounts.mockResolvedValue({ incomingRequests: 2, unreadNotifications: 1, jointInvitations: 3, planShareRequests: 4, total: 10 });
+    let tree: TestRenderer.ReactTestRenderer;
+
+    await act(async () => { tree = TestRenderer.create(React.createElement(CommunityFeedScreen)); });
+
+    const actions = tree!.root.findAll((node) => String(node.type) === 'HapticPressable');
+    expect(actions.filter((node) => node.props.accessibilityLabel === 'Abrir Entrenar juntos, 3 pendientes')).toHaveLength(1);
+    expect(actions.filter((node) => node.props.accessibilityLabel?.startsWith('Juntos'))).toHaveLength(0);
+    expect(actions.filter((node) => node.props.accessibilityLabel?.startsWith('Solicitudes'))).toHaveLength(0);
+    expect(actions.filter((node) => node.props.accessibilityLabel?.startsWith('Planes'))).toHaveLength(0);
+    expect(actions.filter((node) => node.props.accessibilityLabel?.startsWith('Notificaciones'))).toHaveLength(0);
+    expect(tree!.root.findAll((node) => String(node.type) === 'GlassButton' && node.props.title === 'Bandeja · 10 pendientes')).toHaveLength(1);
+  });
+
+  test('merges publication types from newest to oldest with subtle date sections', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-08-08T12:00:00Z'));
+    social.getWorkoutRecaps.mockResolvedValue({
+      recaps: [{
+        id: 'recap-old', authorAlias: 'Alex', authorAvatarId: 'capybara-athlete', authorThemeId: null, routineName: 'Recap anterior', completedAt: '2026-08-06T10:00:00Z',
+        durationSeconds: 600, exerciseCount: 3, muscleGroupIds: [], metrics: {}, caption: null, createdAt: '2026-08-06T10:00:00Z', templateAvailable: false, mesocycleAvailable: false, isAuthor: false,
+      }], nextCursor: null,
+    });
+    social.getCommunityActivities.mockResolvedValue({ activities: [{ id: 'rank-mid', kind: 'rank_up', authorAlias: 'Brisas', authorAvatarId: 'capybara-athlete', authorThemeId: null, level: 4, rank: 'GymBro', createdAt: '2026-08-07T10:00:00Z' }], nextCursor: null });
+    feedServices.listWorkoutStartActivities.mockResolvedValue([{ id: 'start-new', authorAlias: 'Cami', authorAvatarId: 'capybara-athlete', authorThemeId: null, routineName: 'Piernas', jointWorkoutId: null, startedAt: '2026-08-08T11:45:00Z', expiresAt: '2026-08-08T13:45:00Z', isAuthor: false }]);
+    let tree: TestRenderer.ReactTestRenderer;
+
+    await act(async () => { tree = TestRenderer.create(React.createElement(CommunityFeedScreen)); });
+
+    const text = tree!.root.findAll((node) => String(node.type) === 'Text').map((node) => node.children.join(''));
+    expect(text.indexOf('Cami comenzó un entrenamiento')).toBeLessThan(text.indexOf('Nivel 4 · GymBro'));
+    expect(text.indexOf('Nivel 4 · GymBro')).toBeLessThan(text.indexOf('Recap anterior'));
+    expect(text).toEqual(expect.arrayContaining(['HOY', 'AYER', '6 DE AGOSTO', 'hace 15 min', 'hace 2 días']));
+  });
+
+  test('renders a foreign athlete milestone with their presentation theme', async () => {
+    social.getCommunityActivities.mockResolvedValue({ activities: [{
+      id: 'personal-record', kind: 'personal_record', authorAlias: 'Brisas', authorAvatarId: 'capybara-mark', authorThemeId: 'profile-brisas',
+      payload: { exercise_name: 'Press banca', best_score: 960, score_unit: 'kg-reps' }, createdAt: '2026-08-08T11:00:00Z',
+    }], nextCursor: null });
+    let tree: TestRenderer.ReactTestRenderer;
+
+    await act(async () => { tree = TestRenderer.create(React.createElement(CommunityFeedScreen)); });
+
+    const text = tree!.root.findAll((node) => String(node.type) === 'Text').map((node) => node.children.join(''));
+    expect(text).toEqual(expect.arrayContaining(['Brisas', 'RÉCORD PERSONAL', 'Press banca', '960 kg-reps']));
+    expect(tree!.root.find((node) => String(node.type) === 'LinearGradient').props.colors).toEqual(['#D63384', '#FF85C0', '#9B59B6']);
+  });
+
+  test('hides manual recap controls while automatic sharing succeeds', async () => {
+    workoutData.sessions = [{
+      id: 'session-1', routineId: 'routine-1', routineName: 'Upper', completedAt: '2026-08-01T10:00:00Z',
+      durationSeconds: 600, restTimerSeconds: 0, exercises: [],
+    }];
+    let tree: TestRenderer.ReactTestRenderer;
+
+    await act(async () => { tree = TestRenderer.create(React.createElement(SocialScreen)); });
+
+    expect(tree!.root.findAll((node) => String(node.type) === 'GlassButton' && node.props.title === 'Compartir: Upper')).toHaveLength(0);
+    expect(tree!.root.findAll((node) => String(node.type) === 'GlassButton' && node.props.title === 'Publicar resumen')).toHaveLength(0);
+  });
+
+  test('does not expose recovery controls for failed automatic shares', async () => {
+    workoutData.sessions = [{
+      id: 'session-1', routineId: 'routine-1', routineName: 'Upper', completedAt: '2026-08-01T10:00:00Z',
+      durationSeconds: 600, restTimerSeconds: 0, exercises: [],
+    }];
+    social.failedAutoRecapSessionIds = new Set(['session-1']);
+    let tree: TestRenderer.ReactTestRenderer;
+
+    await act(async () => { tree = TestRenderer.create(React.createElement(SocialScreen)); });
+
+    expect(tree!.root.findAll((node) => String(node.type) === 'GlassButton' && String(node.props.title).includes('Compartir:'))).toHaveLength(0);
+    expect(tree!.root.findAll((node) => String(node.type) === 'GlassButton' && node.props.title === 'Publicar resumen')).toHaveLength(0);
+  });
+
+  test('keeps self identity and blocked-user access in Profile, outside the feed', async () => {
+    let tree: TestRenderer.ReactTestRenderer;
+    await act(async () => { tree = TestRenderer.create(React.createElement(ProfileScreen)); });
+    await act(async () => { tree!.root.find((node) => String(node.type) === 'HapticPressable' && node.props.accessibilityLabel === 'Privacidad').props.onPress(); });
+
+    expect(tree!.root.findAll((node) => String(node.type) === 'GlassButton' && node.props.title === 'Usuarios bloqueados')).toHaveLength(1);
+    expect(tree!.root.findAll((node) => String(node.type) === 'Text').map((node) => node.children.join(''))).not.toContain('Entrenamientos compartidos');
+  });
+
+  test('mounts the versioned owner volume card without requesting restricted social insights', async () => {
+    let tree: TestRenderer.ReactTestRenderer;
+    await act(async () => { tree = TestRenderer.create(React.createElement(ProfileScreen)); });
+
+    expect(social.getProfileInsights).not.toHaveBeenCalled();
+    expect(tree!.root.find((node) => String(node.type) === 'MuscleVolumeCard').props).toMatchObject({subjectId:'member-1',own:true});
+  });
+
+  test('selects an available profile avatar for the athlete sex', async () => {
+    let tree: TestRenderer.ReactTestRenderer;
+    await act(async () => { tree = TestRenderer.create(React.createElement(ProfileScreen)); });
+    await act(async () => { tree!.root.find((node) => String(node.type) === 'HapticPressable' && node.props.accessibilityLabel === 'Apariencia').props.onPress(); });
+    await act(async () => { tree!.root.find((node) => String(node.type) === 'HapticPressable' && node.props.accessibilityLabel === 'Elegir avatar').props.onPress(); });
+    await act(async () => { tree!.root.find((node) => String(node.type) === 'HapticPressable' && node.props.accessibilityLabel === 'Capybro cabello puntiagudo').props.onPress(); });
+    await act(async () => { tree!.root.find((node) => String(node.type) === 'GlassButton' && node.props.title === 'Guardar cambios').props.onPress(); });
+
+    expect(social.saveProfile).toHaveBeenCalledWith(expect.objectContaining({ avatarId: 'capybro-spiky' }));
+  });
+
+  test('starts a locked frame preview only after confirming its modal', async () => {
+    let tree: TestRenderer.ReactTestRenderer;
+    await act(async () => { tree = TestRenderer.create(React.createElement(ProfileScreen)); });
+    await act(async () => { tree!.root.find((node) => String(node.type) === 'HapticPressable' && node.props.accessibilityLabel === 'Apariencia').props.onPress(); });
+
+    await act(async () => { tree!.root.find((node) => String(node.type) === 'HapticPressable' && node.props.accessibilityLabel === 'Elegir marco').props.onPress(); });
+    await act(async () => { tree!.root.find((node) => String(node.type) === 'HapticPressable' && node.props.accessibilityLabel === 'Intermedio').props.onPress(); });
+
+    expect(alert).toHaveBeenCalledWith('Marco bloqueado', expect.stringContaining('nivel 5'), expect.any(Array));
+    expect(tree!.root.findAll((node) => String(node.type) === 'Text').map((node) => node.children.join(''))).not.toContain('Previsualización: 15s');
+    const actions = alert.mock.calls[0][2] as Array<{ text: string; onPress?: () => void }>;
+    await act(async () => { actions.find((action) => action.text === 'Previsualizar 15 s')?.onPress?.(); });
+
+    expect(tree!.root.findAll((node) => String(node.type) === 'Text').map((node) => node.children.join(''))).toContain('Previsualización: 15s');
+  });
+
+  test('renders every profile switch with safe defaults for a legacy profile missing sharing fields', async () => {
+    const legacyProfile = social.ownProfile as Record<string, unknown>;
+    delete legacyProfile.categories;
+    delete legacyProfile.categoryVisibility;
+    delete legacyProfile.autoShareCompletedWorkouts;
+    delete legacyProfile.shareRoutineTemplate;
+    delete legacyProfile.shareMesocycleTemplate;
+    delete legacyProfile.sharePerformedSetDetails;
+    let tree: TestRenderer.ReactTestRenderer;
+
+    await act(async () => { tree = TestRenderer.create(React.createElement(ProfileScreen)); });
+    await act(async () => { tree!.root.find((node) => String(node.type) === 'HapticPressable' && node.props.accessibilityLabel === 'Privacidad').props.onPress(); });
+
+    const switches = tree!.root.findAll((node) => String(node.type) === 'Switch');
+    expect(switches).toHaveLength(9);
+    expect(switches.map((node) => node.props.value)).toEqual(Array(9).fill(true));
+  });
+
+  test('normalizes malformed profile fields while preserving valid false switch values', async () => {
+    Object.assign(social.ownProfile as Record<string, unknown>, {
+      categories: { trainingStyle: 7, about: { text: 'invalid' }, legacy: 'preserved' },
+      categoryVisibility: { trainingStyle: 'false', about: false, legacy: 0 },
+      autoShareCompletedWorkouts: 'false', shareRoutineTemplate: 0,
+      shareMesocycleTemplate: {}, sharePerformedSetDetails: false,
+    });
+    let tree: TestRenderer.ReactTestRenderer;
+
+    await act(async () => { tree = TestRenderer.create(React.createElement(ProfileScreen)); });
+    await act(async () => { tree!.root.find((node) => String(node.type) === 'HapticPressable' && node.props.accessibilityLabel === 'Privacidad').props.onPress(); });
+
+    const switches = tree!.root.findAll((node) => String(node.type) === 'Switch');
+    expect(switches.map((node) => node.props.value)).toEqual([true, true, true, false, true, true, true, true, true]);
+  });
+
+  test('renders loading and malformed profiles with valid Switch props when focus refresh throws synchronously', async () => {
+    social.ownProfile = null as never;
+    social.refreshOwnProfile.mockImplementation(() => { throw new Error('Offline'); });
+    let tree: TestRenderer.ReactTestRenderer;
+
+    await act(async () => { tree = TestRenderer.create(React.createElement(ProfileScreen)); });
+    await act(async () => { tree!.root.find((node) => String(node.type) === 'HapticPressable' && node.props.accessibilityLabel === 'Privacidad').props.onPress(); });
+
+    expect(tree!.root.findAll((node) => String(node.type) === 'Switch')).toHaveLength(9);
+    expect(tree!.root.find((node) => String(node.type) === 'GlassButton' && node.props.title === 'Crear perfil')).toBeDefined();
+    expect(tree!.root.findAll((node) => String(node.type) === 'Text').map((node) => node.children.join(''))).toContain('Offline');
+
+    social.ownProfile = {
+      uid: 7,
+      alias: { invalid: true },
+      categories: [],
+      categoryVisibility: null,
+      autoShareCompletedWorkouts: 'false',
+      shareRoutineTemplate: 0,
+      shareMesocycleTemplate: {},
+      sharePerformedSetDetails: false,
+    } as never;
+    social.refreshOwnProfile.mockResolvedValue(undefined);
+    await act(async () => { tree!.update(React.createElement(ProfileScreen)); });
+
+    const switches = tree!.root.findAll((node) => String(node.type) === 'Switch');
+    expect(switches.every((node) => typeof node.props.value === 'boolean' && typeof node.props.onValueChange === 'function')).toBe(true);
+    expect(tree!.root.findAll((node) => String(node.type) === 'GlassInput').every((node) => typeof node.props.value === 'string')).toBe(true);
+  });
+
+  test('alerts when focus refresh rejects asynchronously', async () => {
+    social.refreshOwnProfile.mockRejectedValue(new Error('Async offline'));
+    let tree: TestRenderer.ReactTestRenderer;
+
+    await act(async () => { tree = TestRenderer.create(React.createElement(ProfileScreen)); });
+    await act(async () => { tree!.root.find((node) => String(node.type) === 'HapticPressable' && node.props.accessibilityLabel === 'Privacidad').props.onPress(); });
+
+    expect(tree!.root.findAll((node) => String(node.type) === 'Switch')).toHaveLength(9);
+    expect(tree!.root.findAll((node) => String(node.type) === 'Text').map((node) => node.children.join(''))).toContain('Async offline');
+  });
+
+  test('saves the changed sharing toggle as a boolean while preserving profile fields', async () => {
+    let tree: TestRenderer.ReactTestRenderer;
+    await act(async () => { tree = TestRenderer.create(React.createElement(ProfileScreen)); });
+    await act(async () => { tree!.root.find((node) => String(node.type) === 'HapticPressable' && node.props.accessibilityLabel === 'Privacidad').props.onPress(); });
+
+    const routineTemplateToggle = tree!.root.find((node) => String(node.type) === 'Switch' && node.props.accessibilityLabel === 'Incluir plantilla de rutina');
+    await act(async () => { routineTemplateToggle.props.onValueChange(false); });
+    await act(async () => {
+      tree!.root.find((node) => String(node.type) === 'GlassButton' && node.props.title === 'Guardar cambios').props.onPress();
+    });
+
+    expect(social.saveProfile).toHaveBeenCalledWith({
+      alias: 'Blocker',
+      avatarId: 'capybara-athlete',
+      frameId: 'principiante',
+      titleId: 'principiante',
+      categories: {},
+      categoryVisibility: {},
+      autoShareCompletedWorkouts: true,
+      shareRoutineTemplate: false,
+      shareMesocycleTemplate: true,
+      sharePerformedSetDetails: true,
+      shareSocialActivity: true,
+      shareSocialProgress: true,
+      shareSocialConsistency: true,
+       shareSocialStatistics: true,
+       shareSocialMuscleDistribution: true,
+       muscleBalanceTargetId: 'balanced',
+    });
+  });
+
+  test('preserves unrelated categories and removes only blank editable categories when saving', async () => {
+    Object.assign(social.ownProfile as Record<string, unknown>, {
+      categories: { trainingStyle: 'Strength', about: 'Old bio', legacy: 'keep', future: 'keep too' },
+    });
+    let tree: TestRenderer.ReactTestRenderer;
+    await act(async () => { tree = TestRenderer.create(React.createElement(ProfileScreen)); });
+    await act(async () => { tree!.root.find((node) => String(node.type) === 'HapticPressable' && node.props.accessibilityLabel === 'Identidad').props.onPress(); });
+    const inputs = tree!.root.findAll((node) => String(node.type) === 'GlassInput');
+
+    await act(async () => {
+      inputs.find((node) => node.props.placeholder === 'Sobre ti')!.props.onChangeText('Updated bio');
+    });
+    await act(async () => { tree!.root.find((node) => String(node.type) === 'GlassButton' && node.props.title === 'Guardar cambios').props.onPress(); });
+
+    expect(social.saveProfile).toHaveBeenCalledWith(expect.objectContaining({
+      categories: { about: 'Updated bio', legacy: 'keep', future: 'keep too' },
+    }));
+  });
+
+  test('loads additional pending requests without treating the first page as the complete list', async () => {
+    social.requests
+      .mockResolvedValueOnce({ profiles: [{ uid: 'request-1', alias: 'First', categories: {} }], nextCursor: 'next-page' })
+      .mockResolvedValueOnce({ profiles: [{ uid: 'request-2', alias: 'Second', categories: {} }], nextCursor: null });
+    let tree: TestRenderer.ReactTestRenderer;
+    await act(async () => { tree = TestRenderer.create(React.createElement(RequestsScreen)); });
+
+    const loadMore = tree!.root.find((node) => String(node.type) === 'GlassButton' && node.props.title === 'Ver más');
+    await act(async () => { loadMore.props.onPress(); });
+
+    expect(social.requests).toHaveBeenNthCalledWith(1, null);
+    expect(social.requests).toHaveBeenNthCalledWith(2, 'next-page');
+    expect(tree!.root.findAll((node) => String(node.type) === 'Text').map((node) => node.children.join(''))).toEqual(expect.arrayContaining(['First', 'Second']));
+  });
+  test('an older feed response cannot overwrite the newest refresh', async () => {
+    let oldResponse: (value: any) => void = () => undefined;
+    social.getWorkoutRecaps.mockImplementationOnce(() => new Promise((resolve) => { oldResponse = resolve; }));
+    let tree: TestRenderer.ReactTestRenderer;
+    await act(async () => { tree = TestRenderer.create(React.createElement(CommunityFeedScreen)); });
+    social.getWorkoutRecaps.mockResolvedValueOnce({ recaps: [], nextCursor: 'fresh' });
+    await act(async () => { tree!.root.find((node) => String(node.type) === 'FlatList').props.refreshControl.props.onRefresh(); });
+    await act(async () => { oldResponse({ recaps: [], nextCursor: 'stale' }); });
+    const more = tree!.root.find((node) => String(node.type) === 'GlassButton' && node.props.title === 'Ver más');
+    await act(async () => { more.props.onPress(); });
+    expect(social.getWorkoutRecaps).toHaveBeenLastCalledWith('fresh');
+    await act(async () => tree!.unmount());
+  });
+
+  test('a delayed presence response already expired on arrival is immediately hidden', async () => {
+    const start=Date.parse('2026-09-08T12:00:00Z'); vi.setSystemTime(start);
+    let respond: (value: any[]) => void = () => undefined;
+    feedServices.listWorkoutStartActivities.mockImplementationOnce(() => new Promise((resolve) => { respond=resolve; }));
+    let tree: TestRenderer.ReactTestRenderer;
+    await act(async () => { tree=TestRenderer.create(React.createElement(CommunityFeedScreen)); });
+    vi.setSystemTime(start+2_000);
+    await act(async () => { respond([{id:'late-presence',authorAlias:'Expired athlete',routineName:'Upper',startedAt:new Date(start).toISOString(),expiresAt:new Date(start+1_000).toISOString(),isAuthor:false}]); });
+    expect(tree!.root.findAll((node) => String(node.type) === 'Text').map((node) => node.children.join('')).join(' ')).not.toContain('Expired athlete');
+    await act(async () => tree!.unmount());
+    vi.useRealTimers();
+  });
+
+});

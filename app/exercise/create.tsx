@@ -44,12 +44,14 @@ export default function ExerciseFormScreen() {
     addExercise,
     createVariant,
     deleteVariant,
+    definitions,
     getExercise,
     renameVariant,
     updateExercise,
     variants,
   } = useData();
   const existingExercise = useMemo(() => (exerciseId ? getExercise(exerciseId) : undefined), [exerciseId, getExercise]);
+  const isSystemDefinition = definitions?.some((definition) => definition.id === exerciseId && definition.source.kind === 'system') ?? false;
   const [name, setName] = useState('');
   const [muscleGroups, setMuscleGroups] = useState<MuscleGroup[]>(parsePrefilledGroups(muscleGroupsParam));
   const [primaryMuscle, setPrimaryMuscle] = useState<MuscleGroup | null>(null);
@@ -111,6 +113,10 @@ export default function ExerciseFormScreen() {
   };
 
   const save = async () => {
+    if (isSystemDefinition) {
+      Alert.alert('Definición protegida', 'Las definiciones del sistema no se editan. Ajusta la carga, repeticiones y series dentro de una rutina.');
+      return;
+    }
     if (!name.trim()) {
       Alert.alert('Validación', 'El nombre no puede estar vacío.');
       return;
@@ -220,7 +226,7 @@ export default function ExerciseFormScreen() {
         <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ flex: 1 }}>
           <ScrollView contentContainerStyle={styles.scroll} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
             <Text style={[styles.title, { color: theme.text }]}>{existingExercise ? 'Editar ejercicio' : 'Crear ejercicio'}</Text>
-            <Text style={[styles.subtitle, { color: theme.textMuted }]}>Nombre, grupos musculares, variante y series por defecto.</Text>
+              <Text style={[styles.subtitle, { color: theme.textMuted }]}>{isSystemDefinition ? 'Definición del sistema protegida. Edita prescripciones en una rutina.' : 'Nombre, grupos musculares, variante y series por defecto.'}</Text>
 
             <GlassCard style={styles.section}>
               <Text style={[styles.label, { color: theme.textMuted }]}>Nombre</Text>
@@ -349,7 +355,7 @@ export default function ExerciseFormScreen() {
               ))}
             </GlassCard>
 
-            <GlassButton title={existingExercise ? 'Guardar cambios' : 'Crear ejercicio'} onPress={save} disabled={isMutating} loading={isMutating} />
+              <GlassButton title={existingExercise ? 'Guardar cambios' : 'Crear ejercicio'} onPress={save} disabled={isMutating || isSystemDefinition} loading={isMutating} />
             <View style={styles.spacer} />
             <GlassButton title="Cancelar" onPress={() => router.back()} variant="secondary" disabled={isMutating} />
           </ScrollView>

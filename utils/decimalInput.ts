@@ -14,6 +14,6 @@ export function normalizeDecimalInput(value: string): number | null {
 
 export function buildDecimalDraftMap(items: readonly { id: string; weight: number }[]): DecimalDraftMap {
   return Object.fromEntries(
-    items.map((item) => [item.id, item.weight > 0 ? String(item.weight) : '']),
+    items.map((item) => [item.id, Number.isFinite(item.weight) && item.weight >= 0 ? String(item.weight) : '']),
   );
 }

@@ -1,5 +1,6 @@
+import { useLocalAtmosphere } from '../hooks/useLocalAtmosphere';
 import React, { createContext, useContext, useMemo } from 'react';
-import { AppTheme } from '../types';
+import { AppTheme, LegacyAlias } from '../types';
 import { getShopTheme } from '../constants/shopThemes';
 import { resolveActiveTheme, resolveDualThemes } from '../utils/theme';
 import { useAuth } from './AuthContext';
@@ -16,21 +17,25 @@ interface ThemeContextValue {
   isCombined: boolean;
   isShopTheme: boolean;
   isPreview: boolean;
+  backgroundId: string | null;
 }
 
 const ThemeContext = createContext<ThemeContextValue | null>(null);
 
 export function ThemeProvider({ children }: { children: React.ReactNode }) {
   const { user } = useAuth();
+  const atmosphere = useLocalAtmosphere();
   const {
     equippedThemeId,
     previewThemeId,
+    equippedBackgroundId,
+    previewBackgroundId,
     combineWithPartner,
     partnerEquippedThemeId,
     selfEquippedThemeId,
   } = useShop();
 
-  const profile = user ?? 'rodaja';
+  const profile: LegacyAlias = user === 'brisas' ? 'brisas' : 'rodaja';
   const activeId = previewThemeId ?? equippedThemeId;
   const theme = resolveActiveTheme(profile, activeId);
 
@@ -58,7 +63,7 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
 
   return (
     <ThemeContext.Provider
-      value={{ theme, dualThemes, isCombined, isShopTheme, isPreview: !!previewThemeId }}
+      value={{ theme, dualThemes, isCombined, isShopTheme, isPreview: !!previewThemeId, backgroundId: previewBackgroundId ?? atmosphere ?? equippedBackgroundId }}
     >
       {children}
     </ThemeContext.Provider>

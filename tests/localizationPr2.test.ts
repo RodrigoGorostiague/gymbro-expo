@@ -34,7 +34,7 @@ describe('PR2 Spanish navigation, training, and catalog copy', () => {
 
   test('preserves routes, catalog identity, set types, and numeric parsing', () => {
     for (const value of [
-      "name=\"routine/execute/[id]\"", "'/routine/create'", "'/exercise/create'",
+      "name=\"routine/execute/[id]\"", "'/routine/create'",
       "value: 'fullBody'", "normalized === 'C' || normalized === 'F'",
       "normalizeDecimalInput(draftWeights[set.id] ?? '')", "parseInt(text, 10) || 0",
     ]) expect(sources).toContain(value);

@@ -1,16 +1,61 @@
 import React from 'react';
+import { readFileSync } from 'node:fs';
 import { beforeEach, describe, expect, test, vi } from 'vitest';
-import { changeText, findButton, findText, mockRouter, press, render, resetRuntimeHarness, setMockData, setMockParams } from './helpers/runtimeHarness';
+import { changeText, findButton, findText, mockAlert, mockRouter, press, render, resetRuntimeHarness, setMockData, setMockParams } from './helpers/runtimeHarness';
 import CreateMesocycleScreen from '../app/mesocycle/create';
 import MesocycleDetailScreen from '../app/mesocycle/[id]';
 import MesocycleSummaryScreen from '../app/mesocycle/summary/[id]';
+import MesocyclesScreen from '../app/(tabs)/mesocycles';
+import JointWorkoutScreen from '../app/community/joint-workout';
 import { deriveFirstEntryStartDate } from '../utils/mesocycles';
+const listJointWorkouts = vi.hoisted(() => vi.fn());
+const respondToJointInvite = vi.hoisted(() => vi.fn());
+vi.mock('../services/workoutStartActivity', () => ({ publishWorkoutStartActivity: vi.fn(async () => undefined) }));
+vi.mock('../services/jointWorkouts', () => ({ listJointWorkouts, respondToJointInvite }));
 const subject = { id: 'mesocycle-1', name: 'Block', goal: '', status: 'active' as const, durationWeeks: 1, startDate: '2026-07-26', createdAt: '', weeks: [{ id: 'week-1', weekNumber: 1, entries: [{ id: 'entry-1', ref: { routineId: 'routine-1', routineName: 'Upper', source: 'local' as const }, order: 1 }, { id: 'rest-1', kind: 'rest' as const }] }] };
 const routine = { id: 'routine-1', name: 'Upper', muscleGroups: ['Pecho', 'Espalda'], exercises: [{ id: 'exercise-1', name: 'Press', sets: [] }, { id: 'exercise-2', name: 'Remo', sets: [] }], createdAt: '' };
+// The screens use the device locale; keep fixture dates fixed without assuming Spanish ICU defaults.
+const scheduleDateLabel = (year: number, month: number, day: number) => {
+  const date = new Date(year, month - 1, day, 12);
+  return `${new Intl.DateTimeFormat(undefined, { weekday: 'long' }).format(date)} · ${new Intl.DateTimeFormat(undefined, { month: 'long', day: 'numeric' }).format(date)}`;
+};
 beforeEach(() => { vi.clearAllMocks(); vi.setSystemTime(new Date(2026, 6, 26, 12)); resetRuntimeHarness(); setMockParams({ id: 'mesocycle-1' }); });
 describe('mesocycle entry navigation', () => {
-  test('passes entry lineage to routine execution', () => { setMockData({ getMesocycle: vi.fn(() => subject), routines: [routine], attempts: [], resolvePlannedRoutine: vi.fn(() => ({ id: 'routine-1' })) }); const screen = render(React.createElement(MesocycleSummaryScreen)); const [play] = screen.root.findAll((node) => node.props.accessibilityLabel === 'Ejecutar Upper'); press(play); expect(mockRouter.push).toHaveBeenCalledWith({ pathname: '/routine/execute/[id]', params: { id: 'routine-1', mesocycleId: 'mesocycle-1', weekNumber: '1', plannedSessionId: 'entry-1' } }); });
+  test('passes the planned routine reference and lineage to execution, not a resolved snapshot ID', () => { setMockData({ getMesocycle: vi.fn(() => subject), routines: [routine], attempts: [], resolvePlannedRoutine: vi.fn(() => ({ ...routine, id: 'snapshot-copy' })) }); const screen = render(React.createElement(MesocycleSummaryScreen)); const [play] = screen.root.findAll((node) => node.props.accessibilityLabel === 'Ejecutar Upper'); press(play); expect(mockRouter.push).toHaveBeenCalledWith({ pathname: '/routine/execute/[id]', params: { id: 'routine-1', mesocycleId: 'mesocycle-1', weekNumber: '1', plannedSessionId: 'entry-1' } }); });
+  test('shares the summary mesocycle with its id and name', () => { setMockData({ getMesocycle: vi.fn(() => subject), routines: [routine], attempts: [], resolvePlannedRoutine: vi.fn(() => ({ id: 'routine-1' })) }); const screen = render(React.createElement(MesocycleSummaryScreen)); press(screen.root.find((node) => node.props.accessibilityLabel === 'Compartir Block')); expect(mockRouter.push).toHaveBeenCalledWith({ pathname: '/community/share-plan', params: { kind: 'mesocycle', id: 'mesocycle-1', name: 'Block' } }); });
   test('renders rest without an execute CTA', () => { setMockData({ getMesocycle: vi.fn(() => subject), routines: [routine], attempts: [], resolvePlannedRoutine: vi.fn(() => ({ id: 'routine-1' })) }); const screen = render(React.createElement(MesocycleSummaryScreen)); expect(findText(screen.root, 'Día de descanso')).toBeTruthy(); });
+});
+
+describe('joint workout mesocycle navigation', () => {
+  const alternateRoutine = { ...routine, id: 'routine-2', name: 'Lower' };
+  const invitation = { id: 'joint-1', createdAt: '', participants: [{ id: 'self', alias: 'Yo', avatarId: 'capiboy', status: 'invited' as const, isSelf: true }, { id: 'partner', alias: 'Bro', avatarId: 'capigirl', status: 'active' as const }] };
+
+  beforeEach(() => {
+    listJointWorkouts.mockResolvedValue([invitation]);
+    respondToJointInvite.mockResolvedValue(undefined);
+  });
+
+  test('accepts with the current active workout and preserves its lineage without a routine selector', async () => {
+    const updateActiveWorkout = vi.fn().mockResolvedValue(undefined);
+    setMockData({ activeWorkoutDraft: { attemptId: 'attempt-1', routineId: 'routine-1', lineage: { mesocycleId: 'mesocycle-1', weekNumber: 1, plannedSessionId: 'entry-1' } }, associateActiveWorkoutJoint: updateActiveWorkout });
+    const screen = render(React.createElement(JointWorkoutScreen));
+
+    await vi.waitFor(() => expect(findButton(screen.root, 'Aceptar con mi entrenamiento activo')).toBeTruthy());
+    press(findButton(screen.root, 'Aceptar con mi entrenamiento activo'));
+
+    await vi.waitFor(() => expect(mockRouter.replace).toHaveBeenCalledWith({ pathname: '/routine/execute/[id]', params: { id: 'routine-1', jointWorkoutId: 'joint-1', mesocycleId: 'mesocycle-1', weekNumber: '1', plannedSessionId: 'entry-1' } }));
+    expect(respondToJointInvite).toHaveBeenCalledWith('joint-1', true);
+    expect(updateActiveWorkout).toHaveBeenCalledWith(expect.any(String), 'attempt-1', 'joint-1');
+  });
+
+  test('does not render a routine-selection UI for invitations', async () => {
+    setMockData({ activeWorkoutDraft: { routineId: 'routine-2' }, updateActiveWorkout: vi.fn() });
+    const screen = render(React.createElement(JointWorkoutScreen));
+
+    await vi.waitFor(() => expect(findButton(screen.root, 'Aceptar con mi entrenamiento activo')).toBeTruthy());
+    expect(screen.root.findAll((node) => String(node.props.title ?? '').includes('Elegir otra rutina propia'))).toHaveLength(0);
+    expect(screen.root.findAll((node) => String(node.props.title ?? '').includes('Usar plan de hoy'))).toHaveLength(0);
+  });
 });
 
 describe('mesocycle first-entry start date', () => {
@@ -23,36 +68,84 @@ describe('mesocycle first-entry start date', () => {
   });
 });
 
-describe('mesocycle creation schedule selection', () => {
-  test('creates a first-week routine or rest entry with its derived start date', async () => {
+describe('mesocycle creation', () => {
+  test('creates an empty schedule for detailed planning after creation', async () => {
     const addMesocycle = vi.fn(async (value) => ({ ...value, id: 'created' }));
-    setMockData({ routines: [routine], addMesocycle });
+    setMockData({ addMesocycle });
     const screen = render(React.createElement(CreateMesocycleScreen));
 
     changeText(screen.root.findAll((node) => (node.type as any) === 'GlassInput')[0], 'New block');
-    press(screen.root.find((node) => node.props.accessibilityLabel === 'Programar Upper'));
     press(findButton(screen.root, 'Crear mesociclo'));
 
     await vi.waitFor(() => expect(addMesocycle).toHaveBeenCalled());
-    expect(addMesocycle.mock.calls[0][0].startDate).toBe('2026-07-26');
-    expect(addMesocycle.mock.calls[0][0].weeks[0].entries[0]).toMatchObject({
-      ref: { routineId: 'routine-1', routineName: 'Upper', source: 'local' },
-    });
+    expect(addMesocycle.mock.calls[0][0].startDate).toBeUndefined();
+    expect(addMesocycle.mock.calls[0][0].weeks[0].entries).toEqual([]);
+  });
 
-    resetRuntimeHarness();
-    const addRestMesocycle = vi.fn(async (value) => ({ ...value, id: 'rest-created' }));
-    setMockData({ routines: [routine], addMesocycle: addRestMesocycle });
-    const restScreen = render(React.createElement(CreateMesocycleScreen));
-    changeText(restScreen.root.findAll((node) => (node.type as any) === 'GlassInput')[0], 'Rest block');
-    press(restScreen.root.find((node) => node.props.accessibilityLabel === 'Programar descanso'));
-    press(findButton(restScreen.root, 'Crear mesociclo'));
-    await vi.waitFor(() => expect(addRestMesocycle).toHaveBeenCalled());
-    expect(addRestMesocycle.mock.calls[0][0].weeks[0].entries[0]).toMatchObject({ kind: 'rest' });
-    expect(addRestMesocycle.mock.calls[0][0].startDate).toBe('2026-07-26');
+  test('validates overlapping dates against the data-context mesocycle collection before saving', () => {
+    const source = readFileSync(new URL('../app/mesocycle/create.tsx', import.meta.url), 'utf8');
+    expect(source).toContain('findOverlappingMesocycle<Mesocycle>');
+    expect(source).toContain('findOverlappingMesocycle<Mesocycle>({ ...candidate');
+    expect(source).toContain('}, mesocycles)');
+  });
+});
+
+describe('mesocycle overview', () => {
+  test('keeps active blocks visible and detailed progress collapsed until requested', () => {
+    const completed = { ...subject, id: 'completed', status: 'completed' as const };
+    setMockData({ mesocycles: [completed, subject], attempts: [] });
+    const screen = render(React.createElement(MesocyclesScreen));
+
+    expect(findText(screen.root, 'Activo')).toBeTruthy();
+    expect(screen.root.findAll((node) => node.props.accessibilityLabel === 'Progreso por semana: 0%')).toHaveLength(0);
+    press(screen.root.findAll((node) => node.props.accessibilityLabel === 'Desplegar estadísticas del mesociclo')[0]);
+    expect(screen.root.findAll((node) => node.props.accessibilityLabel === 'Progreso por semana: 0%').length).toBeGreaterThan(0);
+    const source = readFileSync(new URL('../app/(tabs)/mesocycles/index.tsx', import.meta.url), 'utf8');
+    expect(source).toContain('groupMesocyclesForList(mesocycles)');
+  });
+
+  test('offers deletion only for unused drafts', () => {
+    const draft = { ...subject, id: 'draft', name: 'Draft', status: 'draft' as const };
+    const attempted = { ...draft, id: 'attempted', name: 'Attempted' };
+    const completed = { ...subject, id: 'completed', name: 'Completed', status: 'completed' as const };
+    setMockData({ mesocycles: [draft, attempted, completed], attempts: [{ lineage: { mesocycleId: attempted.id, weekNumber: 1, plannedSessionId: 'entry-1' }, exercises: [], completion: { status: 'partial' } } as any], routines: [] });
+    const screen = render(React.createElement(MesocyclesScreen));
+    press(screen.root.find((node) => node.props.accessibilityLabel === 'Mostrar Borradores'));
+    press(screen.root.find((node) => node.props.accessibilityLabel === 'Mostrar Completados'));
+
+    expect(new Set(screen.root.findAll((node) => String(node.props.accessibilityLabel ?? '').startsWith('Eliminar ')).map((node) => node.props.accessibilityLabel))).toEqual(new Set(['Eliminar Draft']));
   });
 });
 
 describe('mesocycle edit schedule selection', () => {
+  test('uses independent non-nestable draggable lists inside the native editor scroll container', () => {
+    setMockData({ getMesocycle: vi.fn(() => subject), routines: [routine], attempts: [], updateMesocycle: vi.fn() });
+    const screen = render(React.createElement(MesocycleDetailScreen));
+
+    const source = readFileSync(new URL('../app/mesocycle/[id].tsx', import.meta.url), 'utf8');
+    expect(source).toContain('<NestableScrollContainer');
+    expect(source).toContain('<NestableDraggableFlatList');
+    expect(source).toContain('scrollEnabled={false}');
+    expect(source).toContain('dragItemOverflow={false}');
+  });
+
+  test('keeps a selected lifecycle status in the draft until planning is saved', async () => {
+    const updateMesocycle = vi.fn(async (_value: any) => undefined);
+    const draft = { ...subject, status: 'draft' as const };
+    setMockData({ getMesocycle: vi.fn(() => draft), routines: [routine], attempts: [], updateMesocycle });
+    const screen = render(React.createElement(MesocycleDetailScreen));
+
+    expect(findText(screen.root, 'Las sesiones planificadas todavía no se pueden ejecutar.')).toBeTruthy();
+    press(findButton(screen.root, 'Activar'));
+    expect(updateMesocycle).not.toHaveBeenCalled();
+    expect(findText(screen.root, 'Las sesiones pendientes están habilitadas.')).toBeTruthy();
+    expect(findText(screen.root, 'Completá al menos un entrenamiento del mesociclo antes de cerrarlo.')).toBeTruthy();
+
+    press(findButton(screen.root, 'Guardar planificación'));
+
+    await vi.waitFor(() => expect(updateMesocycle).toHaveBeenCalledWith(expect.objectContaining({ status: 'active' })));
+  });
+
   test('persists a selected routine with a derived first-entry date', async () => {
     const updateMesocycle = vi.fn(async (_value: any) => undefined);
     const empty = { ...subject, startDate: undefined, weeks: [{ ...subject.weeks[0], entries: [] }] };
@@ -70,14 +163,49 @@ describe('mesocycle edit schedule selection', () => {
     expect(saved).toMatchObject({ startDate: '2026-07-26' });
     expect(saved.weeks[0].entries[0]).toMatchObject({ ref: { routineId: 'routine-1' } });
   });
+
+  test('shows the persisted start date and reports save failures', async () => {
+    const updateMesocycle = vi.fn(async () => { throw new Error('offline'); });
+    setMockData({ getMesocycle: vi.fn(() => subject), mesocycles: [subject], routines: [routine], attempts: [], updateMesocycle });
+    const screen = render(React.createElement(MesocycleDetailScreen));
+
+    const trigger = screen.root.find((node) => node.props.testID === 'mesocycle-edit-start-date-picker-trigger');
+    expect(trigger.findAll((node) => String(node.type) === 'Text')[0].children.join('')).toBe(subject.startDate);
+    press(findButton(screen.root, 'Guardar planificación'));
+    await vi.waitFor(() => expect(mockAlert.alert).toHaveBeenCalledWith('No se pudo guardar', 'offline'));
+  });
+
+  test('allows the same routine to be scheduled more than once in a week', async () => {
+    const updateMesocycle = vi.fn(async (_value: any) => undefined);
+    const empty = { ...subject, startDate: undefined, weeks: [{ ...subject.weeks[0], entries: [] }] };
+    setMockData({ getMesocycle: vi.fn(() => empty), routines: [routine], attempts: [], updateMesocycle });
+    const screen = render(React.createElement(MesocycleDetailScreen));
+
+    press(findButton(screen.root, 'Agregar rutina'));
+    press(screen.root.find((node) => node.props.accessibilityLabel === 'Programar Upper'));
+    press(screen.root.find((node) => node.props.accessibilityLabel === 'Agregar otra sesión de Upper'));
+    press(findButton(screen.root, 'Guardar planificación'));
+
+    await vi.waitFor(() => expect(updateMesocycle).toHaveBeenCalled());
+    const entries = updateMesocycle.mock.calls[0]![0].weeks[0].entries;
+    expect(entries.filter((entry: any) => 'ref' in entry && entry.ref.routineId === 'routine-1')).toHaveLength(2);
+  });
 });
 
 describe('mesocycle schedule presentation', () => {
+  test('warns that a completed mesocycle cannot grant its XP reward again after editing', () => {
+    const completed = { ...subject, status: 'completed' as const };
+    setMockData({ getMesocycle: vi.fn(() => completed), routines: [routine], attempts: [], updateMesocycle: vi.fn() });
+    const screen = render(React.createElement(MesocycleDetailScreen));
+
+    expect(findText(screen.root, 'La recompensa de XP se acreditó una única vez. Los cambios posteriores no generan una nueva recompensa.')).toBeTruthy();
+  });
+
   test('shows dated routine context and an accessible compact remove action in the editor', () => {
     const updateMesocycle = vi.fn();
     setMockData({ getMesocycle: vi.fn(() => subject), routines: [routine], attempts: [], updateMesocycle, resolvePlannedRoutine: vi.fn(() => routine) });
     const screen = render(React.createElement(MesocycleDetailScreen));
-    expect(findText(screen.root, 'domingo · 26 de julio')).toBeTruthy();
+    expect(findText(screen.root, scheduleDateLabel(2026, 7, 26))).toBeTruthy();
     expect(findText(screen.root, 'Pecho · Espalda · 2 ejercicios')).toBeTruthy();
     const remove = screen.root.find((node) => node.props.accessibilityLabel === 'Quitar Upper del plan');
     expect(remove.props.accessibilityHint).toBe('Elimina esta entrada sin cambiar el orden de las demás.');
@@ -104,7 +232,7 @@ describe('mesocycle schedule presentation', () => {
 
     const screen = render(React.createElement(MesocycleDetailScreen));
 
-    expect(findText(screen.root, 'domingo · 2 de agosto')).toBeTruthy();
+    expect(findText(screen.root, scheduleDateLabel(2026, 8, 2))).toBeTruthy();
   });
 
   test('renders routine progress and an accessible play action for a 70% partial attempt', () => {
@@ -136,6 +264,16 @@ describe('mesocycle schedule presentation', () => {
     expect(screen.root.findAll((node) => node.props.accessibilityLabel === 'Ejecutar Upper')).toHaveLength(0);
   });
 
+  test('hides execution for a routine whose planned date has passed', () => {
+    const past = { ...subject, startDate: '2026-07-25' };
+    setMockData({ getMesocycle: vi.fn(() => past), routines: [routine], attempts: [], resolvePlannedRoutine: vi.fn(() => routine) });
+
+    const screen = render(React.createElement(MesocycleSummaryScreen));
+
+    expect(screen.root.findAll((node) => node.props.accessibilityLabel === 'Ejecutar Upper')).toHaveLength(0);
+    expect(findText(screen.root, 'La fecha programada para esta sesión ya pasó.')).toBeTruthy();
+  });
+
   test('renders dated temporal recovery guidance without routine actions on rest entries', () => {
     const restToday = {
       ...subject,
@@ -148,8 +286,8 @@ describe('mesocycle schedule presentation', () => {
 
     const screen = render(React.createElement(MesocycleSummaryScreen));
 
-    expect(findText(screen.root, 'domingo · 26 de julio')).toBeTruthy();
+    expect(findText(screen.root, scheduleDateLabel(2026, 7, 26))).toBeTruthy();
     expect(findText(screen.root, 'Hoy es un día de recuperación.')).toBeTruthy();
-    expect(screen.root.findAll((node) => node.props.accessibilityRole === 'button')).toHaveLength(0);
+    expect(screen.root.findAll((node) => node.props.accessibilityLabel === 'Ejecutar Upper')).toHaveLength(0);
   });
 });

@@ -1,0 +1,35 @@
+import React from 'react';
+import TestRenderer, { act } from 'react-test-renderer';
+import { afterEach, expect, test, vi } from 'vitest';
+import { SimpleLineChart } from '../components/LineChart';
+import { ComparisonBarChart } from '../components/ProgressCharts';
+import { nearestChartIndex } from '../constants/chartDesign';
+const motion = vi.hoisted(() => ({ active: false }));
+vi.mock('../hooks/useAnimationActivity', () => ({ useAnimationActivity: () => motion.active }));
+vi.mock('../context/ThemeContext', () => ({ useTheme: () => ({ theme: { text: '#FFF', textMuted: '#AAA', primary: '#0FA' } }) }));
+globalThis.IS_REACT_ACT_ENVIRONMENT = true;
+const trees: TestRenderer.ReactTestRenderer[] = [];
+const render = (node: React.ReactElement) => { let tree!: TestRenderer.ReactTestRenderer; act(() => { tree = TestRenderer.create(node); }); trees.push(tree); return tree; };
+afterEach(() => { act(() => trees.splice(0).forEach((tree) => tree.unmount())); motion.active = false; });
+const points = [10, 20, 15].map((maxWeight, index) => ({ date: `2026-09-0${index + 1}`, label: `Día ${index + 1}`, maxWeight, totalReps: 8, tonnage: maxWeight * 8 }));
+test('touch selects a real line point and accessible buttons offer the same values with units', () => {
+    const tree = render(React.createElement(SimpleLineChart, { data: points, dataKey: "maxWeight", label: "Carga", unit: "kg" }));
+    const touch = tree.root.find((node) => String(node.type) === 'View' && node.props.testID === 'line-chart-touch');
+    act(() => { touch.props.onLayout({ nativeEvent: { layout: { width: 320 } } }); });
+    act(() => { touch.props.onTouchEnd({ nativeEvent: { locationX: 310 } }); });
+    const detail = () => tree.root.find((node) => String(node.type) === 'Text' && node.props.accessibilityLiveRegion === 'polite');
+    expect(detail().children.join('')).toBe('Día 3: 15 kg');
+    act(() => { tree.root.find((node) => String(node.type) === 'Pressable' && node.props.accessibilityLabel === 'Día 1: 10 kg').props.onPress(); });
+    expect(detail().children.join('')).toBe('Día 1: 10 kg');
+    const line = tree.root.find((node) => String(node.type) === 'VictoryLine');
+    expect(line.props.curveType).toBe('linear');
+    expect(line.props.animate).toBeUndefined();
+});
+test('mixed measurement units produce independent comparison scales and static truthful values', () => {
+    const palette = { primary: '#0FA', secondary: '#AAF', accent: '#FFF', textMuted: '#AAA', glassBorder: '#333' };
+    const tree = render(React.createElement(ComparisonBarChart, { palette: palette, accessibilityLabel: "Comparaci\u00F3n", data: [{ label: 'Sesiones', current: 3, previous: 2, unit: 'sesiones' }, { label: 'Adherencia', current: 80, previous: 90, unit: '%' }] }));
+    expect(tree.root.findAll((node) => String(node.type) === 'CartesianChart')).toHaveLength(2);
+    expect(tree.root.findAll((node) => String(node.type) === 'VictoryBar').every((node) => node.props.animate === undefined)).toBe(true);
+    expect(nearestChartIndex(1000, 300, 3)).toBe(2);
+    expect(nearestChartIndex(-30, 300, 3)).toBe(0);
+});
