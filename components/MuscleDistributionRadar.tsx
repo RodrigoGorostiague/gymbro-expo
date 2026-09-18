@@ -3,7 +3,7 @@ import { CHART_DESIGN } from '../constants/chartDesign';
 import React, { useEffect, useRef, useState } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { MuscleDistributionRadarCanvas } from './MuscleDistributionRadarCanvas';
-import Animated, { cancelAnimation, Easing, useAnimatedStyle, useSharedValue, withDelay, withTiming } from 'react-native-reanimated';
+import Animated, { cancelAnimation, Easing, useAnimatedStyle, useSharedValue, withTiming } from 'react-native-reanimated';
 import type { MuscleDistributionEntry } from '../services/socialGraph';
 import type { AppTheme } from '../types';
 import { useTheme } from '../context/ThemeContext';
@@ -13,7 +13,7 @@ const SIZE = 260;
 const CENTER = SIZE / 2;
 const RADIUS = 82;
 
-export function MuscleDistributionRadar({ data, reference, palette }: { data: readonly MuscleDistributionEntry[]; reference?: readonly MuscleDistributionEntry[]; palette?: AppTheme }) {
+export function MuscleDistributionRadar({ data, reference, palette, scaleMax, unit = 'puntos de estímulo', referenceLabel = 'objetivo', periodLabel = 'últimos 90 días', compactLabels = false, onSelect }: { data: readonly MuscleDistributionEntry[]; reference?: readonly MuscleDistributionEntry[]; palette?: AppTheme; scaleMax?: number; unit?: string; referenceLabel?: string; periodLabel?: string; compactLabels?: boolean; onSelect?: (id: string) => void }) {
   const { theme: activeTheme } = useTheme();
   const theme = palette ?? activeTheme;
   const [width, setWidth] = useState(0);
@@ -23,16 +23,13 @@ export function MuscleDistributionRadar({ data, reference, palette }: { data: re
   const priorData = useRef<string | null>(null);
   const populated = data.filter((entry) => entry.value > 0);
   const max = Math.max(...data.map(({ value }) => value), 1);
-  const total = data.reduce((sum, entry) => sum + entry.value, 0);
   const referenceById = new Map(reference?.map((entry) => [entry.id, entry.value]));
   const referenceTotal = reference?.reduce((sum, entry) => sum + entry.value, 0) ?? 0;
-  const comparisonMax = referenceTotal > 0 && total > 0
-    ? Math.max(...data.map((entry) => entry.value / total), ...data.map((entry) => (referenceById.get(entry.id) ?? 0) / referenceTotal), 1e-6)
-    : max;
+  const comparisonMax = scaleMax ?? Math.max(max, ...referenceById.values());
   const scale = Math.min(1, width / SIZE || 1);
-  const labels = data.map((entry, index) => ({ ...entry, ...radarPoint(index, data.length, RADIUS + 31, CENTER) }));
-  const shapePoints = radarPoints(data.map((entry) => referenceTotal > 0 && total > 0 ? entry.value / total : entry.value), comparisonMax, RADIUS, CENTER, 8);
-  const referencePoints = radarPoints(data.map((entry) => (referenceById.get(entry.id) ?? 0) / Math.max(referenceTotal, 1)), comparisonMax, RADIUS, CENTER, 0);
+  const labels = data.map((entry, index) => ({ ...entry, index, ...radarPoint(index, data.length, RADIUS + 31, CENTER) }));
+  const shapePoints = radarPoints(data.map((entry) => entry.value), comparisonMax, RADIUS, CENTER, 0);
+  const referencePoints = radarPoints(data.map((entry) => referenceById.get(entry.id) ?? 0), comparisonMax, RADIUS, CENTER, 0);
   const rings = [.25, .5, .75, 1].map((ratio) => data.map((_, index) => radarPoint(index, data.length, RADIUS * ratio, CENTER)));
   const axes = data.map((_, index) => radarPoint(index, data.length, RADIUS, CENTER));
   const summary = [...populated].sort((left, right) => right.value - left.value)[0];
@@ -49,14 +46,14 @@ export function MuscleDistributionRadar({ data, reference, palette }: { data: re
     return () => cancelAnimation(reveal);
   }, [animationActive, signature, reveal]);
   const revealStyle = useAnimatedStyle(() => ({ opacity: reveal.value, transform: [{ scale: 0.88 + reveal.value * 0.12 }] }));
-  if (!populated.length) return <View style={styles.empty}><Text style={{ color: theme.textMuted }}>Sin ejercicios completados en los últimos 90 días.</Text></View>;
-  return <View accessibilityRole="summary" accessibilityLabel={`Distribución de estímulo muscular de los últimos 90 días. Mayor foco: ${summary.label}, ${summary.value.toFixed(2)} puntos.${reference ? ' Incluye el objetivo de referencia.' : ''}`} onLayout={({ nativeEvent }) => setWidth(nativeEvent.layout.width)}>
+  if (!populated.length) return <View style={styles.empty}><Text style={{ color: theme.textMuted }}>Sin ejercicios completados en los {periodLabel}.</Text></View>;
+  return <View accessibilityRole="summary" accessibilityLabel={`Distribución muscular de los ${periodLabel}. Mayor foco: ${summary.label}, ${summary.value.toFixed(2)} ${unit === 'puntos de estímulo' ? 'puntos' : unit}.${reference ? ` Incluye ${referenceLabel === 'objetivo' ? 'el objetivo de referencia' : referenceLabel}.` : ''}`} onLayout={({ nativeEvent }) => setWidth(nativeEvent.layout.width)}>
     <Animated.View style={[styles.canvasWrap, { width: SIZE * scale, height: SIZE * scale }, revealStyle]}>
-      <MuscleDistributionRadarCanvas size={SIZE} center={CENTER} radius={RADIUS} rings={rings} axes={axes} shape={shapePoints} reference={referenceTotal > 0 ? referencePoints : undefined} focusedIndex={data.findIndex((entry) => entry.id === focusedId)} theme={theme} />
-      {labels.map((entry) => <Pressable key={entry.id} accessibilityRole="button" accessibilityLabel={`${entry.label}: ${entry.value.toFixed(2)} puntos de estímulo${referenceTotal ? `; objetivo ${(((referenceById.get(entry.id) ?? 0) / referenceTotal) * 100).toFixed(0)}%` : ''}`} onPress={() => setFocusedId(entry.id)} style={[styles.label, { left: entry.x * scale - 36, top: entry.y * scale - 10 }]}><Text numberOfLines={1} style={[styles.labelText, { color: focusedId === entry.id ? theme.accent : theme.text }]}>{entry.label} {entry.value.toFixed(1)}</Text></Pressable>)}
+      <MuscleDistributionRadarCanvas size={SIZE} drawScale={scale} center={CENTER} radius={RADIUS} rings={rings} axes={axes} shape={shapePoints} reference={referenceTotal > 0 ? referencePoints : undefined} focusedIndex={data.findIndex((entry) => entry.id === focusedId)} theme={theme} />
+      {labels.map((entry) => <Pressable key={entry.id} accessibilityRole="button" accessibilityLabel={`${entry.label}: ${entry.value.toFixed(2)} ${unit}${referenceTotal ? `; ${referenceLabel} ${(referenceById.get(entry.id) ?? 0).toFixed(1)} ${unit}` : ''}`} onPress={() => { setFocusedId(entry.id); onSelect?.(entry.id); }} style={[styles.label, { width: compactLabels ? 32 : 72, left: entry.x * scale - (compactLabels ? 16 : 36), top: entry.y * scale - 24 }]}><Text numberOfLines={1} style={[styles.labelText, { color: focusedId === entry.id ? theme.accent : theme.text }]}>{compactLabels ? entry.index + 1 : `${entry.label} ${entry.value.toFixed(1)}`}</Text></Pressable>)}
     </Animated.View>
-    {focusedId ? <Text accessibilityLiveRegion="polite" style={{ color: theme.text, fontSize: CHART_DESIGN.detail, fontWeight: '700' }}>{data.find((entry) => entry.id === focusedId)?.label}: {data.find((entry) => entry.id === focusedId)?.value.toFixed(2)} puntos de estímulo{referenceTotal ? ` · objetivo ${(((referenceById.get(focusedId) ?? 0) / referenceTotal) * 100).toFixed(0)}%` : ''}</Text> : null}
-    <Text style={[styles.hint, { color: theme.textMuted }]}>{referenceTotal ? 'Área de color: estímulo realizado. Contorno: distribución objetivo.' : 'Cada eje suma estímulo ponderado por relevancia.'}</Text>
+    {focusedId ? <Text accessibilityLiveRegion="polite" style={{ color: theme.text, fontSize: CHART_DESIGN.detail, fontWeight: '700' }}>{data.find((entry) => entry.id === focusedId)?.label}: {data.find((entry) => entry.id === focusedId)?.value.toFixed(2)} {unit}{referenceTotal ? ` · ${referenceLabel} ${(referenceById.get(focusedId) ?? 0).toFixed(1)} ${unit}` : ''}</Text> : null}
+    <Text style={[styles.hint, { color: theme.textMuted }]}>{scaleMax ? `Escala: 0–${comparisonMax.toFixed(1)} ${unit}. Área: realizado.${reference ? ` Contorno fino: ${referenceLabel}.` : ''}` : referenceTotal ? 'Área de color: estímulo realizado. Contorno: distribución objetivo.' : 'Cada eje suma estímulo ponderado por relevancia.'}</Text>
   </View>;
 }
 

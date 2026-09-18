@@ -26,7 +26,7 @@ export function JointParticipantProfileCard({ participant, children, onPress, se
     accent: theme.accent,
     secondary: theme.secondary,
   };
-  const badge = fixedStatus?.label ?? (participant.status === 'completed' ? 'Completó' : 'Activo');
+  const badge = participant.terminalReason === 'expired' ? 'Venció' : participant.terminalReason === 'cancelled' ? 'Canceló' : fixedStatus?.label ?? (participant.status === 'completed' ? 'Completó' : 'Activo');
 
   if (compact) {
     return <View accessibilityLabel={`Participante ${participant.alias}: ${badge}`} style={[styles.compact, { backgroundColor: palette.primary, borderColor: palette.accent }]}>

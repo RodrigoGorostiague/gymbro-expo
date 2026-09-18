@@ -19,6 +19,7 @@ import { useTheme } from '../../context/ThemeContext';
 import { WorkoutSession } from '../../types';
 
 type SetDraft = {
+  durationSeconds?: string;
   weight: string;
   reps: string;
   completed: boolean;
@@ -49,6 +50,7 @@ function buildDraft(session: WorkoutSession): SessionDraft {
       sets[`${exercise.exerciseId}:${set.setId}`] = {
         weight: String(set.weight),
         reps: String(set.reps),
+        ...(set.durationSeconds !== undefined ? { durationSeconds: String(set.durationSeconds) } : {}),
         completed: set.completed,
       };
     }
@@ -153,7 +155,9 @@ export default function SessionDetailScreen() {
         if (!Number.isInteger(reps) || reps < 0) {
           throw new Error(`${exercise.name}: las repeticiones deben ser una cantidad entera no negativa.`);
         }
-        return { ...set, weight, reps, completed: editedSet.completed };
+        const durationSeconds = set.durationSeconds !== undefined ? Number(editedSet.durationSeconds) : undefined;
+        if (durationSeconds !== undefined && (!Number.isInteger(durationSeconds) || durationSeconds < 0 || durationSeconds > 86400 || (editedSet.completed && durationSeconds === 0))) throw new Error(`${exercise.name}: revisa la duración en segundos.`);
+        return { ...set, weight, reps: durationSeconds !== undefined ? 0 : reps, ...(durationSeconds !== undefined ? { durationSeconds } : {}), completed: editedSet.completed };
       }),
     }));
 
@@ -338,13 +342,13 @@ export default function SessionDetailScreen() {
                           />
                         </View>
                         <View style={styles.field}>
-                          <Text style={[styles.label, { color: theme.textMuted }]}>Repeticiones</Text>
+                          <Text style={[styles.label, { color: theme.textMuted }]}>{set.durationSeconds !== undefined ? 'Duración (segundos)' : 'Repeticiones'}</Text>
                           <GlassInput
-                            accessibilityLabel={`${exercise.name}, serie ${setIndex + 1}, repeticiones`}
+                            accessibilityLabel={`${exercise.name}, serie ${setIndex + 1}, ${set.durationSeconds !== undefined ? 'segundos' : 'repeticiones'}`}
                             editable={!busy}
-                            value={setDraft.reps}
+                            value={set.durationSeconds !== undefined ? setDraft.durationSeconds : setDraft.reps}
                             keyboardType="number-pad"
-                            onChangeText={(reps) => updateSetDraft(key, { reps })}
+                            onChangeText={(value) => updateSetDraft(key, set.durationSeconds !== undefined ? { durationSeconds: value } : { reps: value })}
                           />
                         </View>
                       </View>

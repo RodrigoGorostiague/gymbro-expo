@@ -22,7 +22,7 @@ describe('WorkoutRecapAnalysis', () => {
     const text = tree!.root.findAll((node) => String(node.type) === 'Text').map((node) => node.children.join(''));
     expect(text).toEqual(expect.arrayContaining(['60 min', '1/2', 'Vs. último entrenamiento igual', '50 min · 1 ejercicios', 'Análisis por ejercicio', '80 de carga registrada × 10 reps', 'Hecha', 'No realizada']));
     expect(text.join(' ')).not.toMatch(/\bkg\b|\+100/);
-    const exercise = tree!.root.find((node) => String(node.type) === 'HapticPressable');
+    const exercise = tree!.root.find((node) => String(node.type) === 'HapticPressable' && node.props.accessibilityLabel === 'Row, 50% de series completadas');
     await act(async () => { exercise.props.onPress(); });
     expect(exercise.props.accessibilityState.expanded).toBe(false);
   });

@@ -1,5 +1,8 @@
+import { actualEffortMetrics } from '../utils/actualEffort';
 import React, { useCallback, useEffect, useState } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
+import { LinearGradient } from 'expo-linear-gradient';
+import Animated, { FadeInDown, ReduceMotion } from 'react-native-reanimated';
 import { router, useFocusEffect } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { useTheme } from '../context/ThemeContext';
@@ -38,7 +41,7 @@ function participantRecap(participant: JointParticipant, publishedAt: string): W
     routineName: participant.workout.routineName,
     durationSeconds: participant.workout.durationSeconds,
     exerciseCount: participant.workout.exercises.length,
-    metrics: {},
+    metrics: actualEffortMetrics(participant.workout.exercises),
     muscleGroupIds: [...counts.keys()] as WorkoutRecap['muscleGroupIds'],
     muscleDistribution: [...counts].map(([id, value]) => ({ id: id as WorkoutRecap['muscleGroupIds'][number], value })),
     caption: null,
@@ -62,7 +65,7 @@ export function JointWorkoutFeedCard({ workoutId, participants: previewParticipa
   const load = useCallback(() => {
     void getJointWorkoutDetail(workoutId).then((detail) => {
       setWorkout(detail);
-      if (!detail) setError('El detalle ya no está disponible.');
+      setError(detail ? null : 'El detalle ya no está disponible.');
     }).catch(() => setError('No se pudo cargar el detalle del grupo.'));
   }, [workoutId]);
   useEffect(() => { if (expanded) load(); }, [expanded, load, previewParticipants]);
@@ -82,21 +85,21 @@ export function JointWorkoutFeedCard({ workoutId, participants: previewParticipa
   };
 
   return <GlassCard style={styles.card}>
-    <View style={[styles.groupHero, { backgroundColor: theme.glass, borderColor: theme.primary }]}>
+    <LinearGradient colors={[`${theme.primary}28`, `${theme.primary}08`]} style={[styles.groupHero, { borderColor: theme.primary }]}>
       <Text style={[styles.groupEyebrow, { color: theme.primary }]}>CÍRCULO EN ACCIÓN</Text>
       <Text style={[styles.groupHeadline, { color: theme.text }]}>Cada atleta.
 Un mismo impulso.</Text>
-      <View style={styles.groupScore}><Text style={[styles.groupNumber, { color: theme.primary }]}>{participants.length}</Text><Text style={{ color: theme.textMuted }}>participantes · sin comparar sus cargas</Text></View>
-    </View>
+      <View style={styles.groupScore}><Text style={[styles.groupNumber, { color: theme.primary }]}>{participants.length}</Text><Text style={{ color: theme.textMuted }}>participantes · una historia, cada ejecución</Text></View>
+    </LinearGradient>
     <HapticPressable accessibilityRole="button" accessibilityLabel="Expandir entrenamiento conjunto" accessibilityState={{ expanded }} onPress={() => setExpanded((value) => !value)} style={styles.trigger}>
       <View style={styles.heading}><View><Text style={[styles.title, { color: theme.text }]}>Entrenamiento conjunto</Text><Text style={{ color: theme.textMuted }}>{expanded ? 'Ocultar participantes' : 'Ver participantes y resultados'}</Text></View><View style={styles.headingMeta}><Text style={[styles.publishedAt, { color: theme.textMuted }]}>{formatRelativeTime(publishedAt, now)}</Text><Ionicons name={expanded ? 'chevron-up' : 'chevron-down'} size={22} color={theme.primary} /></View></View>
       <View style={styles.people}>{participants.map((participant) => <View key={participant.id} style={styles.person}><ProfileAvatar avatarId={participant.avatarId} frameId={participant.frameId} size={30} borderColor={theme.primary} /><View style={styles.personCopy}><Text numberOfLines={1} style={{ color: theme.text }}>{participant.alias}</Text>{participant.titleId ? <ProfileTitleBadge titleId={participant.titleId} /> : null}</View></View>)}</View>
     </HapticPressable>
-    {expanded ? <View style={styles.detail}>{error ? <Text accessibilityRole="alert" style={{ color: theme.textMuted }}>{error}</Text> : null}{!workout && !error ? <Text style={{ color: theme.textMuted }}>Cargando resultados...</Text> : null}{workout ? <View style={styles.participants}>{participants.map((participant) => {
+    {expanded ? <Animated.View entering={FadeInDown.duration(250).reduceMotion(ReduceMotion.System)} style={styles.detail}>{error ? <Text accessibilityRole="alert" style={{ color: theme.textMuted }}>{error}</Text> : null}{!workout && !error ? <Text style={{ color: theme.textMuted }}>Cargando resultados...</Text> : null}{workout ? <View style={styles.participants}>{participants.map((participant) => {
       const recap = participantRecap(participant, publishedAt);
       if (!recap || (!participant.relationshipKind && !participant.isSelf)) return <JointParticipantProfileCard key={participant.id} participant={participant} onPress={() => router.push({ pathname: '/social/[uid]', params: { uid: participant.id } })}><Text style={{ color: theme.textMuted }}>{participant.canInviteBro ? 'Ver perfil e invitar como Bro' : 'Ver perfil público'}</Text></JointParticipantProfileCard>;
       return <WorkoutPublicationCard key={participant.id} recap={recap} now={now} onProfilePress={() => router.push(participant.isSelf ? '/profile' : { pathname: '/social/[uid]', params: { uid: participant.id } })} onPress={() => router.push({ pathname: '/social/recap/[id]', params: { id: recap.id, workoutId, participantId: participant.id } })} onToggleReaction={!participant.isSelf ? () => void toggleReaction(participant) : undefined} />;
-    })}</View> : null}</View> : null}
+    })}</View> : null}</Animated.View> : null}
   </GlassCard>;
 }
 

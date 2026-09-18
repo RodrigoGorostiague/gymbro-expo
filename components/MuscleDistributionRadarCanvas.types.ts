@@ -3,6 +3,7 @@ import type { RadarPoint } from '../utils/radarGeometry';
 
 export interface MuscleDistributionRadarCanvasProps {
   size: number;
+  drawScale?: number;
   center: number;
   radius: number;
   rings: readonly (readonly RadarPoint[])[];

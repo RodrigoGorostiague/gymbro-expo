@@ -6,7 +6,7 @@ globalThis.IS_REACT_ACT_ENVIRONMENT = true;
 
 vi.mock('react-native', async () => {
   const ReactModule = await import('react'); const host = (name: string) => ({ children, ...props }: { children?: React.ReactNode }) => ReactModule.createElement(name, props, children);
-  return { StyleSheet: { create: <T,>(styles: T) => styles }, Text: host('Text'), View: host('View') };
+  return { StyleSheet: { create: <T,>(styles: T) => styles }, Text: host('Text'), View: host('View'), Pressable: host('Pressable') };
 });
 vi.mock('../context/ThemeContext', () => ({ useTheme: () => ({ theme: { text: '#111', textMuted: '#666', primary: '#00f', glassBorder: '#ddd' } }) }));
 vi.mock('../context/DataContext', () => ({ useData: () => ({ catalogMuscleGroups: [] }) }));

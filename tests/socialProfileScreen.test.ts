@@ -29,7 +29,7 @@ vi.mock('../context/ThemeContext', () => ({ useTheme: () => ({ theme: { text: '#
 vi.mock('../components/AppNavBar', () => ({ AppNavBar: () => null }));
 vi.mock('../components/ProfileAvatar', () => ({ ProfileAvatar: () => null }));
 vi.mock('../components/ExperienceProgressCard', () => ({ ExperienceProgressCard: () => null }));
-vi.mock('../components/MuscleDistributionRadar', () => ({ MuscleDistributionRadar: () => null }));
+vi.mock('../components/MuscleVolumeCard', () => ({ MuscleVolumeCard: (props: Record<string,unknown>) => React.createElement('MuscleVolumeCard', props, React.createElement('Text', null, 'Distribución muscular')) }));
 vi.mock('../components/GlassCard', async () => {
   const ReactModule = await import('react');
   return { GlassCard: ({ children, ...props }: { children: React.ReactNode } & Record<string, unknown>) => ReactModule.createElement('GlassCard', props, children), ThemeBackground: ({ children, ...props }: { children: React.ReactNode } & Record<string, unknown>) => ReactModule.createElement('ThemeBackground', props, children) };

@@ -1,3 +1,4 @@
+import { ExerciseBodyMap } from '../../components/TrainingBodyMap';
 import React from 'react';
 import { ScrollView, StyleSheet, Text, View } from 'react-native';
 import { router, useLocalSearchParams } from 'expo-router';
@@ -45,6 +46,7 @@ export default function ExerciseDetailScreen() {
             </View>
           </GlassCard>
 
+          <ExerciseBodyMap exercise={exercise} />
           <View style={styles.sectionHeader}><Text style={[styles.sectionTitle, { color: theme.text }]}>Participación muscular</Text><Text style={[styles.sectionCount, { color: theme.textMuted }]}>{participations.length || exercise.muscleGroups.length} grupos</Text></View>
           {participations.length ? participations.map((participation) => {
             const primary = participation.role === 'Principal';

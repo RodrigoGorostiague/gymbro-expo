@@ -27,7 +27,7 @@ vi.mock('../context/AuthContext', () => ({
 vi.mock('../context/DataContext', () => ({
   useData: () => workoutData,
 }));
-vi.mock('../services/jointWorkoutPublicationQueue', () => ({ flushPendingJointWorkoutPublications }));
+vi.mock('../services/jointWorkoutPublicationQueue', () => ({ flushPendingJointWorkoutPublications, loadJointPublicationProgress: vi.fn(async () => []) }));
 
 import {
   getCirclePage,

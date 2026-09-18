@@ -55,7 +55,7 @@ export default function WorkoutRecapDetailScreen() {
   }, [load]);
 
   const save = async (kind: 'routine' | 'mesocycle') => {
-    if (!recap?.sharePayload || !user) return;
+    if (!recap?.sharePayload || !user || saving || saved.includes(kind)) return;
     setSaving(kind);
     setError(null);
     try {
@@ -130,17 +130,17 @@ export default function WorkoutRecapDetailScreen() {
           {!error && !recap ? <Text style={{ color: theme.textMuted }}>Cargando análisis...</Text> : null}
           {recap ? (
             <>
-              <WorkoutPublicationCard recap={recap} />
+              <WorkoutPublicationCard recap={recap} onProfilePress={recap.isAuthor ? () => router.push('/profile') : recap.authorId ? () => router.push({ pathname: '/social/[uid]', params: { uid: recap.authorId! } }) : undefined} />
 
               <GlassCard style={styles.analysis}>
                 <Text accessibilityRole="header" style={[styles.title, { color: theme.text }]}>{recap.routineName}</Text>
                 <WorkoutRecapAnalysis recap={recap} />
               </GlassCard>
 
-              {!recap.isAuthor && (recap.templateAvailable || recap.mesocycleAvailable) ? (
+              {(recap.templateAvailable || recap.mesocycleAvailable) ? (
                 <GlassCard style={styles.templates}>
-                  <Text style={[styles.sectionTitle, { color: theme.text }]}>Recursos del entrenamiento</Text>
-                  {recap.templateAvailable ? <GlassButton title={saved.includes('routine') ? 'Rutina guardada' : 'Guardar rutina'} loading={saving === 'routine'} disabled={!!saving || saved.includes('routine')} onPress={() => void save('routine')} /> : null}
+                  <Text style={[styles.sectionTitle, { color: theme.text }]}>Hazla tuya</Text><Text style={{ color: theme.textMuted }}>Copia la plantilla a tu biblioteca. No copia el historial ni los resultados de esta persona.</Text>
+                  {recap.templateAvailable ? <GlassButton title={saved.includes('routine') ? 'Rutina guardada' : 'Copiar rutina'} loading={saving === 'routine'} disabled={!!saving || saved.includes('routine')} onPress={() => void save('routine')} /> : null}
                   {recap.mesocycleAvailable ? (
                     <>
                       <GlassButton title="Ver mesociclo" variant="secondary" onPress={openMesocycle} />
@@ -149,6 +149,8 @@ export default function WorkoutRecapDetailScreen() {
                   ) : null}
                 </GlassCard>
               ) : null}
+
+              {!recap.templateAvailable ? <GlassCard style={styles.templates}><GlassButton title="Copiar rutina" disabled onPress={() => undefined} /><Text style={{ color: theme.textMuted }}>Esta publicación no incluye una plantilla de rutina para copiar.</Text></GlassCard> : null}
 
               <GlassCard style={styles.engagement}>
                 <View style={styles.communityHeader}>

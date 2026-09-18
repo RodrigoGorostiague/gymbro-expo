@@ -20,10 +20,9 @@ import { HapticPressable } from '../../components/HapticPressable';
 import { ProfileAction, ProfileHistorySummary, ProfileOverview } from '../../components/ProfileOverview';
 import { summarizeProfileHistory } from '../../utils/profileOverview';
 import { useAuth } from '../../context/AuthContext';
-import { MuscleDistributionRadar } from '../../components/MuscleDistributionRadar';
+import { MuscleVolumeCard } from '../../components/MuscleVolumeCard';
 import { useData } from '../../context/DataContext';
-import { ownMuscleDistribution } from '../../utils/muscleDistribution';
-import { MUSCLE_BALANCE_TARGETS, MuscleBalanceTargetId, muscleBalanceTargetEntries, muscleBalanceTargetForId } from '../../constants/muscleBalanceTargets';
+import { MuscleBalanceTargetId, muscleBalanceTargetForId } from '../../constants/muscleBalanceTargets';
 
 const categoryKeys = ['about'] as const;
 type CustomizationSection = 'avatar' | 'frame' | 'title' | 'target' | null;
@@ -79,7 +78,7 @@ function ProfileEditor({ ownerId }: { ownerId: string | null }) {
   const { theme } = useTheme();
   const [section, setSection] = useState<'athlete' | 'identity' | 'privacy' | 'appearance'>('athlete');
   const scrollRef = useRef<ScrollView>(null);
-  const { experienceProgress, attempts, sessions = [], isLoading: dataLoading, dataState, retryData, catalogMuscleGroups = [] } = useData();
+  const { experienceProgress, attempts, sessions = [], isLoading: dataLoading, dataState, retryData } = useData();
   const history = useMemo(() => summarizeProfileHistory(sessions), [sessions]);
   const { ownProfile, refreshOwnProfile, saveProfile } = useSocial();
   const [alias, setAlias] = useState('');
@@ -117,8 +116,6 @@ function ProfileEditor({ ownerId }: { ownerId: string | null }) {
   useEffect(() => { latestConfirmedProfile.current = profile; }, [profile]);
   const { purchasedFrameIds } = useShop();
   const { enabled: backgroundParallaxEnabled, setEnabled: setBackgroundParallaxEnabled } = useBackgroundParallaxPreference();
-  const muscleDistribution = useMemo(() => ownMuscleDistribution(attempts ?? [], catalogMuscleGroups), [attempts, catalogMuscleGroups]);
-  const muscleBalanceTarget = useMemo(() => muscleBalanceTargetEntries(catalogMuscleGroups, muscleBalanceTargetId), [catalogMuscleGroups, muscleBalanceTargetId]);
   const displayedFrameId = previewFrameId ?? frameId;
   const [baselineProfile, setBaselineProfile] = useState<Record<string, unknown> | null>(null);
   const dirty = !!baselineProfile && (
@@ -301,12 +298,7 @@ function ProfileEditor({ ownerId }: { ownerId: string | null }) {
             <GlassCard>{dataLoading ? <Text accessibilityLiveRegion="polite" style={{ color: theme.textMuted }}>Cargando tu recorrido…</Text> : dataState === 'error' ? <><Text style={{ color: theme.text }}>No se pudo cargar tu historial.</Text><GlassButton title="Reintentar historial" variant="secondary" onPress={retryData} /></> : <ProfileHistorySummary summary={history} onHistory={() => router.push('/history')} onTrain={() => router.push('/(tabs)/train')} />}</GlassCard>
             <View style={styles.quickActions}><ProfileAction icon="analytics-outline" label="Explorar mi progreso" hint="Tendencias y evolución" onPress={() => router.push('/(tabs)/progress')} /><ProfileAction icon="options-outline" label="Preferencias de entrenamiento" hint="Movimiento, sonido y vibración" onPress={() => router.push('/profile/preferences')} /></View>
            <GlassCard>
-            <Text style={[styles.eyebrow, { color: theme.primary }]}>EQUILIBRIO · TU ENFOQUE</Text>
-            <Text accessibilityRole="header" style={[styles.title, { color: theme.text }]}>Tu distribución muscular</Text>
-             <Text style={[styles.identityHint, { color: theme.textMuted }]}>{shareSocialMuscleDistribution ? 'Compartir distribución está activado en este borrador.' : 'Compartir distribución está desactivado en este borrador.'}</Text>
-             <MuscleDistributionRadar data={muscleDistribution} reference={muscleBalanceTarget} />
-             <View style={styles.targetHeader}><View style={styles.targetCopy}><Text style={[styles.targetTitle, { color: theme.text }]}>Objetivo de distribución</Text><Text style={[styles.identityHint, { color: theme.textMuted }]}>{MUSCLE_BALANCE_TARGETS.find((target) => target.id === muscleBalanceTargetId)?.description}</Text></View><HapticPressable accessibilityRole="button" accessibilityLabel="Elegir objetivo muscular" onPress={() => setCustomizationSection((current) => current === 'target' ? null : 'target')} style={[styles.targetButton, { borderColor: theme.primary }]}><Text style={[styles.editAvatarText, { color: theme.primary }]}>Cambiar</Text></HapticPressable></View>
-             {customizationSection === 'target' ? <View accessibilityRole="radiogroup" style={styles.targetOptions}>{MUSCLE_BALANCE_TARGETS.map((target) => <HapticPressable key={target.id} accessibilityRole="radio" accessibilityLabel={target.label} accessibilityState={{ selected: muscleBalanceTargetId === target.id }} onPress={() => { setMuscleBalanceTargetId(target.id); setCustomizationSection(null); }} style={[styles.targetOption, { borderColor: muscleBalanceTargetId === target.id ? theme.primary : theme.glassBorder, backgroundColor: muscleBalanceTargetId === target.id ? theme.glass : 'transparent' }]}><Text style={[styles.avatarOptionLabel, { color: theme.text }]}>{target.label}</Text><Text style={[styles.identityHint, { color: theme.textMuted }]}>{target.description}</Text></HapticPressable>)}</View> : null}
+            {ownerId ? <MuscleVolumeCard subjectId={ownerId} own attempts={attempts} localAvailable={!dataLoading && dataState !== 'error'} /> : null}
            </GlassCard>
            </> : null}
            {section === 'appearance' ? <GlassCard>
@@ -392,7 +384,7 @@ function ProfileEditor({ ownerId }: { ownerId: string | null }) {
             <Text style={[styles.eyebrow, { color: theme.primary }]}>SOLO PARA TI</Text>
             <Text accessibilityRole="header" style={[styles.title, { color: theme.text }]}>Tu evolución, en privado</Text>
             <Text style={{ color: theme.textMuted }}>Actualizá peso, talla y perímetros de forma privada para seguir tu evolución.</Text>
-            <GlassButton title="Actualizar antropometrías" variant="secondary" onPress={() => router.push('/profile/measurements')} />
+            <GlassButton title="Ver evolución corporal" variant="secondary" onPress={() => router.push('/body')} />
           </GlassCard>
           : null}
           {section === 'privacy' ? <GlassCard>

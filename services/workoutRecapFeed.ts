@@ -1,3 +1,4 @@
+import { actualEffortFields, actualEffortMetrics, readActualEffort } from '../utils/actualEffort';
 import { CatalogImportPlan, Mesocycle, MesocycleEntry, MuscleGroup, Routine, WorkoutRecap, WorkoutRecapComment, WorkoutRecapDetail, WorkoutRecapExercise, WorkoutRecapInput, WorkoutRecapPage, WorkoutRecapReactionState, WorkoutRecapSharePayload, WorkoutSession } from '../types';
 import { supabase, supabaseConfigurationError } from './supabase';
 import { avatarIdOrDefault } from '../constants/avatars';
@@ -21,7 +22,7 @@ function asMuscleDistribution(value: unknown): Array<{ id: MuscleGroup; value: n
   });
 }
 
-function asRecap(row: unknown): WorkoutRecap {
+export function asRecap(row: unknown): WorkoutRecap {
   const value = row as Record<string, unknown>;
   return {
     id: String(value.id),
@@ -58,10 +59,13 @@ export function asSharePayload(value: unknown): WorkoutRecapSharePayload | null 
   const validEffortTarget = (target: unknown) => isRecord(target)
     && ((target.kind === 'rir' && Number.isInteger(target.value) && (target.value as number) >= 0 && (target.value as number) <= 5)
       || (target.kind === 'rpe' && Number.isInteger(target.value) && (target.value as number) >= 6 && (target.value as number) <= 10));
-  const validSet = (set: unknown) => isRecord(set) && hasOnly(set, ['tipo', 'weight', 'reps', 'effortTarget', 'backoffGroup']) && hasRequired(set, ['tipo', 'weight', 'reps'])
-    && (set.tipo === 'C' || set.tipo === 'F' || (typeof set.tipo === 'number' && Number.isInteger(set.tipo) && set.tipo >= 0 && set.tipo <= 10))
+  const validSet = (set: unknown) => isRecord(set) && hasOnly(set, ['tipo', 'weight', 'reps', 'effortTarget', 'backoffGroup', 'dropGroup', 'durationSeconds', 'loadBasis']) && hasRequired(set, ['tipo', 'weight', 'reps'])
+    && (set.tipo === 'C' || set.tipo === 'F' || (typeof set.tipo === 'number' && Number.isInteger(set.tipo) && set.tipo >= 0 && set.tipo <= 100))
     && typeof set.weight === 'number' && Number.isFinite(set.weight) && set.weight >= 0 && set.weight <= 10000
     && typeof set.reps === 'number' && Number.isInteger(set.reps) && set.reps >= 0 && set.reps <= 1000
+    && (set.durationSeconds === undefined || (Number.isInteger(set.durationSeconds) && (set.durationSeconds as number) > 0 && (set.durationSeconds as number) <= 86400 && set.reps === 0))
+    && (set.loadBasis === undefined || ['external', 'bodyweight', 'added', 'assisted'].includes(set.loadBasis as string))
+    && (set.dropGroup === undefined || (Number.isInteger(set.dropGroup) && (set.dropGroup as number) >= 0 && (set.dropGroup as number) <= 99 && set.backoffGroup === undefined))
     && (set.effortTarget === undefined || validEffortTarget(set.effortTarget))
     && (set.backoffGroup === undefined || (typeof set.backoffGroup === 'number' && Number.isInteger(set.backoffGroup) && set.backoffGroup >= 0 && set.backoffGroup <= 99));
   const validRoutine = (routine: unknown): routine is NonNullable<WorkoutRecapSharePayload['routine']> => {
@@ -75,7 +79,7 @@ export function asSharePayload(value: unknown): WorkoutRecapSharePayload | null 
     const routines = mesocycle.routines as unknown[];
     return mesocycle.weeks.every((week) => Array.isArray(week) && week.length <= 7 && week.every((entry) => entry === null || (isRecord(entry) && hasOnly(entry, ['routineIndex', 'dayLabel']) && hasRequired(entry, ['routineIndex']) && typeof entry.routineIndex === 'number' && Number.isInteger(entry.routineIndex) && entry.routineIndex >= 0 && entry.routineIndex < routines.length && (entry.dayLabel === undefined || validLabel(entry.dayLabel, 120, false)))));
   };
-  const validPerformedSets = (performances: unknown) => Array.isArray(performances) && performances.length <= 100 && performances.every((performance) => isRecord(performance) && hasOnly(performance, ['exerciseIndex', 'sets']) && hasRequired(performance, ['exerciseIndex', 'sets']) && typeof performance.exerciseIndex === 'number' && Number.isInteger(performance.exerciseIndex) && performance.exerciseIndex >= 0 && performance.exerciseIndex <= 99 && Array.isArray(performance.sets) && performance.sets.length <= 100 && performance.sets.every((set) => isRecord(set) && hasOnly(set, ['weight', 'reps', 'completed']) && hasRequired(set, ['weight', 'reps', 'completed']) && typeof set.weight === 'number' && Number.isFinite(set.weight) && set.weight >= 0 && set.weight <= 10000 && typeof set.reps === 'number' && Number.isInteger(set.reps) && set.reps >= 0 && set.reps <= 1000 && typeof set.completed === 'boolean'));
+  const validPerformedSets = (performances: unknown) => Array.isArray(performances) && performances.length <= 100 && performances.every((performance) => isRecord(performance) && hasOnly(performance, ['exerciseIndex', 'sets']) && hasRequired(performance, ['exerciseIndex', 'sets']) && typeof performance.exerciseIndex === 'number' && Number.isInteger(performance.exerciseIndex) && performance.exerciseIndex >= 0 && performance.exerciseIndex <= 99 && Array.isArray(performance.sets) && performance.sets.length <= 100 && performance.sets.every((set) => isRecord(set) && hasOnly(set, ['weight', 'reps', 'completed', 'actualEffort', 'durationSeconds']) && (set.durationSeconds === undefined || (Number.isInteger(set.durationSeconds) && (set.durationSeconds as number) >= 0 && (set.durationSeconds as number) <= 86400 && set.reps === 0)) && (set.actualEffort === undefined || (set.completed === true && !!readActualEffort(set.actualEffort))) && hasRequired(set, ['weight', 'reps', 'completed']) && typeof set.weight === 'number' && Number.isFinite(set.weight) && set.weight >= 0 && set.weight <= 10000 && typeof set.reps === 'number' && Number.isInteger(set.reps) && set.reps >= 0 && set.reps <= 1000 && typeof set.completed === 'boolean'));
   if (!hasOnly(payload as unknown as Record<string, unknown>, ['version', 'routine', 'mesocycle', 'performedSets']) || !hasRequired(payload as unknown as Record<string, unknown>, ['version']) || payload.version !== 1 || (payload.routine !== undefined && !validRoutine(payload.routine))) return null;
   if (payload.mesocycle !== undefined && (!payload.routine || !validMesocycle(payload.mesocycle))) return null;
   if (payload.performedSets !== undefined && !validPerformedSets(payload.performedSets)) return null;
@@ -93,10 +97,14 @@ function routinePayload(routine: Routine): NonNullable<WorkoutRecapSharePayload[
       variant: exercise.variant,
       sets: (() => {
         const groups = new Map<string, number>();
-        return exercise.sets.map(({ tipo, weight, reps, effortTarget, backoffGroupId }) => ({
+        const drops = new Map<string, number>();
+        return exercise.sets.map(({ tipo, weight, reps, effortTarget, backoffGroupId, dropGroupId, durationSeconds, loadBasis }) => ({
           tipo,
           weight,
           reps,
+          ...(durationSeconds !== undefined ? { durationSeconds } : {}),
+          ...(loadBasis ? { loadBasis } : {}),
+          ...(dropGroupId ? { dropGroup: drops.get(dropGroupId) ?? (drops.set(dropGroupId, drops.size), drops.size - 1) } : {}),
           ...(effortTarget ? { effortTarget } : {}),
           ...(backoffGroupId ? { backoffGroup: groups.get(backoffGroupId) ?? (groups.set(backoffGroupId, groups.size), groups.size - 1) } : {}),
         }));
@@ -136,14 +144,14 @@ export function recapSharePayload(
     }));
     if (included.length) payload.mesocycle = { name: mesocycle.name.trim(), goal: mesocycle.goal.trim(), durationWeeks: mesocycle.durationWeeks, weeks, routines: included };
   }
-  if (policy.sharePerformedSetDetails) payload.performedSets = session.exercises.map((exercise, exerciseIndex) => ({ exerciseIndex, sets: exercise.sets.map(({ weight, reps, completed }) => ({ weight, reps, completed })) }));
+  if (policy.sharePerformedSetDetails) payload.performedSets = session.exercises.map((exercise, exerciseIndex) => ({ exerciseIndex, sets: exercise.sets.map(({ weight, reps, completed, actualEffort, durationSeconds }) => ({ weight, reps, completed, ...(durationSeconds !== undefined ? { durationSeconds } : {}), ...(completed ? actualEffortFields(actualEffort) : {}) })) }));
   return payload;
 }
 
 function importedSets(sets: NonNullable<WorkoutRecapSharePayload['routine']>['exercises'][number]['sets'], prefix: string) {
   const groups = new Map<number, string>();
-  return sets.map(({ backoffGroup, ...set }, setIndex) => ({
-    ...set,
+  return sets.map(({ backoffGroup, dropGroup, durationSeconds, loadBasis, tipo, weight, reps, effortTarget }, setIndex) => ({
+    tipo, weight, reps, ...(durationSeconds !== undefined ? { durationSeconds } : {}), ...(loadBasis ? { loadBasis } : {}), ...(dropGroup !== undefined ? { dropGroupId: `${prefix}:drop:${dropGroup}` } : {}), ...(effortTarget ? { effortTarget } : {}),
     id: `${prefix}:set:${setIndex + 1}`,
     ...(backoffGroup === undefined ? {} : { backoffGroupId: groups.get(backoffGroup) ?? (groups.set(backoffGroup, `${prefix}:backoff:${groups.size}`), groups.get(backoffGroup)!) }),
   }));
@@ -182,7 +190,7 @@ function asExercises(value: unknown): WorkoutRecapExercise[] {
         if (typeof value.weight !== 'number' || !Number.isFinite(value.weight)
           || typeof value.reps !== 'number' || !Number.isInteger(value.reps)
           || typeof value.completed !== 'boolean') return [];
-        return [{ weight: value.weight, reps: value.reps, completed: value.completed }];
+        return [{ weight: value.weight, reps: value.reps, ...(typeof value.durationSeconds === 'number' && Number.isInteger(value.durationSeconds) && value.durationSeconds >= 0 && value.durationSeconds <= 86400 ? { durationSeconds: value.durationSeconds } : {}), completed: value.completed, ...(value.completed ? actualEffortFields(value.actualEffort) : {}) }];
       }) : [],
     }];
   });
@@ -222,7 +230,7 @@ export function recapInputFromSession(session: WorkoutSession, caption?: string)
     return [{
       name,
       muscleGroupIds: [...new Set(exercise.muscleGroupIds ?? [])].sort(),
-      sets: exercise.sets.map(({ weight, reps, completed }) => ({ weight, reps, completed })),
+      sets: exercise.sets.map(({ weight, reps, completed, actualEffort, durationSeconds }) => ({ weight, reps, completed, ...(durationSeconds !== undefined ? { durationSeconds } : {}), ...(completed ? actualEffortFields(actualEffort) : {}) })),
     }];
   });
   const volume = session.exercises.reduce(
@@ -239,13 +247,13 @@ export function recapInputFromSession(session: WorkoutSession, caption?: string)
     completedAt: session.completedAt,
     durationSeconds: Math.floor(session.durationSeconds),
     exerciseCount: exercises.length,
-    metrics: { volume },
+    metrics: { volume, ...actualEffortMetrics(exercises) },
     exercises,
     ...(trimmedCaption ? { caption: trimmedCaption } : {}),
   };
 }
 
-function recapPayload(input: WorkoutRecapInput, publicationKey: string) {
+export function recapPayload(input: WorkoutRecapInput, publicationKey: string) {
   return {
     routine_name: input.routineName,
     completed_at: input.completedAt,

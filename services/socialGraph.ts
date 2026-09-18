@@ -1,3 +1,5 @@
+import { parseMuscleVolume } from './muscleVolume';
+import type { MuscleVolume } from '../utils/muscleVolume';
 import { supabase, supabaseConfigurationError } from './supabase';
 import { AvatarId, avatarIdOrDefault } from '../constants/avatars';
 import { ProfileFrameId, ProfileTitleId, profileFrameIdOrDefault, profileTitleIdOrDefault } from '../constants/profileFrames';
@@ -32,6 +34,7 @@ export type GraphSummary = {
 };
 export type MuscleDistributionEntry = { id: string; label: string; value: number };
 export type SocialProfileInsights = {
+  muscleVolume?: MuscleVolume;
   activity?: { lastCompletedAt: string | null };
   progress?: { level: number; rank: string };
   consistency?: { workoutsLast28Days: number; activeWeeksLast90Days: number };
@@ -72,7 +75,7 @@ export function normalizeAliasPrefix(value: string): string {
 /** Creates the private profile projection required by social and reward services. */
 export async function bootstrapOwnProfile(): Promise<void> {
   const { error } = await requireClient().rpc('ensure_own_profile', {});
-  if (error) throw new Error(error.message);
+  if (error) throw Object.assign(new Error(error.message), error);
 }
 
 function asPage(data: unknown): { profiles: PublicProfile[]; nextCursor: string | null } {
@@ -196,6 +199,7 @@ function asSocialProfileInsights(data: unknown): SocialProfileInsights {
     ...(progress && typeof progress.level === 'number' && typeof progress.rank === 'string' ? { progress: { level: progress.level, rank: progress.rank } } : {}),
     ...(consistency ? { consistency: { workoutsLast28Days: nonNegativeNumber(consistency.workouts_last_28_days), activeWeeksLast90Days: nonNegativeNumber(consistency.active_weeks_last_90_days) } } : {}),
     ...(statistics ? { statistics: { workoutsLast90Days: nonNegativeNumber(statistics.workouts_last_90_days), completedExercisesLast90Days: nonNegativeNumber(statistics.completed_exercises_last_90_days) } } : {}),
+    ...(source.muscle_volume ? { muscleVolume: parseMuscleVolume(source.muscle_volume) ?? undefined } : {}),
     ...(Array.isArray(source.muscle_distribution) ? { muscleDistribution: source.muscle_distribution.flatMap((entry): MuscleDistributionEntry[] => { const value = asObject(entry); return value && typeof value.id === 'string' && typeof value.label === 'string' ? [{ id: value.id, label: value.label, value: nonNegativeNumber(value.value) }] : []; }) } : {}),
   };
 }

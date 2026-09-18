@@ -1,3 +1,4 @@
+import { MesocycleBodyMap } from '../../components/TrainingBodyMap';
 import React, { useEffect, useMemo, useState } from 'react';
 import { Alert, StyleSheet, Text, TextInput, View } from 'react-native';
 import Ionicons from '@expo/vector-icons/Ionicons';
@@ -194,6 +195,7 @@ export default function MesocycleDetailScreen() {
        {draft.status === 'completed' ? <Text style={[styles.statusGuidance, { color: theme.textMuted }]}>La recompensa de XP se acreditó una única vez. Los cambios posteriores no generan una nueva recompensa.</Text> : completionBlockReason ? <Text style={[styles.statusGuidance, { color: theme.textMuted }]}>{completionBlockReason}</Text> : null}
        {!['completed', 'cancelled', 'archived'].includes(draft.status) ? <View style={styles.extension}><TextInput value={extensionWeeks} onChangeText={setExtensionWeeks} keyboardType="number-pad" style={[styles.extensionInput, { color: theme.text, borderColor: theme.glassBorder }]} /><GlassButton title="Añadir semanas" variant="secondary" onPress={extend} /></View> : null}
     </GlassCard>
+    <MesocycleBodyMap mesocycle={draft} routines={routines} />
     {draft.weeks.map((week) => <WeekCard
       key={week.id}
       week={week}

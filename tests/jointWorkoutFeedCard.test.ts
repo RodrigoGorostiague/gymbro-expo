@@ -59,6 +59,19 @@ describe('JointWorkoutFeedCard', () => {
     expect(tree!.root.findByProps({ name: 'chevron-down' })).toBeTruthy();
   });
 
+  test('clears a stale detail error after a successful refresh', async () => {
+    getJointWorkoutDetail.mockReset();
+    getJointWorkoutDetail.mockRejectedValueOnce(new Error('Offline')).mockResolvedValueOnce({id:'joint-retry',createdAt:'2026-09-11T00:00:00Z',participants:[]});
+    let tree!: TestRenderer.ReactTestRenderer;
+    await act(async () => { tree = TestRenderer.create(React.createElement(JointWorkoutFeedCard, {workoutId:'joint-retry',publishedAt:'2026-09-11T00:00:00Z',participants:[]})); });
+    await act(async () => { tree.root.findByProps({accessibilityLabel:'Expandir entrenamiento conjunto'}).props.onPress(); });
+    expect(JSON.stringify(tree.toJSON())).toContain('No se pudo cargar el detalle del grupo.');
+    await act(async () => { tree.update(React.createElement(JointWorkoutFeedCard,{workoutId:'joint-retry',publishedAt:'2026-09-11T00:00:00Z',participants:[]})); });
+    expect(JSON.stringify(tree.toJSON())).not.toContain('No se pudo cargar el detalle del grupo.');
+    act(() => tree.unmount());
+    getJointWorkoutDetail.mockReset();
+  });
+
   test('refreshes an expanded post when another participant finishes', async () => {
     const firstDetail = { id: 'joint-1', createdAt: '2026-08-09T10:00:00Z', participants: [{ id: 'athlete-1', alias: 'Alex', avatarId: 'capigirl', status: 'completed' as const, relationshipKind: 'bro' as const, workout: { routineName: 'Upper', durationSeconds: 60, exercises: [] } }, { id: 'athlete-2', alias: 'Sam', avatarId: 'capiboy', status: 'active' as const, relationshipKind: 'bro' as const }] };
     const updatedDetail = { ...firstDetail, participants: [{ ...firstDetail.participants[0] }, { id: 'athlete-2', alias: 'Sam', avatarId: 'capiboy', status: 'completed' as const, relationshipKind: 'bro' as const, workout: { routineName: 'Lower', durationSeconds: 70, exercises: [] } }] };

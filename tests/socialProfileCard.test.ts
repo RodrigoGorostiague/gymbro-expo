@@ -11,6 +11,7 @@ vi.mock('../components/HapticPressable', async () => {
 });
 vi.mock('../components/ProfileAvatar', () => ({ ProfileAvatar: () => null }));
 
+import { MuscleBodyMap } from '../components/MuscleBodyMap';
 import { SocialProfileCard } from '../components/SocialProfileCard';
 
 describe('SocialProfileCard', () => {
@@ -26,11 +27,13 @@ describe('SocialProfileCard', () => {
     expect(onPress).toHaveBeenCalledOnce();
   });
 
-  test('uses the connected athlete presentation theme with rank and a mini radar', async () => {
+  test('uses the connected athlete presentation theme with rank and a body map', async () => {
     let tree: TestRenderer.ReactTestRenderer | undefined;
     await act(async () => { tree = TestRenderer.create(React.createElement(SocialProfileCard, { profile: { uid: 'member-2', alias: 'Moon athlete', avatarId: 'capigirl', frameId: 'avanzado', titleId: 'avanzado', categories: {}, presentationThemeId: 'moon', relationshipStatus: 'bro' }, insights: { progress: { level: 12, rank: 'Avanzado' }, muscleDistribution: [{ id: 'chest', label: 'Pecho', value: 3 }] }, onPress: vi.fn() })); });
     expect(tree!.root.find((node) => String(node.type) === 'LinearGradient').props.colors).toEqual(['#9FA8DA', '#C5CAE9', '#5C6BC0']);
     expect(tree!.root.findAll((node) => String(node.type) === 'Text').map((node) => node.children.join(''))).toContain('Nivel 12 · Avanzado');
-    expect(tree!.root.find((node) => String(node.type) === 'View' && node.props.accessibilityLabel?.startsWith('Distribución muscular compartida:'))).toBeDefined();
+    const map = tree!.root.findByType(MuscleBodyMap);
+    expect(map.props.palette.primary).toBe('#9FA8DA');
+    expect(map.props.projection.entries.find((e:any)=>e.id==='chest').value).toBe(3);
   });
 });
