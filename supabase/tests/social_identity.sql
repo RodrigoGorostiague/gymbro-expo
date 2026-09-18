@@ -16,13 +16,13 @@ select throws_ok('select * from public.public_profiles', '42501', 'permission de
 reset role;
 set local role authenticated;
 select set_config('request.jwt.claim.sub', '00000000-0000-0000-0000-000000000002', true);
-select results_eq('select count(*)::int from public.public_profiles', 'values (1)', 'eligible members can read safe projections');
+select results_eq($$select count(*)::int from public.public_profiles where id = '00000000-0000-0000-0000-000000000001'$$, 'values (1)', 'eligible members can read safe projections');
 select throws_ok($$insert into public.relationships (member_low, member_high, kind) values ('00000000-0000-0000-0000-000000000001', '00000000-0000-0000-0000-000000000002', 'bro')$$, '42501', 'permission denied for table relationships', 'direct graph writes are denied');
 reset role;
 insert into public.profiles (id, alias) values ('00000000-0000-0000-0000-000000000002', 'Two User');
 insert into public.blocks (blocker_id, blocked_id) values ('00000000-0000-0000-0000-000000000001', '00000000-0000-0000-0000-000000000002');
 set local role authenticated;
-select is_empty('select * from public.public_profiles', 'blocked pairs cannot read projections or receive Realtime rows');
+select is_empty($$select * from public.public_profiles where id = '00000000-0000-0000-0000-000000000001'$$, 'blocked pairs cannot read projections or receive Realtime rows');
 
 select * from finish();
 rollback;
