@@ -20,6 +20,10 @@ export interface CatalogSet {
   tipo: SetType;
   weight: number;
   reps: number;
+  /** Explicit prescription; absent fields retain legacy repetition/load semantics. */
+  durationSeconds?: number;
+  loadBasis?: 'external' | 'bodyweight' | 'added' | 'assisted';
+  dropGroupId?: string;
   /** Groups contiguous physical sets as one backoff prescription. */
   backoffGroupId?: string;
   /** Optional intensity target for this physical set. */
@@ -249,7 +253,12 @@ export interface PrivatePlanShareImport {
   mesocycleId: string | null;
 }
 
+/** Performed intensity belongs only to one execution, not its routine prescription. */
+export type ActualEffort = EffortTarget;
+
 export interface CompletedSet {
+  durationSeconds?: number;
+  actualEffort?: ActualEffort;
   setId: string;
   weight: number;
   reps: number;
@@ -290,7 +299,7 @@ export interface WorkoutRecapInput {
 export interface WorkoutRecapExercise {
   name: string;
   muscleGroupIds: MuscleGroup[];
-  sets: Array<{ weight: number; reps: number; completed: boolean }>;
+  sets: Array<{ weight: number; reps: number; durationSeconds?: number; completed: boolean; actualEffort?: ActualEffort }>;
 }
 
 export interface WorkoutRecap {
@@ -353,7 +362,7 @@ export interface WorkoutRecapSharePayload {
       loadMode: ExerciseLoadMode;
       loadUnit: LoadUnit;
       variant: ExerciseVariant;
-      sets: Array<Pick<CatalogSet, 'tipo' | 'weight' | 'reps' | 'effortTarget'> & { backoffGroup?: number }>;
+      sets: Array<Pick<CatalogSet, 'tipo' | 'weight' | 'reps' | 'effortTarget' | 'durationSeconds' | 'loadBasis'> & { backoffGroup?: number; dropGroup?: number }>;
     }>;
   };
   mesocycle?: {
@@ -363,7 +372,7 @@ export interface WorkoutRecapSharePayload {
     weeks: Array<Array<{ routineIndex: number; dayLabel?: string } | null>>;
     routines: NonNullable<WorkoutRecapSharePayload['routine']>[];
   };
-  performedSets?: Array<{ exerciseIndex: number; sets: Array<{ weight: number; reps: number; completed: boolean }> }>;
+  performedSets?: Array<{ exerciseIndex: number; sets: Array<{ weight: number; reps: number; durationSeconds?: number; completed: boolean; actualEffort?: ActualEffort }> }>;
 }
 
 export interface WorkoutRecapPage {
@@ -373,13 +382,15 @@ export interface WorkoutRecapPage {
 
 export interface ActiveWorkoutDraft {
   version: 1;
+  /** Explicit server-claimed transport; never inferred from group membership. */
+  transportMode?: 'online';
   owner: UserId;
   attemptId: string;
   routineId: string;
   startedAtMs: number;
   restTimerSeconds: number;
   completedSets: Record<string, boolean>;
-  setValues: Record<string, { weight: string; reps: string }>;
+  setValues: Record<string, { durationSeconds?: string; weight: string; reps: string; actualEffort?: ActualEffort }>;
   restEndsAtMs?: number;
   /** Optional pause metadata; omitted fields keep version-1 drafts backwards compatible. */
   pausedAtMs?: number;
@@ -411,21 +422,25 @@ export interface MuscleAttribution {
   weights?: Partial<Readonly<Record<MuscleGroup, number>>>;
 }
 
-export type SetPerformance =
+export type SetPerformance = { durationSeconds?: number; bodyweightUnspecified?: boolean; bodyweightIncluded?: boolean } & (
   | { mode: 'external-load'; reps: number; load: number; unit: LoadUnit }
   | { mode: 'bodyweight'; reps: number; bodyweight: number; unit: LoadUnit }
-  | { mode: 'assisted'; reps: number; assistance: number; unit: LoadUnit };
+  | { mode: 'assisted'; reps: number; assistance: number; unit: LoadUnit });
 
 export interface AttemptSetPlan {
   readonly id: string;
   readonly type: SetType;
   readonly targetReps?: number;
+  readonly targetDurationSeconds?: number;
+  readonly loadBasis?: CatalogSet['loadBasis'];
+  readonly dropGroupId?: string;
   readonly targetLoad?: number;
   readonly backoffGroupId?: string;
   readonly effortTarget?: EffortTarget;
 }
 
 export interface AttemptSetResult {
+  readonly actualEffort?: ActualEffort;
   readonly setId: string;
   readonly performed: boolean;
   readonly performance: SetPerformance | null;
@@ -437,6 +452,8 @@ export interface AttemptSetSnapshot {
 }
 
 export interface AttemptExerciseSnapshot {
+  /** Frozen on new captures; absent legacy variants must not be inferred. */
+  readonly variant?: ExerciseVariant;
   readonly exerciseId: string | null;
   readonly recordedName: string;
   readonly attribution: MuscleAttribution | null;

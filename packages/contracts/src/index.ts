@@ -1,6 +1,6 @@
 import { z } from 'zod';
 
-export type RoutineSet = { id: string; tipo: 'C' | 'F' | number; weight: number; reps: number; backoffGroupId?: string; effortTarget?: { kind: 'rir' | 'rpe'; value: number } };
+export type RoutineSet = { id: string; tipo: 'C' | 'F' | number; weight: number; reps: number; durationSeconds?: number; loadBasis?: 'external' | 'bodyweight' | 'added' | 'assisted'; dropGroupId?: string; backoffGroupId?: string; effortTarget?: { kind: 'rir' | 'rpe'; value: number } };
 export type ExerciseDefinitionSnapshot = { id: string; name: string; muscleGroups: string[]; loadMode: 'external-load' | 'bodyweight' | 'assisted'; loadUnit: 'kg' | 'lb'; variant: string };
 export type RoutineExercise = { id: string; catalogExerciseId?: string; definitionId?: string; definitionSnapshot?: ExerciseDefinitionSnapshot; name: string; muscleGroups: string[]; loadMode?: 'external-load' | 'bodyweight' | 'assisted'; loadUnit?: 'kg' | 'lb'; attribution?: { primary: string; secondary: string[]; weights?: Record<string, number> }; catalog?: { movementPattern: string | null; equipment: string | null; muscleParticipations: Array<{ muscleGroupId: string; role: 'Principal' | 'Secundario'; relevance: number; originalLabel: string }> }; variant: string; sets: RoutineSet[] };
 export type Routine = { id: string; version?: number; versionOf?: string; previousVersionId?: string; name: string; muscleGroups: string[]; exercises: RoutineExercise[]; createdAt: string; sharedFrom?: { requestId: string; senderId: string; acceptedAt: string }; isShared?: boolean; shareId?: string };
@@ -25,6 +25,9 @@ export const routineSetSchema = z.object({
   tipo: z.union([z.literal('C'), z.literal('F'), canonicalNumberSchema]),
   weight: canonicalNumberSchema,
   reps: canonicalNumberSchema,
+  durationSeconds: z.number().int().min(1).max(86400).optional(),
+  loadBasis: z.enum(['external', 'bodyweight', 'added', 'assisted']).optional(),
+  dropGroupId: idSchema.optional(),
   backoffGroupId: idSchema.optional(),
   effortTarget: effortTargetSchema.optional(),
 }).passthrough();
@@ -174,7 +177,7 @@ export const usableRoutineSchema: z.ZodType<Routine> = routineSchema.superRefine
     }
     if (new Set(exercise.sets.map(({ id }) => id)).size !== exercise.sets.length) context.addIssue({ code: z.ZodIssueCode.custom, message: 'Routine set IDs must be unique.', path: ['exercises', index, 'sets'] });
     exercise.sets.forEach((set, setIndex) => {
-      const validType = set.tipo === 'C' || set.tipo === 'F' || (Number.isInteger(set.tipo) && set.tipo >= 0 && set.tipo <= 10);
+      const validType = set.tipo === 'C' || set.tipo === 'F' || (Number.isInteger(set.tipo) && set.tipo >= 0 && set.tipo <= 100);
       if (!validType || !Number.isInteger(set.reps) || set.reps < 0 || set.reps > 1_000 || set.weight < 0 || set.weight > 10_000) context.addIssue({ code: z.ZodIssueCode.custom, message: 'Routine set prescription is outside usable limits.', path: ['exercises', index, 'sets', setIndex] });
     });
   });

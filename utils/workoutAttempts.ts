@@ -1,3 +1,5 @@
+import { setLoadBasis } from './setPrescription';
+import { actualEffortFields } from './actualEffort';
 import {
   AttemptCompletion,
   AttemptFinalization,
@@ -18,7 +20,7 @@ import {
 } from '../types';
 
 export interface AttemptCaptureInput { id: string; owner: UserProfile; routine: Routine; completedAt: string; durationSeconds: number;
-  restTimerSeconds: number; results: Readonly<Record<string, { performed: boolean; reps: number; load: number }>>;
+  restTimerSeconds: number; results: Readonly<Record<string, { performed: boolean; reps: number; durationSeconds?: number; load: number; actualEffort?: import('../types').ActualEffort }>>;
   lineage?: WorkoutLineage; jointWorkoutId?: string }
 
 function isValidLineage(lineage?: WorkoutLineage): lineage is WorkoutLineage {
@@ -36,9 +38,10 @@ export function createWorkoutAttempt(input: AttemptCaptureInput): WorkoutAttempt
       primary: muscles[0], secondary: muscles.slice(1),
       weights: Object.fromEntries(muscles.map((muscle) => [muscle, 1])),
     });
-    const mode = exercise.loadMode ?? 'external-load';
+
     const unit = exercise.loadUnit ?? 'kg';
     return { exerciseId: exercise.catalogExerciseId ?? exercise.id, recordedName: exercise.name, attribution,
+      ...(typeof exercise.variant === 'string' && exercise.variant.trim() ? { variant: exercise.variant } : {}),
       catalog: exercise.catalog ? {
         movementPattern: exercise.catalog.movementPattern,
         muscleParticipations: exercise.catalog.muscleParticipations.map((participation) => ({ ...participation })),
@@ -46,20 +49,26 @@ export function createWorkoutAttempt(input: AttemptCaptureInput): WorkoutAttempt
       sets: exercise.sets.map((set) => {
       const id = `${exercise.id}:${set.id}`;
       const actual = input.results[id];
-      const performance = !actual?.performed ? null : mode === 'external-load'
-        ? { mode, reps: actual.reps, load: actual.load, unit }
-        : mode === 'bodyweight' ? { mode, reps: actual.reps, bodyweight: actual.load, unit }
-          : { mode, reps: actual.reps, assistance: actual.load, unit };
+      const basis = setLoadBasis(exercise, set);
+      const mode = basis === 'bodyweight' ? 'bodyweight' : basis === 'assisted' ? 'assisted' : 'external-load';
+      const measurements = { reps: set.durationSeconds !== undefined ? 0 : actual?.reps ?? 0, ...(set.durationSeconds !== undefined ? { durationSeconds: actual?.durationSeconds ?? 0 } : {}), ...(basis === 'added' ? { bodyweightIncluded: true } : {}) };
+      const performance: SetPerformance | null = !actual?.performed ? null : mode === 'external-load'
+        ? { mode, ...measurements, load: actual.load, unit }
+        : mode === 'bodyweight' ? { mode, ...measurements, bodyweight: actual.load, ...(actual.load === 0 ? { bodyweightUnspecified: true } : {}), unit }
+          : { mode, ...measurements, assistance: actual.load, unit };
       return {
         plan: {
           id,
           type: set.tipo,
-          targetReps: set.tipo === 'F' ? undefined : set.reps,
+          targetReps: set.tipo === 'F' || set.durationSeconds !== undefined ? undefined : set.reps,
+          targetDurationSeconds: set.durationSeconds,
+          loadBasis: set.loadBasis,
+          dropGroupId: set.dropGroupId,
           targetLoad: set.weight,
           backoffGroupId: set.backoffGroupId,
           effortTarget: set.effortTarget,
         },
-        result: { setId: id, performed: actual?.performed ?? false, performance },
+        result: { setId: id, performed: actual?.performed ?? false, performance, ...(actual?.performed ? actualEffortFields(actual.actualEffort) : {}) },
       };
     }),
     };
@@ -87,7 +96,7 @@ export function attemptToSession(attempt: WorkoutAttempt): WorkoutSession {
         const performance = result.performance;
         const weight = !performance ? 0 : performance.mode === 'external-load'
           ? performance.load : performance.mode === 'bodyweight' ? performance.bodyweight : performance.assistance;
-        return { setId: plan.id, weight, reps: performance?.reps ?? 0, completed: result.performed };
+        return { setId: plan.id, weight, reps: performance?.reps ?? 0, ...(performance?.durationSeconds !== undefined ? { durationSeconds: performance.durationSeconds } : {}), completed: result.performed, ...(result.performed ? actualEffortFields(result.actualEffort) : {}) };
       }),
     })) };
 }
@@ -104,10 +113,10 @@ export function applySessionEdits(attempt: WorkoutAttempt, edited: WorkoutSessio
       if (nextExercise?.exerciseId !== original.exercises[exerciseIndex].exerciseId || next?.setId !== plan.id) {
         throw new Error('La estructura del intento de entrenamiento es inmutable.');
       }
-      const performance = result.performance && ({ ...result.performance, reps: next.reps,
+      const performance = result.performance && ({ ...result.performance, reps: next.reps, ...(result.performance.durationSeconds !== undefined ? { durationSeconds: next.durationSeconds ?? 0 } : {}),
         ...(result.performance.mode === 'external-load' ? { load: next.weight }
           : result.performance.mode === 'bodyweight' ? { bodyweight: next.weight } : { assistance: next.weight }) });
-      return { plan, result: { setId: plan.id, performed: next.completed, performance } };
+      return { plan, result: { setId: plan.id, performed: next.completed, performance, ...(next.completed ? actualEffortFields(next.actualEffort) : {}) } };
     }),
   }));
   return { ...attempt, completedAt: edited.completedAt, durationSeconds: edited.durationSeconds,
@@ -115,9 +124,12 @@ export function applySessionEdits(attempt: WorkoutAttempt, edited: WorkoutSessio
 }
 
 export function isValidPerformance(value: SetPerformance): boolean {
-  if (!Number.isInteger(value.reps) || value.reps <= 0 || !['kg', 'lb'].includes(value.unit)) return false;
+  if (!['kg', 'lb'].includes(value.unit)) return false;
+  if (value.durationSeconds !== undefined) {
+    if (!Number.isInteger(value.durationSeconds) || value.durationSeconds <= 0 || value.durationSeconds > 86400 || value.reps !== 0) return false;
+  } else if (!Number.isInteger(value.reps) || value.reps <= 0) return false;
   if (value.mode === 'external-load') return Number.isFinite(value.load) && value.load >= 0;
-  if (value.mode === 'bodyweight') return Number.isFinite(value.bodyweight) && value.bodyweight > 0;
+  if (value.mode === 'bodyweight') return Number.isFinite(value.bodyweight) && (value.bodyweight > 0 || (value.bodyweight === 0 && value.bodyweightUnspecified === true));
   return Number.isFinite(value.assistance) && value.assistance >= 0;
 }
 

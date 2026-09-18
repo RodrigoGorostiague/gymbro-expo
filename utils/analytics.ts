@@ -76,6 +76,12 @@ function comparison(current: number | null, previous: number | null): SignalComp
   };
 }
 
+/** Sum recorded duration using the existing core-progress validity rule. */
+export function sumAttemptDurationSeconds(attempts: readonly WorkoutAttempt[]): number {
+  return attempts.reduce((sum, attempt) => sum + (Number.isFinite(attempt.durationSeconds) && attempt.durationSeconds > 0
+    ? attempt.durationSeconds : 0), 0);
+}
+
 export function selectCoreProgressSignals(
   attempts: readonly WorkoutAttempt[],
   owner: UserProfile,
@@ -98,9 +104,7 @@ export function selectCoreProgressSignals(
     if (!target) continue;
 
     target.attempts += 1;
-    if (Number.isFinite(attempt.durationSeconds) && attempt.durationSeconds > 0) {
-      target.durationSeconds += attempt.durationSeconds;
-    }
+    target.durationSeconds += sumAttemptDurationSeconds([attempt]);
     target.validSets += attempt.completion.validSets;
     target.plannedSets += attempt.completion.plannedSets;
   }
@@ -187,6 +191,8 @@ export interface PerformancePartition {
 }
 
 function performanceValues(value: SetPerformance): Record<string, number> {
+  if (value.durationSeconds !== undefined) return { durationSeconds: value.durationSeconds };
+  if (value.bodyweightUnspecified) return { reps: value.reps };
   if (value.mode === 'external-load') return { reps: value.reps, load: value.load, volume: value.reps * value.load };
   if (value.mode === 'bodyweight') return { reps: value.reps, bodyweight: value.bodyweight };
   return { reps: value.reps, assistance: value.assistance };
@@ -215,7 +221,7 @@ export function selectExercisePerformance(
       if (exercise.exerciseId !== exerciseId) continue;
       matched = true;
       for (const value of getEligiblePerformances(exercise.sets)) {
-        const key = `${exerciseId}:${value.mode}:${value.unit}`;
+        const key = `${exerciseId}:${value.mode}:${value.unit}${value.durationSeconds !== undefined ? ':duration' : ''}${value.bodyweightIncluded ? ':added' : ''}${value.bodyweightUnspecified ? ':unweighed' : ''}`;
         const partition = attemptPartitions.get(key) ?? { mode: value.mode, unit: value.unit, values: [] };
         partition.values.push(performanceValues(value));
         attemptPartitions.set(key, partition);
@@ -488,7 +494,7 @@ export interface TrainingStatisticsSummary {
 }
 
 function performanceLoad(performance: SetPerformance): number | null {
-  if (performance.mode !== 'external-load') return null;
+  if (performance.mode !== 'external-load' || performance.durationSeconds !== undefined || performance.bodyweightIncluded) return null;
   return performance.load;
 }
 
@@ -531,7 +537,7 @@ export function selectTrainingStatistics(
         const volume = load * performance.reps;
         current.load = Math.max(current.load, load);
         current.volume += volume;
-        if (performance.reps <= 12) current.e1rm = Math.max(current.e1rm, load * (1 + performance.reps / 30));
+        if (performance.durationSeconds === undefined && !performance.bodyweightIncluded && performance.reps > 0 && performance.reps <= 12) current.e1rm = Math.max(current.e1rm, load * (1 + performance.reps / 30));
       }
       const key = `${exercise.exerciseId ?? exercise.recordedName}:${eligible[0]?.mode ?? ''}:${eligible[0]?.unit ?? ''}`;
       const before = previousBest.get(key);

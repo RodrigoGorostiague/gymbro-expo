@@ -3,6 +3,8 @@ import { ActiveWorkoutDraft, Exercise, ExerciseDefinition, Routine, RoutineExerc
 type IdFactory = () => string;
 
 export interface SessionSetValue {
+  durationSeconds?: string;
+  actualEffort?: import('../types').ActualEffort;
   weight: string;
   reps: string;
 }
@@ -14,7 +16,26 @@ export function nextEffectiveSessionSetNumber(sets: readonly RoutineSet[]): numb
 /** Keeps working-set labels contiguous while excluding warmup and failure sets. */
 export function normalizeSessionSetNumbers(sets: readonly RoutineSet[]): RoutineSet[] {
   let number = 0;
-  return sets.map((set) => typeof set.tipo === 'number' ? { ...set, tipo: ++number } : set);
+  const seen = new Set<string>();
+  const result: RoutineSet[] = [];
+  for (let index = 0; index < sets.length;) {
+    const set = sets[index];
+    if (!set.dropGroupId) {
+      result.push(typeof set.tipo === 'number' ? { ...set, tipo: ++number } : set);
+      index++; continue;
+    }
+    let end = index + 1;
+    while (end < sets.length && sets[end].dropGroupId === set.dropGroupId) end++;
+    if (end - index < 2) {
+      result.push({ ...set, dropGroupId: undefined, tipo: typeof set.tipo === 'number' ? ++number : set.tipo });
+    } else {
+      const group = seen.has(set.dropGroupId) ? `${set.dropGroupId}:${set.id}` : set.dropGroupId;
+      seen.add(group);
+      result.push(...sets.slice(index, end).map((member) => ({ ...member, tipo: 1, dropGroupId: group, backoffGroupId: undefined })));
+    }
+    index = end;
+  }
+  return result;
 }
 
 /** Mirrors routine set-type selection without touching the routine template. */
@@ -25,7 +46,7 @@ export function withSessionSetType(sets: readonly RoutineSet[], setId: string, t
     ? (typeof current.tipo === 'number' ? current.tipo : nextEffectiveSessionSetNumber(sets))
     : type;
   return normalizeSessionSetNumbers(sets.map((set) => set.id === setId
-    ? { ...set, tipo, ...(type === 'F' ? { effortTarget: { kind: 'rir', value: 0 } } : {}) }
+    ? { ...set, tipo, ...(type !== 'effective' ? { dropGroupId: undefined, backoffGroupId: undefined } : {}), ...(type === 'F' ? { effortTarget: { kind: 'rir', value: 0 } } : {}) }
     : set));
 }
 
@@ -36,7 +57,8 @@ export function reconcileSessionSetValues(routine: Routine, current: Readonly<Re
     for (const set of exercise.sets) {
       const key = `${exercise.id}-${set.id}`;
       values[key] = current[key] ?? {
-        weight: set.weight ? String(set.weight) : '',
+        weight: set.loadBasis === 'bodyweight' ? '0' : set.weight ? String(set.weight) : '',
+        ...(set.durationSeconds !== undefined ? { durationSeconds: String(set.durationSeconds) } : {}),
         reps: set.tipo === 'F' ? '0' : set.reps ? String(set.reps) : '',
       };
     }
