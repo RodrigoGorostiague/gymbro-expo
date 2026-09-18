@@ -6,7 +6,7 @@ import { withRepeat } from 'react-native-reanimated';
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
 
 const auth = vi.hoisted(() => ({ user: 'member-1' as string | null }));
-const data = vi.hoisted(() => ({ hydratedUserId: null as string | null }));
+const data = vi.hoisted(() => ({ hydratedUserId: null as string | null, offlineWorkoutEnabled: false }));
 const shop = vi.hoisted(() => ({ hydratedUserId: null as string | null }));
 
 vi.mock('../context/AuthContext', () => ({ useAuth: () => auth }));
@@ -21,6 +21,7 @@ describe('AppThemeLoadingOverlay', () => {
     vi.clearAllMocks();
     auth.user = 'member-1';
     data.hydratedUserId = null;
+    data.offlineWorkoutEnabled = false;
     shop.hydratedUserId = null;
   });
 
@@ -58,4 +59,11 @@ describe('AppThemeLoadingOverlay', () => {
     act(() => { tree!.update(React.createElement(AppThemeLoadingOverlay)); });
     expect(tree!.toJSON()).toBeNull();
   });
+  test('durable offline recovery is not trapped behind network-dependent shop hydration', () => {
+    data.hydratedUserId = 'member-1'; data.offlineWorkoutEnabled = true;
+    let tree: TestRenderer.ReactTestRenderer;
+    act(() => { tree = TestRenderer.create(React.createElement(AppThemeLoadingOverlay)); });
+    expect(tree!.toJSON()).toBeNull(); act(() => tree!.unmount());
+  });
+
 });

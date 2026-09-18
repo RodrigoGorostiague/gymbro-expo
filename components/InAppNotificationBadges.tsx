@@ -97,7 +97,7 @@ function InAppNotificationBadge({ item, busy, canInviteWorkoutStart, onAct, onDi
 
 export function InAppNotificationBadges() {
   const { user } = useAuth();
-  const { activeWorkoutDraft, associateActiveWorkoutJoint } = useData();
+  const { activeWorkoutDraft, prepareOnlineWorkout, associateActiveWorkoutJoint } = useData();
   const { theme } = useTheme();
   const insets = useSafeAreaInsets();
   const { realtimeRevision } = useSocial();
@@ -132,9 +132,10 @@ export function InAppNotificationBadges() {
     const actorId = workoutStartActorId(item);
     setBusy(item.id);
     try {
+      if ((workoutId || actorId) && (!activeWorkoutDraft?.routineSnapshot || !user)) throw new Error('Iniciá un entrenamiento antes de aceptar la invitación.');
       if ((workoutId || actorId) && activeWorkoutDraft?.routineSnapshot && user) {
         if (activeWorkoutDraft.pendingFinalization || activeWorkoutDraft.jointCancellationPending) throw new Error('El entrenamiento está finalizando.');
-        await publishWorkoutStartActivity(activeWorkoutDraft.routineSnapshot.name, activeWorkoutDraft.jointWorkoutId, activeWorkoutDraft.attemptId);
+        await prepareOnlineWorkout(); await publishWorkoutStartActivity(activeWorkoutDraft.routineSnapshot.name, activeWorkoutDraft.jointWorkoutId, activeWorkoutDraft.attemptId);
       }
       if (workoutId) {
         await respondToJointInvite(workoutId, true);

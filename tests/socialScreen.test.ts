@@ -64,6 +64,7 @@ vi.mock('../context/ThemeContext', () => ({
 }));
 vi.mock('../context/ShopContext', () => ({ useShop: () => ({ purchasedFrameIds: [] }) }));
 vi.mock('../components/AppScreenHeader', () => ({ AppScreenHeader: () => null }));
+vi.mock('../components/MuscleVolumeCard', () => ({ MuscleVolumeCard: (props: Record<string,unknown>) => React.createElement('MuscleVolumeCard', props) }));
 vi.mock('../components/MuscleDistributionRadar', async () => {
   const ReactModule = await import('react');
   return { MuscleDistributionRadar: (props: Record<string, unknown>) => ReactModule.createElement('MuscleDistributionRadar', props) };
@@ -180,6 +181,49 @@ describe('Community feed', () => {
     expect(texts.some((text) => text.includes('última actualización disponible'))).toBe(true);
     expect(tree.root.findAll((node) => String(node.type) === 'GlassButton' && node.props.title === 'Reintentar')).toHaveLength(1);
     act(() => tree.unmount());
+  });
+
+  test('keeps joint posts visible when the recap endpoint fails', async () => {
+    social.getWorkoutRecaps.mockRejectedValueOnce(new Error('Recap service unavailable'));
+    feedServices.listJointWorkoutPosts.mockResolvedValueOnce([{id:'joint-barrier',createdAt:'2026-09-11T10:00:00Z',updatedAt:'2026-09-11T10:00:00Z',participants:[]}] as never[]);
+    let tree!: TestRenderer.ReactTestRenderer;
+    await act(async () => { tree = TestRenderer.create(React.createElement(CommunityFeedScreen)); });
+    expect(tree.root.findAll((node) => node.props.workoutId === 'joint-barrier').length).toBeGreaterThan(0);
+    expect(tree.root.findAll((node) => String(node.type) === 'Text').some(node => node.children.join('').includes('Recap service unavailable'))).toBe(true);
+    act(() => tree.unmount());
+  });
+
+  test('renders joint posts immediately despite a hung recap endpoint and bounds refresh time', async () => {
+    vi.useFakeTimers();
+    let rejectLate!: (error: Error) => void;
+    social.getWorkoutRecaps.mockImplementationOnce(() => new Promise((_resolve, reject) => { rejectLate = reject; }));
+    feedServices.listJointWorkoutPosts.mockResolvedValueOnce([{id:'joint-fast',createdAt:'2026-09-11T10:00:00Z',updatedAt:'2026-09-11T10:00:00Z',participants:[]}] as never[]);
+    let tree!: TestRenderer.ReactTestRenderer;
+    await act(async () => { tree = TestRenderer.create(React.createElement(CommunityFeedScreen)); });
+    expect(tree.root.findAll((node) => node.props.workoutId === 'joint-fast').length).toBeGreaterThan(0);
+    expect(tree.root.find((node) => String(node.type) === 'FlatList').props.refreshControl.props.refreshing).toBe(true);
+    await act(async () => { await vi.advanceTimersByTimeAsync(10_000); });
+    expect(tree.root.find((node) => String(node.type) === 'FlatList').props.refreshControl.props.refreshing).toBe(false);
+    expect(tree.root.findAll((node) => String(node.type) === 'Text').map(node => node.children.join('')).join(' ')).toContain('tardó demasiado');
+    await act(async () => { rejectLate(new Error('Late failure must stay handled')); });
+    expect(tree.root.findAll((node) => String(node.type) === 'Text').map(node => node.children.join('')).join(' ')).not.toContain('Late failure must stay handled');
+    act(() => tree.unmount());
+    expect(vi.getTimerCount()).toBe(0);
+    vi.useRealTimers();
+  });
+
+  test('cleans hung feed timers on unmount and ignores later completion', async () => {
+    vi.useFakeTimers();
+    let resolveLate!: (value: any) => void;
+    social.getWorkoutRecaps.mockImplementationOnce(() => new Promise((resolve) => { resolveLate = resolve; }));
+    let tree!: TestRenderer.ReactTestRenderer;
+    await act(async () => { tree = TestRenderer.create(React.createElement(CommunityFeedScreen)); });
+    expect(vi.getTimerCount()).toBeGreaterThan(0);
+    await act(async () => tree.unmount());
+    expect(vi.getTimerCount()).toBe(0);
+    await act(async () => { resolveLate({recaps:[],nextCursor:'stale'}); });
+    expect(vi.getTimerCount()).toBe(0);
+    vi.useRealTimers();
   });
 
   test('retains unsaved identity fields across profile refresh and section navigation', async () => {
@@ -406,7 +450,7 @@ describe('Community feed', () => {
     await act(async () => { tree = TestRenderer.create(React.createElement(CommunityFeedScreen)); });
 
     const text = tree!.root.findAll((node) => String(node.type) === 'Text').map((node) => node.children.join(''));
-    expect(text).toEqual(expect.arrayContaining(['Brisas', 'Superó su mejor marca', 'Press banca · 960 kg-reps']));
+    expect(text).toEqual(expect.arrayContaining(['Brisas', 'RÉCORD PERSONAL', 'Press banca', '960 kg-reps']));
     expect(tree!.root.find((node) => String(node.type) === 'LinearGradient').props.colors).toEqual(['#D63384', '#FF85C0', '#9B59B6']);
   });
 
@@ -446,13 +490,12 @@ describe('Community feed', () => {
     expect(tree!.root.findAll((node) => String(node.type) === 'Text').map((node) => node.children.join(''))).not.toContain('Entrenamientos compartidos');
   });
 
-  test('derives the private profile distribution without requesting restricted social insights', async () => {
+  test('mounts the versioned owner volume card without requesting restricted social insights', async () => {
     let tree: TestRenderer.ReactTestRenderer;
     await act(async () => { tree = TestRenderer.create(React.createElement(ProfileScreen)); });
 
     expect(social.getProfileInsights).not.toHaveBeenCalled();
-    expect(tree!.root.find((node) => String(node.type) === 'MuscleDistributionRadar').props.data).toEqual([]);
-    expect(tree!.root.findAll((node) => String(node.type) === 'Text').map((node) => node.children.join(''))).toContain('Compartir distribución está activado en este borrador.');
+    expect(tree!.root.find((node) => String(node.type) === 'MuscleVolumeCard').props).toMatchObject({subjectId:'member-1',own:true});
   });
 
   test('selects an available profile avatar for the athlete sex', async () => {

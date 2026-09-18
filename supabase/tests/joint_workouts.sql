@@ -66,13 +66,21 @@ select set_config('request.jwt.claim.sub', '40000000-0000-0000-0000-000000000001
 select lives_ok($$select public.finish_joint_workout(current_setting('test.joint_id')::uuid, 'circle', '{"routineName":"Upper","durationSeconds":60,"exercises":[{"name":"Row","muscleGroupIds":["back"],"sets":[{"weight":80,"reps":8,"completed":true}]}],"sharePayload":{"version":1,"routine":{"name":"Upper","muscleGroups":["back"],"exercises":[{"name":"Row","muscleGroups":["back"],"loadMode":"external-load","loadUnit":"kg","variant":"barbell","sets":[{"tipo":1,"weight":80,"reps":8}]}]},"mesocycle":{"name":"Block","goal":"","durationWeeks":1,"weeks":[[{"routineIndex":0}]],"routines":[{"name":"Upper","muscleGroups":["back"],"exercises":[{"name":"Row","muscleGroups":["back"],"loadMode":"external-load","loadUnit":"kg","variant":"barbell","sets":[{"tipo":1,"weight":80,"reps":8}]}]}]},"performedSets":[{"exerciseIndex":0,"sets":[{"weight":80,"reps":8,"completed":true}]}]}}'::jsonb)$$, 'initiator completion stores the validated import payload');
 set local role postgres;
 select is((select status::text from public.joint_workout_participants where joint_workout_id = current_setting('test.joint_id')::uuid and participant_id = '40000000-0000-0000-0000-000000000004'), 'declined', 'an unaccepted invitation expires when the initiator finishes');
-select is((select count(*)::integer from public.joint_workout_posts where joint_workout_id = current_setting('test.joint_id')::uuid), 1, 'first real completion creates the single live group post');
-select ok((select last_activity_at >= created_at from public.joint_workout_posts where joint_workout_id = current_setting('test.joint_id')::uuid), 'the first completion establishes post activity');
+select is((select count(*)::integer from public.joint_workout_posts where joint_workout_id = current_setting('test.joint_id')::uuid), 0, 'first real completion waits for the other joined participants');
+select is((select count(*)::integer from public.joint_workout_posts where joint_workout_id = current_setting('test.joint_id')::uuid), 0, 'the first completion is not a visible partial post');
 select is((select completed_at is null from public.joint_workouts where id = current_setting('test.joint_id')::uuid), true, 'accepted active participants keep the group live after initiator completion');
 select is((select closed_at is not null from public.workout_start_activities where author_id = '40000000-0000-0000-0000-000000000001'), true, 'completion closes the initiator workout-start presence transactionally');
 insert into public.joint_workout_participants (joint_workout_id, participant_id, status, joined_at)
 values (current_setting('test.joint_id')::uuid, '40000000-0000-0000-0000-000000000005', 'active', now());
 delete from public.relationships where member_low = '40000000-0000-0000-0000-000000000001' and member_high = '40000000-0000-0000-0000-000000000005';
+set local role authenticated;
+select set_config('request.jwt.claim.sub', '40000000-0000-0000-0000-000000000002', true);
+select public.finish_joint_workout(current_setting('test.joint_id')::uuid, 'private', '{"routineName":"Lower","durationSeconds":70,"exercises":[{"name":"Squat","muscleGroupIds":["legs"],"sets":[{"weight":100,"reps":5,"completed":true}]}]}'::jsonb);
+select set_config('request.jwt.claim.sub', '40000000-0000-0000-0000-000000000003', true);
+select public.leave_joint_workout(current_setting('test.joint_id')::uuid);
+select set_config('request.jwt.claim.sub', '40000000-0000-0000-0000-000000000005', true);
+select public.leave_joint_workout(current_setting('test.joint_id')::uuid);
+set local role postgres;
 update public.joint_workout_posts set last_activity_at = now() + interval '1 hour' where joint_workout_id = current_setting('test.joint_id')::uuid;
 select set_config('test.future_joint_activity', (select last_activity_at::text from public.joint_workout_posts where joint_workout_id = current_setting('test.joint_id')::uuid), true);
 set local role authenticated;
@@ -100,7 +108,7 @@ select lives_ok($$select public.create_joint_participant_comment(current_setting
 select is(jsonb_array_length(public.list_joint_participant_comments(current_setting('test.joint_id')::uuid, '40000000-0000-0000-0000-000000000001')), 1, 'the participant discussion thread returns the created comment');
 select is(((public.get_joint_participant_reaction_states(current_setting('test.joint_id')::uuid) -> '40000000-0000-0000-0000-000000000001' ->> 'comment_count'))::integer, 1, 'joint participant engagement states include comment counters');
 select set_config('request.jwt.claim.sub', '40000000-0000-0000-0000-000000000004', true);
-select throws_like($$select public.respond_joint_workout_invite(current_setting('test.joint_id')::uuid, true)$$, 'joint workout invite unavailable', 'expired invitation cannot be accepted later');
+select throws_like($$select public.respond_joint_workout_invite(current_setting('test.joint_id')::uuid, true)$$, 'joint workout unavailable', 'expired invitation cannot be accepted later');
 
 set local role postgres;
 select set_config('request.jwt.claim.sub', '', true);

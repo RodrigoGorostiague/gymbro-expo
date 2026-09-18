@@ -7,12 +7,13 @@ globalThis.IS_REACT_ACT_ENVIRONMENT = true;
 
 const inbox = vi.hoisted(() => ({ listNotificationInbox: vi.fn(), markNotificationRead: vi.fn(), subscribeToNotificationInboxChanges: vi.fn() }));
 const joint = vi.hoisted(() => ({ respondToJointInvite: vi.fn(), inviteActiveWorkoutMember: vi.fn() }));
+const prepareOnlineWorkout = vi.hoisted(() => vi.fn(async () => undefined));
 const updateActiveWorkout = vi.hoisted(() => vi.fn());
 
 vi.mock('../context/SocialContext', () => ({ useSocial: () => ({ realtimeRevision: 0 }) }));
 vi.mock('../services/workoutStartActivity', () => ({ publishWorkoutStartActivity: vi.fn(async () => undefined) }));
 vi.mock('../context/AuthContext', () => ({ useAuth: () => ({ user: 'member-1' }) }));
-vi.mock('../context/DataContext', () => ({ useData: () => ({ activeWorkoutDraft: { attemptId: 'attempt-1', routineId: 'routine-1', routineSnapshot: { id: 'routine-1', name: 'Upper', muscleGroups: ['back'], exercises: [], createdAt: '2026-08-08T00:00:00Z' } }, associateActiveWorkoutJoint: updateActiveWorkout }) }));
+vi.mock('../context/DataContext', () => ({ useData: () => ({ activeWorkoutDraft: { attemptId: 'attempt-1', routineId: 'routine-1', routineSnapshot: { id: 'routine-1', name: 'Upper', muscleGroups: ['back'], exercises: [], createdAt: '2026-08-08T00:00:00Z' } }, prepareOnlineWorkout, associateActiveWorkoutJoint: updateActiveWorkout }) }));
 vi.mock('../context/ThemeContext', () => ({ useTheme: () => ({ theme: { tabBarBackground: '#111', primary: '#0f0', text: '#fff', textMuted: '#aaa', onPrimary: '#000' } }) }));
 vi.mock('../services/notificationInbox', () => inbox);
 vi.mock('../services/jointWorkouts', () => joint);

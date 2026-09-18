@@ -1,6 +1,6 @@
 import { useLatestRequest } from '../../hooks/useLatestRequest';
 import { useAuth } from '../../context/AuthContext';
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Alert, FlatList, RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { router, useFocusEffect } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -54,7 +54,7 @@ export default function CommunityFeedScreen() {
   const { user } = useAuth();
   const reads = useLatestRequest(user);
   const { theme } = useTheme();
-  const { getWorkoutRecaps, getCommunityActivities, deleteWorkoutRecap, realtimeRevision } = useSocial();
+  const { getWorkoutRecaps, getCommunityActivities, deleteWorkoutRecap, realtimeRevision, jointPublicationProgress = [], retryJointPublications, jointPublicationSyncError } = useSocial();
   const [recaps, setRecaps] = useState<WorkoutRecap[]>([]);
   const [recapCursor, setRecapCursor] = useState<string | null>(null);
   const [activityCursor, setActivityCursor] = useState<string | null>(null);
@@ -68,37 +68,57 @@ export default function CommunityFeedScreen() {
 
   useEffect(() => { setRecaps([]); setJointPosts([]); setActivities([]); setStartActivities([]); setBadges(null); setRecapCursor(null); setActivityCursor(null); }, [user]);
 
+  const pendingSections = useRef(new Set<() => void>());
+  useEffect(() => () => {
+    for (const cancel of pendingSections.current) cancel();
+  }, [user]);
+
   const load = useCallback(async (nextRecapCursor: string | null = null, nextActivityCursor: string | null = null, append = false) => {
     const currentRequest = reads.begin();
+    for (const cancel of pendingSections.current) cancel();
     setLoading(true);
     setError(null);
-    try {
-      const [page, posts, activities, starts, nextBadges] = await Promise.all([
-        getWorkoutRecaps(nextRecapCursor),
-        nextRecapCursor ? Promise.resolve(null) : listJointWorkoutPosts(),
-        getCommunityActivities(nextActivityCursor),
-        nextRecapCursor || nextActivityCursor ? Promise.resolve(null) : listWorkoutStartActivities().catch(() => null),
-        nextRecapCursor || nextActivityCursor ? Promise.resolve(null) : getCommunityBadgeCounts().catch(() => null),
-      ]);
-      if (!currentRequest()) return;
-      setRecaps((current) => append ? [...current, ...page.recaps.filter((item) => !current.some(({ id }) => id === item.id))] : page.recaps);
-      if (posts) setJointPosts(posts);
-       setActivities((current) => append ? [...current, ...activities.activities.filter((item) => !current.some(({ id }) => id === item.id))] : activities.activities);
-      if (starts) {
+    // Each section commits immediately. A hung sibling neither hides successful
+    // data nor keeps refresh busy forever; late responses are observed but ignored.
+    const section = <T,>(read: () => Promise<T>, apply: (value: T) => void) => new Promise<void>((resolve) => {
+      let settled = false;
+      const complete = () => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        pendingSections.current.delete(complete);
+        resolve();
+      };
+      const timer = setTimeout(() => {
+        if (currentRequest()) setError('Una sección del feed tardó demasiado. Puedes reintentar.');
+        complete();
+      }, 10_000);
+      pendingSections.current.add(complete);
+      void Promise.resolve().then(read).then((value) => {
+        if (!settled && currentRequest()) apply(value);
+      }).catch((reason) => {
+        if (!settled && currentRequest()) setError(reason instanceof Error ? reason.message : 'No se pudo actualizar una parte del feed.');
+      }).finally(complete);
+    });
+    await Promise.all([
+      section(() => getWorkoutRecaps(nextRecapCursor), (page) => {
+        setRecaps((current) => append ? [...current, ...page.recaps.filter((item) => !current.some(({ id }) => id === item.id))] : page.recaps);
+        setRecapCursor(page.nextCursor);
+      }),
+      section(() => nextRecapCursor ? Promise.resolve(null) : listJointWorkoutPosts(), (posts) => { if (posts) setJointPosts(posts); }),
+      section(() => getCommunityActivities(nextActivityCursor), (page) => {
+        setActivities((current) => append ? [...current, ...page.activities.filter((item) => !current.some(({ id }) => id === item.id))] : page.activities);
+        setActivityCursor(page.nextCursor);
+      }),
+      section(() => nextRecapCursor || nextActivityCursor ? Promise.resolve(null) : listWorkoutStartActivities(), (starts) => {
+        if (!starts) return;
         const receivedAt = Date.now();
         setNow(receivedAt);
         setStartActivities(activeWorkoutStartActivities(starts, receivedAt));
-      }
-      if (nextBadges) setBadges(nextBadges);
-       setRecapCursor(page.nextCursor);
-       setActivityCursor(activities.nextCursor);
-    } catch (reason) {
-      if (!currentRequest()) return;
-      // Preserve the last successful feed while clearly showing refresh failure.
-      setError(reason instanceof Error ? reason.message : 'No se pudo actualizar el feed.');
-    } finally {
-      if (currentRequest()) setLoading(false);
-    }
+      }),
+      section(() => nextRecapCursor || nextActivityCursor ? Promise.resolve(null) : getCommunityBadgeCounts(), (badges) => { if (badges) setBadges(badges); }),
+    ]);
+    if (currentRequest()) setLoading(false);
   }, [getCommunityActivities, getWorkoutRecaps, reads, user]);
 
   useFocusEffect(useCallback(() => { void load(); }, [load]));
@@ -163,6 +183,12 @@ export default function CommunityFeedScreen() {
     })}</View>
     <GlassButton title={badges?.total ? `Bandeja · ${badges.total} pendientes` : 'Abrir bandeja unificada'} variant="secondary" onPress={() => router.push('/community/inbox')} />
     <Text accessibilityRole="header" style={[styles.title, { color: theme.text }]}>Tu círculo en movimiento</Text>
+    {jointPublicationProgress.map((publication) => <GlassCard key={publication.workoutId}>
+      <Text accessibilityRole="text" style={{ color: theme.text }}>{publication.state === 'waiting' ? `Entrenamiento guardado. Esperando a ${publication.waitingCount ?? 0} integrantes.` : 'Entrenamiento guardado. Publicación conjunta pendiente.'}</Text>
+      <Text style={{ color: theme.textMuted }}>{publication.error ?? 'Se publicará cuando todos terminen o cancelen, o al cumplirse 24 horas desde el inicio del grupo.'}</Text>
+      <GlassButton title="Actualizar publicación" variant="secondary" onPress={() => void retryJointPublications()} />
+    </GlassCard>)}
+    {jointPublicationSyncError ? <GlassCard><Text accessibilityRole="alert" style={{ color: theme.text }}>{jointPublicationSyncError}</Text><GlassButton title="Reintentar sincronización" onPress={() => void retryJointPublications()} /></GlassCard> : null}
     {error ? <GlassCard><Text accessibilityRole="alert" style={{ color: theme.text }}>{error}{feed.length ? ' Mostrando la última actualización disponible.' : ''}</Text><GlassButton title="Reintentar" variant="secondary" onPress={() => void load()} /></GlassCard> : null}
     {!loading && !error && !feed.length ? <GlassCard><Text style={{ color: theme.textMuted }}>Todavía no hay actividad de tus conexiones. Cuando alguien entrene, aparecerá acá.</Text></GlassCard> : null}
     </View>}

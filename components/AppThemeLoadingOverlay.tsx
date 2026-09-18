@@ -1,5 +1,5 @@
 import React, { useEffect } from 'react';
-import { Image, StyleSheet, View } from 'react-native';
+import { Image, StyleSheet, Text, View } from 'react-native';
 import Animated, { cancelAnimation, Easing, useAnimatedStyle, useSharedValue, withRepeat, withTiming } from 'react-native-reanimated';
 import { useAuth } from '../context/AuthContext';
 import { useData } from '../context/DataContext';
@@ -11,11 +11,16 @@ const gymbroIcon = process.env.NODE_ENV === 'test' ? 0 : require('../assets/gymb
 
 export function AppThemeLoadingOverlay() {
   const { user } = useAuth();
-  const { hydratedUserId: dataHydratedUserId } = useData();
+  const { hydratedUserId: dataHydratedUserId, offlineWorkoutEnabled } = useData();
   const { hydratedUserId: shopHydratedUserId } = useShop();
+  const visible = Boolean(user && !offlineWorkoutEnabled && (dataHydratedUserId !== user || shopHydratedUserId !== user));
+  return <GymBroLoadingOverlay visible={visible} />;
+}
+
+/** Shared login/publication loader with the same rotating GymBro mark. */
+export function GymBroLoadingOverlay({ visible, label = 'Cargando tema', message }: { visible: boolean; label?: string; message?: string }) {
   const { theme } = useTheme();
   const rotation = useSharedValue(0);
-  const visible = Boolean(user && (dataHydratedUserId !== user || shopHydratedUserId !== user));
   const animationActive = useAnimationActivity(visible);
 
   useEffect(() => {
@@ -32,7 +37,7 @@ export function AppThemeLoadingOverlay() {
 
   return (
     <View
-      accessibilityLabel="Cargando tema"
+      accessibilityLabel={label}
       accessibilityRole="progressbar"
       accessibilityState={{ busy: true }}
       pointerEvents="auto"
@@ -42,6 +47,7 @@ export function AppThemeLoadingOverlay() {
       <Animated.View style={iconStyle}>
         <Image accessibilityLabel="Marca de GymBro" source={gymbroIcon} style={styles.icon} testID="theme-loading-logo" />
       </Animated.View>
+      {message ? <Text style={{ color: theme.text, fontSize: 16, marginTop: 24, textAlign: 'center' }}>{message}</Text> : null}
     </View>
   );
 }

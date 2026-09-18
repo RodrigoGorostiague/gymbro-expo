@@ -12,17 +12,19 @@ vi.mock('../components/GlassCard', async () => {
   return { GlassCard: ({ children }: { children: React.ReactNode }) => ReactModule.createElement('GlassCard', null, children) };
 });
 vi.mock('../components/ProfileAvatar', () => ({ ProfileAvatar: () => null }));
-vi.mock('../components/MiniMuscleDistributionRadar', async () => {
-  const ReactModule = await import('react');
-  return { MiniMuscleDistributionRadar: (props: Record<string, unknown>) => ReactModule.createElement('MiniMuscleDistributionRadar', props) };
-});
+import { MuscleBodyMap } from '../components/MuscleBodyMap';
 
 describe('WorkoutPublicationCard', () => {
-  test('renders the compact muscle radar from the safe feed distribution', () => {
+  test('renders one full body map from the safe feed distribution', () => {
     let tree: TestRenderer.ReactTestRenderer;
     act(() => { tree = TestRenderer.create(React.createElement(WorkoutPublicationCard, { now: Date.UTC(2026, 7, 8), recap: { id: 'recap-1', authorAlias: 'Alex', authorAvatarId: 'capigirl', authorThemeId: 'sakura', routineName: 'Upper', completedAt: '2026-08-08T10:00:00Z', durationSeconds: 3600, exerciseCount: 3, muscleGroupIds: ['pecho', 'tríceps'], muscleDistribution: [{ id: 'pecho', value: 3 }, { id: 'tríceps', value: 1 }], metrics: {}, caption: null, createdAt: '2026-08-08T10:00:00Z', templateAvailable: false, mesocycleAvailable: false, isAuthor: false } })); });
 
-    expect(tree!.root.find((node) => String(node.type) === 'MiniMuscleDistributionRadar').props.data).toEqual([{ id: 'pecho', label: 'pecho', value: 3 }, { id: 'tríceps', label: 'tríceps', value: 1 }]);
+    const maps = tree!.root.findAllByType(MuscleBodyMap);
+    expect(maps).toHaveLength(1);
+    expect(maps[0].props.compact).toBe(false);
+    expect(maps[0].props.projection.entries.find((e:any)=>e.id==='chest').value).toBe(3);
+    expect(maps[0].props.palette.primary).toBeDefined();
+    act(()=>tree!.unmount());
   });
 
   test('uses a separate star action without changing the summary navigation surface', () => {

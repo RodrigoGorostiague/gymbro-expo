@@ -1,5 +1,5 @@
 begin;
-select plan(11);
+select plan(14);
 
 insert into auth.users (id, instance_id, aud, role, email, encrypted_password, email_confirmed_at, raw_app_meta_data, raw_user_meta_data, created_at, updated_at)
 values
@@ -20,9 +20,9 @@ create function pg_temp.attempt(attempt_id text, completed_at text, load_value i
 returns jsonb language sql as $attempt$
   select jsonb_build_object(
     'version', 1, 'id', attempt_id, 'owner', public.require_actor(), 'routineId', 'routine-milestone',
-    'recordedRoutineName', 'Private routine name', 'completedAt', completed_at, 'durationSeconds', 60, 'restTimerSeconds', 30,
-    'exercises', jsonb_build_array(jsonb_build_object('exerciseId', 'EX-6000', 'recordedName', 'Untrusted name', 'sets', jsonb_build_array(
-      jsonb_build_object('plan', jsonb_build_object('id', attempt_id || '-set'), 'result', jsonb_build_object('setId', attempt_id || '-set', 'performed', true, 'performance', jsonb_build_object('mode', 'external-load', 'reps', 8, 'load', load_value, 'unit', 'kg'))
+    'recapPublicationKey', 'milestone-' || attempt_id, 'recordedRoutineName', 'Private routine name', 'completedAt', completed_at, 'durationSeconds', 60, 'restTimerSeconds', 30,
+    'exercises', jsonb_build_array(jsonb_build_object('exerciseId', 'EX-6000', 'variant', 'Barra', 'recordedName', 'Untrusted name', 'sets', jsonb_build_array(
+      jsonb_build_object('plan', jsonb_build_object('id', attempt_id || '-set', 'type', 1), 'result', jsonb_build_object('setId', attempt_id || '-set', 'performed', true, 'performance', jsonb_build_object('mode', 'external-load', 'reps', 8, 'load', load_value, 'unit', 'kg'))
     )))), 'completion', '{}'::jsonb, 'reward', '{}'::jsonb, 'rewardApplication', '{}'::jsonb
   );
 $attempt$;
@@ -33,12 +33,17 @@ select is((select closed_at is not null from public.workout_start_activities whe
 set local role authenticated;
 select lives_ok($$select public.finalize_training_attempt(pg_temp.attempt('pr', '2026-08-10T12:00:00Z', 30))$$, 'personal record finalizes');
 set local role postgres;
-select is((select count(*) from public.community_activities where author_id = public.require_actor() and kind = 'personal_record'), 1::bigint, 'personal record activity is server-generated once');
+select is((select count(*) from public.community_activities where author_id = public.require_actor() and kind = 'personal_record'), 0::bigint, 'record stays private before review');
+set local role authenticated;
+select is(public.stage_workout_completion('pr', '{"routine_name":"Upper","completed_at":"2026-08-10T12:00:00Z","duration_seconds":60,"exercise_count":0,"metrics":{},"publication_key":"milestone-pr","exercise_details":{"exercises":[]}}'), true, 'recap is staged before confirmation');
+select lives_ok($$select public.confirm_workout_completion('pr', array[(public.get_workout_completion_preview('pr')->'records'->0->>'id')::uuid])$$, 'one selected record is confirmed');
+set local role postgres;
+select is((select count(*) from public.community_activities where author_id = public.require_actor() and kind = 'personal_record'), 1::bigint, 'selected record activity is server-generated once');
 select is((select payload ->> 'exercise_name' from public.community_activities where author_id = public.require_actor() and kind = 'personal_record'), 'Catalog Bench Press', 'personal record uses the catalog display name, not attempt text');
 set local role authenticated;
 select lives_ok($$select public.finalize_training_attempt(pg_temp.attempt('pr', '2026-08-10T12:00:00Z', 999))$$, 'retry remains successful');
 set local role postgres;
-select is((select count(*) from public.community_activities where author_id = public.require_actor() and source_key = 'personal-record:pr'), 1::bigint, 'event idempotency survives a changed retry');
+select is((select count(*) from public.community_activities where author_id = public.require_actor() and source_key like 'selected-record:%'), 1::bigint, 'event idempotency survives a changed retry');
 set local role authenticated;
 select is_empty($$select item.value from jsonb_array_elements(public.list_community_activities() -> 'activities') item(value) where item.value ->> 'kind' = 'rank_up'$$, 'ordinary levels do not create a per-level activity');
 

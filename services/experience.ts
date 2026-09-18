@@ -41,7 +41,7 @@ export async function loadExperienceProgress(): Promise<ExperienceProgress> {
 
 const activityKinds: readonly CommunityActivityKind[] = ['rank_up', 'personal_record', 'mesocycle_completed', 'mesocycle_perfect_week', 'weekly_goal', 'weekly_streak', 'first_joint_workout', 'joint_workout_completed', 'weekly_volume_record', 'monthly_volume_record', 'monthly_consistency', 'muscle_balance_improved'];
 
-function asActivity(value: unknown): CommunityActivity | null {
+export function asActivity(value: unknown): CommunityActivity | null {
   if (!isRecord(value) || typeof value.kind !== 'string' || !activityKinds.includes(value.kind as CommunityActivityKind)
     || typeof value.id !== 'string' || typeof value.author_alias !== 'string' || typeof value.created_at !== 'string' || !isRecord(value.payload)) return null;
   const identity = {

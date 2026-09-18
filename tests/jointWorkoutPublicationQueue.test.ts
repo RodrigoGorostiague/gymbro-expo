@@ -135,3 +135,36 @@ describe('joint workout publication queue', () => {
     await expect(loadPendingJointWorkoutPublications('member-2')).resolves.toEqual([{ ...publication, attemptId: 'attempt-2' }]);
   });
 });
+
+describe('server publication barrier', () => {
+  test('persists waiting across reloads and removes only after the group is published', async () => {
+    const service = await import('../services/jointWorkouts');
+    const { loadJointPublicationProgress } = await import('../services/jointWorkoutPublicationQueue');
+    const submit = vi.spyOn(service, 'submitJointWorkoutPublication').mockResolvedValue({ state: 'waiting', workoutId: 'joint-1', waitingCount: 1, expiresAt: '2026-09-12T00:00:00Z' });
+    await queueJointWorkoutPublication('barrier-owner', publication);
+    expect(await flushPendingJointWorkoutPublications('barrier-owner')).toBe(0);
+    expect(await loadJointPublicationProgress('barrier-owner')).toEqual([{ workoutId: 'joint-1', state: 'waiting', waitingCount: 1, error: undefined }]);
+    expect(await loadPendingJointWorkoutPublications('barrier-owner')).toHaveLength(1);
+    submit.mockResolvedValue({ state: 'published', workoutId: 'joint-1', waitingCount: 0, expiresAt: '2026-09-12T00:00:00Z' });
+    expect(await flushPendingJointWorkoutPublications('barrier-owner')).toBe(1);
+    expect(await loadJointPublicationProgress('barrier-owner')).toEqual([]);
+    submit.mockRestore();
+  });
+  test('persists actionable retry errors and clears them after server acknowledgement', async () => {
+    const service = await import('../services/jointWorkouts');
+    const { loadJointPublicationProgress } = await import('../services/jointWorkoutPublicationQueue');
+    const submit = vi.spyOn(service, 'submitJointWorkoutPublication').mockRejectedValue(new Error('Network offline'));
+    await queueJointWorkoutPublication('error-owner', publication);
+    expect(await flushPendingJointWorkoutPublications('error-owner')).toBe(0);
+    expect(await loadJointPublicationProgress('error-owner')).toEqual([{workoutId:'joint-1',state:'error',waitingCount:undefined,error:'Network offline'}]);
+    submit.mockResolvedValue({state:'waiting',workoutId:'joint-1',waitingCount:2,expiresAt:'2026-09-12T00:00:00Z'});
+    await flushPendingJointWorkoutPublications('error-owner');
+    expect((await loadJointPublicationProgress('error-owner'))[0].state).toBe('waiting');
+    submit.mockRestore();
+  });
+  test('keeps recorded duration independent of the 24-hour group deadline', async () => {
+    await queueJointWorkoutPublication('long-owner', {...publication,completedWorkout:{...publication.completedWorkout,durationSeconds:90000}});
+    expect(await loadPendingJointWorkoutPublications('long-owner')).toHaveLength(1);
+    await expect(queueJointWorkoutPublication('long-owner',{...publication,completedWorkout:{...publication.completedWorkout,durationSeconds:2147483648}})).rejects.toMatchObject({code:'invalid-command'});
+  });
+});

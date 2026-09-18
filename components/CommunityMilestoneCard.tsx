@@ -1,3 +1,4 @@
+import { personalRecordPresentation } from '../utils/personalRecordPresentation';
 import { ThemeFamilyTexture } from './ThemeFamilyTexture';
 import { familyForTheme } from '../constants/themeFamilies';
 import { GlassButton } from './UI';
@@ -16,7 +17,10 @@ import { ProfileTitleBadge } from './ProfileTitleBadge';
 function milestoneCopy(activity: CommunityMilestoneActivity): { label: string; title: string; detail: string } {
   const payload = activity.payload;
   switch (activity.kind) {
-    case 'personal_record': return { label: 'RÉCORD PERSONAL', title: 'Superó su mejor marca', detail: `${payload.exercise_name ?? 'Ejercicio'} · ${payload.best_score ?? ''} ${payload.score_unit ?? ''}`.trim() };
+    case 'personal_record': {
+      const record = personalRecordPresentation(activity);
+      return { label: record.label.toLocaleUpperCase(), title: `${record.exercise}${record.previous ? `\nAntes: ${record.previous}` : ''}`, detail: record.value };
+    }
     case 'mesocycle_completed': return { label: 'MESOCICLO', title: 'Finalizó su mesociclo', detail: 'Constancia completada.' };
     case 'mesocycle_perfect_week': return { label: 'SEMANA PERFECTA', title: 'Completó cada sesión planificada', detail: `Semana ${payload.week_number ?? ''}`.trim() };
     case 'weekly_goal': return { label: 'OBJETIVO SEMANAL', title: 'Cumplió su objetivo semanal', detail: `${payload.target_workouts ?? ''} entrenamientos` };
@@ -30,7 +34,7 @@ function milestoneCopy(activity: CommunityMilestoneActivity): { label: string; t
   }
 }
 
-export function CommunityMilestoneCard({ activity, now }: { activity: CommunityActivity; now: number }) {
+export function CommunityMilestoneCard({ activity, now, preview = false }: { activity: CommunityActivity; now: number; preview?: boolean }) {
   const { theme } = useTheme();
   const [expanded, setExpanded] = useState(false);
   const authorTheme = getShopTheme(activity.authorThemeId ?? '') ?? THEMES.rodaja;
@@ -45,11 +49,11 @@ export function CommunityMilestoneCard({ activity, now }: { activity: CommunityA
         <ProfileAvatar avatarId={activity.authorAvatarId} frameId={unlockedFrameId} level={activity.level} size={82} borderColor="rgba(255,255,255,0.7)" />
         <Text style={styles.rankAlias}>{activity.authorAlias}</Text>
         <Text style={styles.rankCopy}>Desbloqueó un nuevo rango</Text>
-        <Text style={styles.time}>{formatRelativeTime(activity.createdAt, now)}</Text>
+        <Text style={styles.time}>{preview ? 'Vista previa' : formatRelativeTime(activity.createdAt, now)}</Text>
       </LinearGradient>
       <Text style={[styles.rankTitle, { color: theme.text }]}>Nivel {activity.level} · {activity.rank}</Text>
       {unlockedTitleId ? <ProfileTitleBadge titleId={unlockedTitleId} size={140} /> : null}
-      <GlassButton title={expanded ? 'Ocultar contexto del hito' : 'Ver contexto del hito'} variant="secondary" onPress={() => setExpanded((value) => !value)} />
+      {!preview ? <GlassButton title={expanded ? 'Ocultar contexto del hito' : 'Ver contexto del hito'} variant="secondary" onPress={() => setExpanded((value) => !value)} /> : null}
       {expanded ? <Text style={{ color: theme.textMuted }}>Registrado el {new Date(activity.createdAt).toLocaleDateString('es')}. Este hito muestra solo la información que el atleta compartió.</Text> : null}
     </GlassCard>;
   }
@@ -58,7 +62,7 @@ export function CommunityMilestoneCard({ activity, now }: { activity: CommunityA
     <LinearGradient colors={[authorTheme.primary, authorTheme.accent, authorTheme.secondary]} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={styles.banner}>
       <ProfileAvatar avatarId={activity.authorAvatarId} frameId={activity.authorFrameId} size={48} borderColor="rgba(255,255,255,0.7)" />
       <View style={styles.copy}><Text style={styles.alias}>{activity.authorAlias}</Text><ProfileTitleBadge titleId={activity.authorTitleId} /><Text style={styles.action}>{copy.label}</Text></View>
-      <Text style={styles.time}>{formatRelativeTime(activity.createdAt, now)}</Text>
+      <Text style={styles.time}>{preview ? 'Vista previa' : formatRelativeTime(activity.createdAt, now)}</Text>
     </LinearGradient>
     <View style={[styles.achievement, { backgroundColor: authorTheme.background[0], borderColor: authorTheme.primary }]}>
       <ThemeFamilyTexture family={familyForTheme(authorTheme).texture} color={authorTheme.accent} opacity={0.16} />
@@ -66,7 +70,7 @@ export function CommunityMilestoneCard({ activity, now }: { activity: CommunityA
       <Text accessibilityRole="header" style={[styles.achievementValue, { color: authorTheme.text }]}>{copy.detail}</Text>
       <Text style={[styles.title, { color: authorTheme.text }]}>{copy.title}</Text>
     </View>
-    <GlassButton title={expanded ? 'Ocultar contexto del hito' : 'Ver contexto del hito'} variant="secondary" onPress={() => setExpanded((value) => !value)} />
+    {!preview ? <GlassButton title={expanded ? 'Ocultar contexto del hito' : 'Ver contexto del hito'} variant="secondary" onPress={() => setExpanded((value) => !value)} /> : null}
       {expanded ? <Text style={{ color: theme.textMuted }}>Registrado el {new Date(activity.createdAt).toLocaleDateString('es')}. Este hito muestra solo la información que el atleta compartió.</Text> : null}
   </GlassCard>;
 }

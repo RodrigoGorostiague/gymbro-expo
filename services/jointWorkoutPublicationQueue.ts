@@ -1,5 +1,6 @@
+import { withTimeout } from '../utils/withTimeout';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { finishJointWorkoutAttempt, JointCompletedWorkout, JointVisibility } from './jointWorkouts';
+import { submitJointWorkoutPublication, JointPublicationStatus, JointCompletedWorkout, JointVisibility } from './jointWorkouts';
 import { asSharePayload } from './workoutRecapFeed';
 
 export type PendingJointWorkoutPublication = {
@@ -17,6 +18,8 @@ type StoredPublication = PendingJointWorkoutPublication & {
   version: 1;
   owner: string;
   state: 'prepared' | 'ready';
+  publicationStatus?: JointPublicationStatus;
+  lastError?: string;
 };
 
 type StoredQueue = {
@@ -64,7 +67,7 @@ function validLabel(value: unknown, max = 120): value is string {
 function isCompletedWorkout(value: unknown): value is JointCompletedWorkout {
   if (!isRecord(value) || !hasOnly(value, ['routineName', 'durationSeconds', 'exercises', 'sharePayload'])
     || !validLabel(value.routineName) || !Number.isInteger(value.durationSeconds)
-    || (value.durationSeconds as number) < 0 || (value.durationSeconds as number) > 18_000
+    || (value.durationSeconds as number) < 0 || (value.durationSeconds as number) > 2_147_483_647
     || !Array.isArray(value.exercises) || value.exercises.length > 100) return false;
   const validSet = (set: unknown) => isRecord(set) && hasOnly(set, ['weight', 'reps', 'completed'])
     && typeof set.weight === 'number' && Number.isFinite(set.weight) && set.weight >= 0 && set.weight <= 10_000
@@ -86,10 +89,10 @@ function isPublicationInput(value: unknown): value is PendingJointWorkoutPublica
 }
 
 function asStoredPublication(value: unknown, owner: string): StoredPublication | null {
-  if (!isRecord(value) || !hasOnly(value, ['version', 'owner', 'state', 'attemptId', 'workoutId', 'visibility', 'completedWorkout'])
+  if (!isRecord(value) || !hasOnly(value, ['version', 'owner', 'state', 'attemptId', 'workoutId', 'visibility', 'completedWorkout', 'publicationStatus', 'lastError'])
     || value.version !== 1 || value.owner !== owner || (value.state !== 'prepared' && value.state !== 'ready')) return null;
   const input = { attemptId: value.attemptId, workoutId: value.workoutId, visibility: value.visibility, completedWorkout: value.completedWorkout };
-  return isPublicationInput(input) ? { ...input, version: 1, owner, state: value.state } : null;
+  return isPublicationInput(input) ? { ...input, version: 1, owner, state: value.state, ...(isRecord(value.publicationStatus) && ['waiting', 'published'].includes(String(value.publicationStatus.state)) && typeof value.publicationStatus.workoutId === 'string' && typeof value.publicationStatus.waitingCount === 'number' && Number.isInteger(value.publicationStatus.waitingCount) && value.publicationStatus.waitingCount >= 0 && typeof value.publicationStatus.expiresAt === 'string' ? { publicationStatus: value.publicationStatus as JointPublicationStatus } : {}), ...(typeof value.lastError === 'string' ? { lastError: value.lastError } : {}) } : null;
 }
 
 function asLegacyPublication(value: unknown, owner: string): StoredPublication | null {
@@ -184,15 +187,33 @@ export async function flushPendingJointWorkoutPublications(
     for (const publication of [...pending]) {
       if (publication.state !== 'ready') continue;
       try {
+        let status: JointPublicationStatus | undefined;
         if (publish) await publish(publication.workoutId, publication.visibility, publication.completedWorkout);
-        else await finishJointWorkoutAttempt(owner, publication.attemptId, publication.workoutId, publication.visibility, publication.completedWorkout);
+        else status = await withTimeout(submitJointWorkoutPublication(owner, publication.attemptId, publication.workoutId, publication.visibility, publication.completedWorkout), 10_000, 'Joint publication synchronization');
+        if (status?.state === 'waiting') {
+          pending = pending.map((item) => item.workoutId === publication.workoutId ? { ...item, publicationStatus: status, lastError: undefined } : item);
+          await save(owner, pending);
+          continue;
+        }
         pending = pending.filter((item) => item.workoutId !== publication.workoutId);
         await save(owner, pending);
         published += 1;
-      } catch {
-        // Keep the durable command for the next retry; finish_joint_workout is idempotent.
+      } catch (error) {
+        const message = error instanceof Error ? error.message : 'Joint publication could not be synchronized.';
+        pending = pending.map((item) => item.workoutId === publication.workoutId ? { ...item, lastError: message } : item);
+        await save(owner, pending);
       }
     }
     return published;
   });
+}
+
+export type JointPublicationProgress = { workoutId: string; state: 'pending' | 'waiting' | 'error'; waitingCount?: number; error?: string };
+export async function loadJointPublicationProgress(owner: string): Promise<JointPublicationProgress[]> {
+  return runForOwner(owner, async () => (await load(owner)).map((item) => ({
+    workoutId: item.workoutId,
+    state: item.lastError ? 'error' : item.publicationStatus?.state === 'waiting' ? 'waiting' : 'pending',
+    waitingCount: item.publicationStatus?.waitingCount,
+    error: item.lastError,
+  })));
 }
