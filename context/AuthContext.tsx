@@ -2,6 +2,8 @@ import React, { createContext, useContext, useEffect, useState } from 'react';
 import { UserId } from '../types';
 import { supabase, supabaseConfigurationError, subscribeToSupabaseAppState } from '../services/supabase';
 import { bootstrapOwnProfile } from '../services/socialGraph';
+import { withTimeout } from '../utils/withTimeout';
+import { confirmOfflineOwner, forgetOfflineOwner, isConfirmedOfflineOwner, isTransportFailure } from '../services/offlineWorkout';
 import { loadLegacyAlias, migrateLegacyAliasToUid } from '../utils/storage';
 
 interface AuthContextValue {
@@ -44,14 +46,22 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       return () => { active = false; };
     }
 
-    const applySession = async (session: { user: { id: string; email?: string | null } } | null) => {
+    let sessionRevision = 0;
+    const applySession = async (session: { user: { id: string; email?: string | null }; access_token?: string } | null, restoring = false) => {
+      const revision = ++sessionRevision;
       if (!session) {
         if (active) { setUser(null); setUserEmail(null); setAuthError(null); }
         return;
       }
       await migrateLegacyAliasToUid(legacyAlias, session.user.id);
-      await bootstrapOwnProfile();
-      if (active) { setUser(session.user.id); setUserEmail(session.user.email ?? null); setAuthError(null); }
+      try {
+        await withTimeout(bootstrapOwnProfile(), 8_000, 'Profile bootstrap');
+        if (!active || revision !== sessionRevision) return;
+        await confirmOfflineOwner(session.user.id).catch(() => undefined);
+      } catch (error) {
+        if (!restoring || !session.access_token || !isTransportFailure(error) || !await isConfirmedOfflineOwner(session.user.id)) throw error;
+      }
+      if (active && revision === sessionRevision) { setUser(session.user.id); setUserEmail(session.user.email ?? null); setAuthError(null); }
     };
 
     const initialize = async () => {
@@ -59,7 +69,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         legacyAlias = await loadLegacyAlias();
         const { data, error } = await client.auth.getSession();
         if (error) throw error;
-        await applySession(data.session);
+        await applySession(data.session, true);
         if (active) setAuthError(null);
       } catch (error) {
         if (active) setAuthError(authErrorMessage(error));
@@ -124,6 +134,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     if (!supabase) return;
     const { error } = await supabase.auth.signOut();
     if (error) throw error;
+    await forgetOfflineOwner();
     setUser(null);
     setUserEmail(null);
   };

@@ -13,12 +13,13 @@ export type ActiveWorkoutTiming = {
 export function reconcileActiveWorkoutTiming(
   draft: ActiveWorkoutDraft,
   nowMs: number,
+  preserveDraft = false,
 ): ActiveWorkoutTiming {
   if (draft.pendingFinalization) return { draft, elapsedSeconds: draft.pendingFinalization.attempt.durationSeconds, restRemainingSeconds: 0, isResting: false, cleanup: 'none' };
   const pausedDurationMs = Math.max(0, draft.pausedDurationMs ?? 0);
   const currentPauseMs = draft.pausedAtMs ? Math.max(0, nowMs - draft.pausedAtMs) : 0;
   const effectiveNowMs = nowMs - pausedDurationMs - currentPauseMs;
-  if (effectiveNowMs >= draft.startedAtMs + ACTIVE_WORKOUT_EXPIRY_MS) {
+  if (!preserveDraft && effectiveNowMs >= draft.startedAtMs + ACTIVE_WORKOUT_EXPIRY_MS) {
     return { draft: null, elapsedSeconds: 0, restRemainingSeconds: 0, isResting: false, cleanup: 'remove-draft' };
   }
 

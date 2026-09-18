@@ -1,7 +1,9 @@
 import React from 'react';
+import { __emitAppState, __resetAppState } from './helpers/reactNativeStub';
 import TestRenderer, { act } from 'react-test-renderer';
 import { beforeEach, describe, expect, test, vi } from 'vitest';
 import { CatalogLibrary } from '../types';
+import { createWorkoutAttempt } from '../utils/workoutAttempts';
 
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -29,9 +31,12 @@ const trainingState = vi.hoisted(() => ({
   value: { definitions: [] as any[], attempts: [] as any[], sessions: [] as any[], activeWorkoutDraft: null as any },
   load: vi.fn(async () => trainingState.value),
   save: vi.fn(async () => undefined),
+  start: vi.fn(async (draft: any) => draft),
   import: vi.fn(async () => undefined),
   experience: vi.fn(async () => ({ level: 1, rank: 'Principiante', xpIntoLevel: 0, xpForNextLevel: 100, totalXp: 0 })),
 }));
+const offlineRpc = vi.hoisted(() => vi.fn(async (_name: string, _input?: unknown) => ({ data: null as any, error: {code:'PGRST202'} as any })));
+vi.mock('../services/supabase', () => ({ supabase: { rpc: offlineRpc }, supabaseConfigurationError: null }));
 const finalizeAttempt = vi.hoisted(() => vi.fn());
 
 vi.mock('@react-native-async-storage/async-storage', () => ({ default: storage }));
@@ -46,14 +51,17 @@ vi.mock('../services/trainingLibrary', () => ({
   saveTrainingRoutines: trainingLibrary.saveRoutines,
   saveTrainingMesocycles: trainingLibrary.saveMesocycles,
 }));
-vi.mock('../services/trainingState', () => ({
+vi.mock('../services/trainingState', async (importOriginal) => ({
+  ...await importOriginal<typeof import('../services/trainingState')>(),
   loadTrainingState: trainingState.load,
   saveTrainingState: trainingState.save,
+  startTrainingWorkout: trainingState.start,
   importLegacyCustomDefinitions: trainingState.import,
   loadExperienceProgress: trainingState.experience,
   finalizeTrainingAttempt: finalizeAttempt,
 }));
-vi.mock('../services/experience', () => ({
+vi.mock('../services/experience', async (importOriginal) => ({
+  ...await importOriginal<typeof import('../services/experience')>(),
   loadExperienceProgress: trainingState.experience,
 }));
 
@@ -82,8 +90,10 @@ const library = (): CatalogLibrary => ({
 
 describe('DataProvider catalog library integration', () => {
   beforeEach(() => {
+    __resetAppState();
     storage.data.clear();
     vi.clearAllMocks();
+    offlineRpc.mockResolvedValue({data:null,error:{code:'PGRST202'}});
     authState.user = 'rodaja';
     trainingLibrary.value = { routines: [], mesocycles: [] };
     trainingLibrary.load.mockImplementation(async () => ({ routinesRevision: 0, mesocyclesRevision: 0, ...trainingLibrary.value }));
@@ -93,6 +103,33 @@ describe('DataProvider catalog library integration', () => {
     trainingState.load.mockResolvedValue(trainingState.value);
     storage.data.set('@gymbro/catalog-library/v2/rodaja', JSON.stringify(library()));
     storage.data.set('@gymbro/catalog-library/v2/brisas', JSON.stringify({ ...library(), owner: 'brisas' }));
+  });
+
+  test('saves complete new routines atomically, returns stable versions and rejects stale drafts', async () => {
+    const base = library().routines[0];
+    trainingLibrary.value = { routines: [base], mesocycles: [] };
+    trainingState.load.mockResolvedValue({ ...trainingState.value, attempts: [createWorkoutAttempt({ id: 'used', owner: 'rodaja', routine: base, completedAt: '2026-09-18T12:00:00Z', durationSeconds: 60, restTimerSeconds: 90, results: {} })] });
+    let current: ReturnType<typeof useData> | undefined;
+    const Probe = () => { current = useData(); return null; };
+    let renderer!: TestRenderer.ReactTestRenderer;
+    await act(async () => { renderer = TestRenderer.create(React.createElement(DataProvider, null, React.createElement(Probe))); });
+    await act(async () => { expect((await current!.saveRoutineDraft(base, base, 'no-op-version')).id).toBe(base.id); });
+    expect(current!.routines).toHaveLength(1);
+    const edited = { ...base, name: 'Edited' };
+    const reverseKeys = (value: any): any => Array.isArray(value) ? value.map(reverseKeys) : value && typeof value === 'object' ? Object.fromEntries(Object.entries(value).reverse().map(([key, entry]) => [key, reverseKeys(entry)])) : value;
+    trainingLibrary.saveRoutines.mockImplementation(async (input) => ({ revision: input.expectedRevision + 1, items: reverseKeys(input.items) }));
+    let saved: any;
+    await act(async () => { saved = await current!.saveRoutineDraft(edited, base, 'stable-version'); });
+    expect(saved).toMatchObject({ id: 'stable-version', name: 'Edited', previousVersionId: base.id });
+    expect(current!.getRoutine(base.id)?.name).toBe(base.name);
+    await act(async () => { await current!.saveRoutineDraft(edited, base, 'stable-version'); });
+    expect(current!.routines.filter((routine) => routine.id === 'stable-version')).toHaveLength(1);
+    const fresh = { ...base, id: 'fresh', name: 'Complete new routine' };
+    await act(async () => { await current!.saveRoutineDraft(fresh, null, 'fresh'); });
+    expect(current!.getRoutine('fresh')?.exercises).toEqual(base.exercises);
+    await act(async () => { await current!.saveRoutineDraft({ ...fresh, name: 'Changed elsewhere' }, fresh, 'unused'); });
+    await expect(current!.saveRoutineDraft({ ...fresh, name: 'Stale' }, fresh, 'unused-2')).rejects.toThrow('cambió');
+    await act(async () => renderer.unmount());
   });
 
   test('reconciles canonical reward metadata but rejects a changed captured result', async () => {
@@ -441,6 +478,7 @@ describe('DataProvider catalog library integration', () => {
   });
 
   test('exposes a retryable error when remote training hydration fails without local fallback', async () => {
+    __resetAppState();
     storage.data.clear();
     storage.data.set('@gymbro/catalog-library/v2/rodaja', JSON.stringify(library()));
     trainingState.load.mockRejectedValueOnce(new Error('offline'));
@@ -457,6 +495,7 @@ describe('DataProvider catalog library integration', () => {
   });
 
   test('retains definition source keys when the definitions-only remote import fails', async () => {
+    __resetAppState();
     storage.data.clear();
     storage.data.set('@gymbro/catalog-library/v2/journal', JSON.stringify({
       version: 1,
@@ -701,6 +740,231 @@ describe('DataProvider catalog library integration', () => {
       await current!.associateActiveWorkoutJoint('rodaja', 'attempt-1', 'must-not-change');
     });
     expect(current!.activeWorkoutDraft).toMatchObject({ jointWorkoutId: 'canonical', jointCancellationPending: true });
+    await act(async () => tree!.unmount());
+  });
+
+  test('restores durable solo work offline, saves keystrokes and never cleans expired/missing plans', async () => {
+    const draft = { version: 1, owner: 'rodaja', attemptId: 'offline-a', routineId: 'routine-1', startedAtMs: 1, restTimerSeconds: 30, completedSets: {}, setValues: {}, routineSnapshot: library().routines[0] };
+    const key = 'gymbro:offline-workout:v1:rodaja';
+    storage.data.set(key, JSON.stringify({version:1,owner:'rodaja',sequence:1,acknowledged:0,base:draft,draft}));
+    trainingState.load.mockRejectedValue(new TypeError('Failed to fetch'));
+    let current: ReturnType<typeof useData>; const Probe = () => { current = useData(); return null; };
+    let tree: TestRenderer.ReactTestRenderer;
+    await act(async () => { tree = TestRenderer.create(React.createElement(DataProvider, null, React.createElement(Probe))); });
+    expect(current!.offlineWorkoutEnabled).toBe(true); expect(current!.activeWorkoutDraft?.attemptId).toBe('offline-a');
+    expect(current!.dataState).toBe('error'); expect(current!.routines).toEqual([]);
+    await act(async () => {
+      await current!.updateActiveWorkout({...current!.activeWorkoutDraft!,setValues:{'e-s':{weight:'25.',reps:''}}},{defer:true});
+      await current!.refreshActiveWorkoutTiming();
+      await current!.clearActiveWorkoutIfMatches({owner:'rodaja',routineId:'routine-1'});
+    });
+    expect(JSON.parse(storage.data.get(key)!).draft.setValues).toEqual({'e-s':{weight:'25.',reps:''}});
+    expect(current!.activeWorkoutDraft).not.toBeNull(); expect(trainingState.save).not.toHaveBeenCalled();
+    await act(async () => tree!.unmount());
+    await act(async () => { tree = TestRenderer.create(React.createElement(DataProvider, null, React.createElement(Probe))); });
+    expect(current!.activeWorkoutDraft?.setValues['e-s'].weight).toBe('25.');
+    storage.setItem.mockRejectedValueOnce(new Error('disk full'));
+    await act(async () => { await expect(current!.updateActiveWorkout({...current!.activeWorkoutDraft!,restTimerSeconds:60})).rejects.toThrow('disk full'); });
+    expect(current!.offlineWorkoutStatus).toBe('local-error');
+    authState.user = 'other-owner';
+    await act(async () => tree!.update(React.createElement(DataProvider, null, React.createElement(Probe))));
+    expect(current!.activeWorkoutDraft).toBeNull(); expect(storage.data.has(key)).toBe(true);
+    await act(async () => tree!.unmount());
+  });
+
+  test('reconciles persisted completion through provider with server-only receipts and no blind state save', async () => {
+    const routine = library().routines[0];
+    const attempt = createWorkoutAttempt({id:'offline-completion',owner:'rodaja',routine,completedAt:'2026-09-09T12:00:00Z',durationSeconds:60,restTimerSeconds:30,results:{}});
+    const draft = {version:1,owner:'rodaja',attemptId:attempt.id,routineId:routine.id,startedAtMs:1,restTimerSeconds:30,completedSets:{},setValues:{},routineSnapshot:routine,pendingFinalization:{attempt}};
+    const key='gymbro:offline-workout:v1:rodaja';
+    storage.data.set(key,JSON.stringify({version:1,owner:'rodaja',sequence:1,acknowledged:0,base:{...draft,pendingFinalization:undefined},draft}));
+    trainingState.load.mockRejectedValue(new TypeError('Failed to fetch'));
+    offlineRpc.mockResolvedValue({error:null,data:{status:'saved',draft:null,finalized:{attempt,receipt:{balance:13,entries:[],weekly:{}},experience_receipt:{attempt_id:attempt.id,earned_xp:4,entries:[],progress:{level:1,rank:'Principiante',xp_into_level:4,xp_for_next_level:100,total_xp:4}}}}});
+    let current: ReturnType<typeof useData>; const Probe=()=>{current=useData();return null;};
+    let tree: TestRenderer.ReactTestRenderer;
+    await act(async()=>{tree=TestRenderer.create(React.createElement(DataProvider,null,React.createElement(Probe)));});
+    expect(current!.attempts).not.toContainEqual(attempt);
+    await act(async()=>{await current!.retryOfflineWorkout();});
+    expect(current!.attempts.filter((value)=>value.id===attempt.id)).toHaveLength(1);
+    expect(current!.experienceProgress?.totalXp).toBe(4);
+    expect(current!.offlineWorkoutResult?.receipt.balance).toBe(13);
+    expect(storage.data.has(key)).toBe(false);expect(trainingState.save).not.toHaveBeenCalled();
+    expect(offlineRpc.mock.calls[0]).toEqual(['sync_offline_workout',expect.objectContaining({attempt_input:attempt})]);
+    await act(async()=>tree!.unmount());
+  });
+
+  test('late cancellation for owner A cannot clear owner B projection',async()=>{
+    const make=(owner:string)=>({version:1,owner,attemptId:owner,routineId:'routine-1',startedAtMs:1,restTimerSeconds:30,completedSets:{},setValues:{},routineSnapshot:library().routines[0]});
+    for(const owner of ['rodaja','brisas']){const draft=make(owner);storage.data.set(`gymbro:offline-workout:v1:${owner}`,JSON.stringify({version:1,owner,sequence:0,acknowledged:0,base:draft,draft}));}
+    trainingState.load.mockRejectedValue(new TypeError('Failed to fetch'));
+    let current:ReturnType<typeof useData>;const Probe=()=>{current=useData();return null;};let tree:TestRenderer.ReactTestRenderer;
+    await act(async()=>{tree=TestRenderer.create(React.createElement(DataProvider,null,React.createElement(Probe)));});
+    let release!:()=>void,started!:()=>void;const began=new Promise<void>(resolve=>{started=resolve;});
+    storage.setItem.mockImplementationOnce(async(key,value)=>{started();await new Promise<void>(resolve=>{release=resolve;});storage.data.set(key,value);});
+    let cancellation!:Promise<void>;await act(async()=>{cancellation=current!.cancelActiveWorkout();await began;});
+    authState.user='brisas';await act(async()=>tree!.update(React.createElement(DataProvider,null,React.createElement(Probe))));
+    expect(current!.activeWorkoutDraft?.owner).toBe('brisas');
+    await act(async()=>{release();await cancellation;});expect(current!.activeWorkoutDraft?.owner).toBe('brisas');
+    await act(async()=>tree!.unmount());
+  });
+
+  test('retry persists latest optimistic input after older ACK and a local write failure',async()=>{
+    const base={version:1,owner:'rodaja',attemptId:'local-failure',routineId:'routine-1',startedAtMs:1,restTimerSeconds:30,completedSets:{},setValues:{},routineSnapshot:library().routines[0]},draft={...base,restTimerSeconds:40};
+    storage.data.set('gymbro:offline-workout:v1:rodaja',JSON.stringify({version:1,owner:'rodaja',sequence:1,acknowledged:0,base,draft}));
+    trainingState.load.mockRejectedValue(new TypeError('Failed to fetch'));
+    let release!:(value:any)=>void,started!:()=>void;const began=new Promise<void>(resolve=>{started=resolve;});
+    offlineRpc.mockImplementationOnce(async()=>{started();return new Promise(resolve=>{release=resolve;});});
+    let current:ReturnType<typeof useData>;const Probe=()=>{current=useData();return null;};let tree:TestRenderer.ReactTestRenderer;
+    await act(async()=>{tree=TestRenderer.create(React.createElement(DataProvider,null,React.createElement(Probe)));});
+    let syncing!:Promise<void>;await act(async()=>{syncing=current!.retryOfflineWorkout();await began;});
+    storage.setItem.mockRejectedValueOnce(new Error('disk full'));
+    await act(async()=>{await expect(current!.updateActiveWorkout({...draft,restTimerSeconds:50} as any)).rejects.toThrow('disk full');});
+    await act(async()=>{release({error:null,data:{status:'saved',draft}});await syncing;});
+    expect(current!.offlineWorkoutStatus).toBe('local-error');expect(current!.activeWorkoutDraft?.restTimerSeconds).toBe(50);
+    offlineRpc.mockResolvedValueOnce({error:null,data:{status:'saved',draft:{...draft,restTimerSeconds:50}}});
+    await act(async()=>{await current!.retryOfflineWorkout();});
+    expect(JSON.parse(storage.data.get('gymbro:offline-workout:v1:rodaja')!).draft.restTimerSeconds).toBe(50);
+    expect(current!.offlineWorkoutStatus).toBe('saved');await act(async()=>tree!.unmount());
+  });
+
+
+  test.each([false, true])('hydrates clean journal from canonical progress or completion (%s)', async (finished) => {
+    const base = { version: 1, owner: 'rodaja', attemptId: 'handoff', routineId: 'routine-1', startedAtMs: 1, restTimerSeconds: 30, completedSets: {}, setValues: {}, routineSnapshot: library().routines[0] };
+    storage.data.set('gymbro:offline-workout:v1:rodaja', JSON.stringify({ version: 1, owner: 'rodaja', sequence: 2, acknowledged: 2, base, draft: base }));
+    const remote = finished ? null : { ...base, restTimerSeconds: 70, completedSets: { 'routine-exercise-1-set-1': true } };
+    trainingState.load.mockResolvedValue({ ...trainingState.value, activeWorkoutDraft: remote });
+    let current: ReturnType<typeof useData>;
+    const Probe = () => { current = useData(); return null; };
+    let tree: TestRenderer.ReactTestRenderer;
+    await act(async () => { tree = TestRenderer.create(React.createElement(DataProvider, null, React.createElement(Probe))); });
+    expect(current!.activeWorkoutDraft).toEqual(remote);
+    expect(trainingState.save).not.toHaveBeenCalled();
+    await act(async () => tree!.unmount());
+  });
+
+  test('foreground reconciliation cannot discard edits entered during its network read', async () => {
+    const base = { version: 1 as const, owner: 'rodaja', attemptId: 'handoff', routineId: 'routine-1', startedAtMs: 1, restTimerSeconds: 30, completedSets: {}, setValues: {}, routineSnapshot: library().routines[0] };
+    storage.data.set('gymbro:offline-workout:v1:rodaja', JSON.stringify({ version: 1, owner: 'rodaja', sequence: 0, acknowledged: 0, base, draft: base }));
+    trainingState.load.mockResolvedValue({ ...trainingState.value, activeWorkoutDraft: base });
+    let current: ReturnType<typeof useData>;
+    const Probe = () => { current = useData(); return null; };
+    let tree: TestRenderer.ReactTestRenderer;
+    await act(async () => { tree = TestRenderer.create(React.createElement(DataProvider, null, React.createElement(Probe))); });
+    let release!: (state: typeof trainingState.value) => void;
+    trainingState.load.mockImplementationOnce(() => new Promise((resolve) => { release = resolve; }));
+    await act(async () => __emitAppState('active'));
+    const local = { ...base, restTimerSeconds: 80 };
+    await act(async () => { await current!.updateActiveWorkout(local); });
+    await act(async () => { release({ ...trainingState.value, activeWorkoutDraft: null }); });
+    expect(current!.activeWorkoutDraft).toEqual(local);
+    expect(current!.offlineWorkoutStatus).toBe('pending');
+    await act(async () => tree!.unmount());
+  });
+
+  test('foreground adopts remote cancellation and repeated saves continue beyond three updates', async () => {
+    vi.useFakeTimers();
+    const base = { version: 1 as const, owner: 'rodaja', attemptId: 'handoff', routineId: 'routine-1', startedAtMs: 1, restTimerSeconds: 30, completedSets: {}, setValues: {}, routineSnapshot: library().routines[0] };
+    storage.data.set('gymbro:offline-workout:v1:rodaja', JSON.stringify({ version: 1, owner: 'rodaja', sequence: 0, acknowledged: 0, base, draft: base }));
+    trainingState.load.mockResolvedValue({ ...trainingState.value, activeWorkoutDraft: base });
+    offlineRpc.mockImplementation(async (name?: string, input?: any) => name === 'offline_workout_capability' ? { data: 1, error: null } : { data: { status: 'saved', draft: input.next_draft }, error: null });
+    let current: ReturnType<typeof useData>;
+    const Probe = () => { current = useData(); return null; };
+    let tree: TestRenderer.ReactTestRenderer;
+    try {
+      await act(async () => { tree = TestRenderer.create(React.createElement(DataProvider, null, React.createElement(Probe))); });
+      for (let index = 0; index < 5; index += 1) {
+        await act(async () => { await current!.updateActiveWorkout({ ...base, restTimerSeconds: 40 + index }); });
+        await act(async () => { await vi.advanceTimersByTimeAsync(15_000); });
+        expect(current!.offlineWorkoutStatus).toBe('saved');
+      }
+      expect(offlineRpc.mock.calls.filter(([name]) => name === 'sync_offline_workout')).toHaveLength(5);
+      trainingState.load.mockResolvedValue({ ...trainingState.value, activeWorkoutDraft: null });
+      await act(async () => __emitAppState('active'));
+      expect(current!.activeWorkoutDraft).toBeNull();
+      expect(current!.activeWorkoutRemoteRevision).toBeGreaterThan(0);
+    } finally {
+      await act(async () => tree!.unmount());
+      vi.useRealTimers();
+    }
+  });
+
+  test('start adopts the canonical existing attempt rather than the requested draft', async () => {
+    const requested = { version: 1 as const, owner: 'rodaja', attemptId: 'new', routineId: 'routine-1', startedAtMs: 1, restTimerSeconds: 30, completedSets: {}, setValues: {}, routineSnapshot: library().routines[0] };
+    const canonical = { ...requested, attemptId: 'remote-existing', restTimerSeconds: 95 };
+    trainingState.start.mockResolvedValueOnce(canonical);
+    let current: ReturnType<typeof useData>;
+    const Probe = () => { current = useData(); return null; };
+    let tree: TestRenderer.ReactTestRenderer;
+    await act(async () => { tree = TestRenderer.create(React.createElement(DataProvider, null, React.createElement(Probe))); });
+    await act(async () => { expect(await current!.startActiveWorkout(requested)).toEqual(canonical); });
+    expect(current!.activeWorkoutDraft).toEqual(canonical);
+    expect(trainingState.save).not.toHaveBeenCalled();
+    await act(async () => tree!.unmount());
+  });
+
+  test('late start response from another account cannot seed or display its draft', async () => {
+    const requested = { version: 1 as const, owner: 'rodaja', attemptId: 'late-start', routineId: 'routine-1', startedAtMs: 1, restTimerSeconds: 30, completedSets: {}, setValues: {}, routineSnapshot: library().routines[0] };
+    let release!: (draft: typeof requested) => void;
+    trainingState.start.mockImplementationOnce(() => new Promise((resolve) => { release = resolve; }));
+    let current: ReturnType<typeof useData>;
+    const Probe = () => { current = useData(); return null; };
+    let tree: TestRenderer.ReactTestRenderer;
+    await act(async () => { tree = TestRenderer.create(React.createElement(DataProvider, null, React.createElement(Probe))); });
+    let start!: Promise<unknown>;
+    await act(async () => { start = current!.startActiveWorkout(requested).catch((error) => error); });
+    authState.user = 'brisas';
+    await act(async () => tree!.update(React.createElement(DataProvider, null, React.createElement(Probe))));
+    await act(async () => { release(requested); expect(await start).toBeInstanceOf(Error); });
+    expect(current!.activeWorkoutDraft).toBeNull();
+    expect(storage.data.has('gymbro:offline-workout:v1:brisas')).toBe(false);
+    await act(async () => tree!.unmount());
+  });
+
+  test('acknowledges solo edits before claiming, then associates and saves through online CAS', async () => {
+    const base = { version: 1 as const, owner: 'rodaja', attemptId: 'online', routineId: 'routine-1', startedAtMs: 1, restTimerSeconds: 30, completedSets: {}, setValues: {}, routineSnapshot: library().routines[0] };
+    storage.data.set('gymbro:offline-workout:v1:rodaja', JSON.stringify({ version: 1, owner: 'rodaja', sequence: 0, acknowledged: 0, base, draft: base }));
+    trainingState.load.mockResolvedValue({ ...trainingState.value, activeWorkoutDraft: base });
+    offlineRpc.mockImplementation(async (name: string, input?: any) => {
+      if (name === 'offline_workout_capability') return { data: 1, error: null };
+      if (name === 'claim_online_workout') return { data: { status: 'claimed', draft: { ...input.expected_draft, transportMode: 'online' } }, error: null };
+      return { data: { status: 'saved', draft: input.next_draft }, error: null };
+    });
+    let current: ReturnType<typeof useData>;
+    const Probe = () => { current = useData(); return null; };
+    let tree: TestRenderer.ReactTestRenderer;
+    await act(async () => { tree = TestRenderer.create(React.createElement(DataProvider, null, React.createElement(Probe))); });
+    await act(async () => { await current!.updateActiveWorkout({ ...base, restTimerSeconds: 60 }); });
+    await act(async () => { await current!.prepareOnlineWorkout(); });
+    const calls = offlineRpc.mock.calls.map(([name]) => name);
+    expect(calls.indexOf('sync_offline_workout')).toBeLessThan(calls.indexOf('claim_online_workout'));
+    expect(current!.activeWorkoutDraft).toMatchObject({ transportMode: 'online', restTimerSeconds: 60 });
+    await act(async () => { await current!.associateActiveWorkoutJoint('rodaja', 'online', 'canonical'); });
+    expect(offlineRpc).toHaveBeenLastCalledWith('sync_online_workout', expect.objectContaining({ next_draft: expect.objectContaining({ jointWorkoutId: 'canonical', transportMode: 'online' }) }));
+    expect(trainingState.save).not.toHaveBeenCalled();
+    await act(async () => tree!.unmount());
+  });
+
+  test.each(['claim', 'cancel'] as const)('projects a retried ambiguous online %s only after acknowledgment', async (command) => {
+    const base = { version: 1 as const, owner: 'rodaja', attemptId: 'online-retry', routineId: 'routine-1', startedAtMs: 1, restTimerSeconds: 30, completedSets: {}, setValues: {}, routineSnapshot: library().routines[0], ...(command === 'cancel' ? { transportMode: 'online' as const } : {}) };
+    storage.data.set('gymbro:offline-workout:v1:rodaja', JSON.stringify({ version: 1, owner: 'rodaja', sequence: 0, acknowledged: 0, base, draft: base, transport: command === 'cancel' ? 'online' : 'offline' }));
+    trainingState.load.mockResolvedValue({ ...trainingState.value, activeWorkoutDraft: base });
+    let fail = true;
+    offlineRpc.mockImplementation(async (name: string, input?: any) => {
+      if (name === 'offline_workout_capability') return { data: 1, error: null };
+      if (fail) { fail = false; throw new TypeError('Failed to fetch'); }
+      if (name === 'claim_online_workout') return { data: { status: 'claimed', draft: { ...input.expected_draft, transportMode: 'online' } }, error: null };
+      return { data: { status: 'saved', draft: null, cancelled: true }, error: null };
+    });
+    let current: ReturnType<typeof useData>;
+    const Probe = () => { current = useData(); return null; };
+    let tree: TestRenderer.ReactTestRenderer;
+    await act(async () => { tree = TestRenderer.create(React.createElement(DataProvider, null, React.createElement(Probe))); });
+    await act(async () => { await expect(command === 'claim' ? current!.prepareOnlineWorkout() : current!.cancelActiveWorkout()).rejects.toThrow(); });
+    expect(current!.activeWorkoutDraft).toEqual(base);
+    await act(async () => { await current!.retryOfflineWorkout(); });
+    if (command === 'claim') expect(current!.activeWorkoutDraft?.transportMode).toBe('online');
+    else expect(current!.activeWorkoutDraft).toBeNull();
+    expect(trainingState.save).not.toHaveBeenCalled();
     await act(async () => tree!.unmount());
   });
 

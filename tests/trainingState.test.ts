@@ -100,3 +100,16 @@ describe('finalization certainty', () => {
     await expect(loadTrainingState()).resolves.toMatchObject({ activeWorkoutDraft: { pendingFinalization: { attempt } } });
   });
 });
+
+describe('atomic solo start RPC', () => {
+  test('returns canonical existing draft, not requested candidate', async () => {
+    const { startTrainingWorkout } = await import('../services/trainingState');
+    const draft = { version: 1 as const, owner: 'owner', attemptId: 'candidate', routineId: 'r', startedAtMs: 1, restTimerSeconds: 30, completedSets: {}, setValues: {} };
+    const canonical = { ...draft, attemptId: 'existing', routineId: 'other-routine' };
+    rpc.mockResolvedValueOnce({ data: { status: 'existing', draft: canonical }, error: null });
+    await expect(startTrainingWorkout(draft)).resolves.toEqual(canonical);
+    expect(rpc).toHaveBeenLastCalledWith('start_training_workout', { draft_input: draft });
+    rpc.mockResolvedValueOnce({ data: { status: 'existing', draft: { ...canonical, owner: 'other' } }, error: null });
+    await expect(startTrainingWorkout(draft)).rejects.toThrow('confirmación');
+  });
+});

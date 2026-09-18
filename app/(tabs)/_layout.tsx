@@ -67,11 +67,11 @@ function TabBarBackground() {
   );
 }
 
-function ActiveWorkoutTabButton() {
+export function ActiveWorkoutTabButton() {
   const { theme } = useTheme();
-  const { activeWorkoutDraft, routines, mesocycles, cancelActiveWorkout } = useData();
+  const { offlineWorkoutEnabled, activeWorkoutDraft, routines, mesocycles, cancelActiveWorkout } = useData();
   const segments = useSegments();
-  const resumableDraft = hasActiveWorkoutReentryIntegrity(activeWorkoutDraft, routines, mesocycles);
+  const resumableDraft = !!activeWorkoutDraft && (offlineWorkoutEnabled || hasActiveWorkoutReentryIntegrity(activeWorkoutDraft, routines, mesocycles));
   const activeMesocycle = mesocycles.find((mesocycle) => mesocycle.status === 'active');
   const dayGuidance = activeMesocycle ? deriveMesocycleDayGuidance(activeMesocycle) : null;
   const plannedRoutine = dayGuidance?.state === 'routine' && routines.some((routine) => routine.id === dayGuidance.ref.routineId)
@@ -95,6 +95,7 @@ function ActiveWorkoutTabButton() {
   }));
 
   const continueActiveWorkout = () => {
+    if (offlineWorkoutEnabled && !activeWorkoutDraft) { router.navigate('/train'); return; }
     if (resumableDraft) {
       const params: Record<string, string> = { id: activeWorkoutDraft!.routineId };
       if (activeWorkoutDraft!.jointWorkoutId) params.jointWorkoutId = activeWorkoutDraft!.jointWorkoutId;

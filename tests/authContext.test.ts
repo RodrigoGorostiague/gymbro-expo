@@ -1,4 +1,5 @@
 import React from 'react';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import TestRenderer, { act } from 'react-test-renderer';
 import { beforeEach, describe, expect, test, vi } from 'vitest';
 
@@ -20,6 +21,7 @@ const storage = vi.hoisted(() => ({
 }));
 const socialGraph = vi.hoisted(() => ({ bootstrapOwnProfile: vi.fn() }));
 
+vi.mock('@react-native-async-storage/async-storage', () => ({ default: { getItem: vi.fn(async () => null), setItem: vi.fn(async () => undefined), removeItem: vi.fn(async () => undefined) } }));
 vi.mock('../services/supabase', () => ({
   supabaseConfigurationError: null,
   supabase: { auth },
@@ -110,4 +112,22 @@ describe('AuthProvider', () => {
     await expect(current!.updatePassword('Stronger1')).resolves.toBeNull();
     expect(auth.updateUser).toHaveBeenCalledWith({ password: 'Stronger1' });
   });
+  test('offline restoration requires genuine stored session plus previously confirmed matching owner', async () => {
+    auth.getSession.mockResolvedValue({data:{session:{access_token:'stored-session-token',user:{id:'uid-1'}}},error:null});
+    socialGraph.bootstrapOwnProfile.mockRejectedValue(new TypeError('Failed to fetch'));
+    vi.mocked(AsyncStorage.getItem).mockResolvedValue('uid-1');
+    let current: ReturnType<typeof useAuth>; const Probe = () => { current = useAuth(); return null; };
+    let tree: TestRenderer.ReactTestRenderer;
+    await act(async () => { tree = TestRenderer.create(React.createElement(AuthProvider, null, React.createElement(Probe))); });
+    expect(current!.user).toBe('uid-1'); await act(async () => tree!.unmount());
+    vi.mocked(AsyncStorage.getItem).mockResolvedValue('different-owner');
+    await act(async () => { tree = TestRenderer.create(React.createElement(AuthProvider, null, React.createElement(Probe))); });
+    expect(current!.user).toBeNull(); await act(async () => tree!.unmount());
+    vi.mocked(AsyncStorage.getItem).mockResolvedValue('uid-1');
+    socialGraph.bootstrapOwnProfile.mockRejectedValue(Object.assign(new Error('network request failed'),{code:'42501'}));
+    await act(async () => { tree = TestRenderer.create(React.createElement(AuthProvider, null, React.createElement(Probe))); });
+    expect(current!.user).toBeNull(); await act(async () => tree!.unmount());
+    vi.mocked(AsyncStorage.getItem).mockResolvedValue(null);
+  });
+
 });

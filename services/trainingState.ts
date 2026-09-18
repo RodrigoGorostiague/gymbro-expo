@@ -136,8 +136,19 @@ function validateState(value: unknown): TrainingState {
 
 export async function loadTrainingState(): Promise<TrainingState> {
   const { data, error } = await requireClient().rpc('load_training_state');
-  if (error) throw new Error(`No se pudo cargar el entrenamiento: ${error.message}`);
+  if (error) throw Object.assign(new Error(`No se pudo cargar el entrenamiento: ${error.message}`), { code: error.code, details: error.details, hint: error.hint });
   return validateState(data);
+}
+
+/** Atomically starts a solo workout or returns the already-active canonical draft. */
+export async function startTrainingWorkout(draft: ActiveWorkoutDraft): Promise<ActiveWorkoutDraft> {
+  if (!isDraft(draft)) throw new Error('El borrador activo no es válido.');
+  const { data, error } = await requireClient().rpc('start_training_workout', { draft_input: draft });
+  if (error) throw Object.assign(new Error(`No se pudo iniciar el entrenamiento: ${error.message}`), { code: error.code });
+  if (!['started', 'existing'].includes(data?.status) || !isDraft(data?.draft) || data.draft.owner !== draft.owner) {
+    throw new Error('La confirmación del entrenamiento no es válida.');
+  }
+  return data.draft;
 }
 
 export async function saveTrainingState(input: TrainingStateInput): Promise<void> {
@@ -152,7 +163,7 @@ export async function saveTrainingState(input: TrainingStateInput): Promise<void
     active_workout_draft_input: input.activeWorkoutDraft === undefined ? null : input.activeWorkoutDraft,
     active_workout_draft_supplied: input.activeWorkoutDraft !== undefined,
   });
-  if (error) throw new Error(`No se pudo guardar el entrenamiento: ${error.message}`);
+  if (error) throw Object.assign(new Error(`No se pudo guardar el entrenamiento: ${error.message}`), { code: error.code, details: error.details, hint: error.hint });
 }
 
 function isReceipt(value: unknown): value is RewardReceipt {
@@ -205,6 +216,10 @@ export async function finalizeTrainingAttempt(attempt: WorkoutAttempt): Promise<
     if (error.code === 'P0001' && ['invalid training attempt input', 'invalid planned session lineage'].includes(error.message)) throw new DefinitelyRejectedFinalizationError(error);
     throw error;
   }
+  return parseTrainingFinalization(data);
+}
+
+export function parseTrainingFinalization(data: unknown): { attempt: WorkoutAttempt; receipt: RewardReceipt; experienceReceipt: ExperienceReceipt } {
   if (!isRecord(data) || !isAttempt(data.attempt) || !isReceipt(data.receipt) || !isExperienceReceipt(data.experience_receipt)) {
     throw new Error('La confirmación de recompensas tiene un formato inválido. Inténtalo nuevamente.');
   }

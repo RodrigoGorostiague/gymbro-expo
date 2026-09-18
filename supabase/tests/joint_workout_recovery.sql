@@ -17,6 +17,7 @@ insert into public.joint_workout_posts(joint_workout_id) values('49000000-0000-0
 set local role authenticated;
 select set_config('request.jwt.claim.sub','49000000-0000-0000-0000-000000000002',true);
 select lives_ok($$select public.respond_joint_workout_invite('49000000-0000-0000-0001-000000000001',true)$$,'lost acceptance acknowledgement can be retried');
+select public.leave_joint_workout('49000000-0000-0000-0001-000000000001');
 select lives_ok($$select public.get_joint_workout_detail('49000000-0000-0000-0001-000000000001')$$,'actual joined member retains private result access');
 select set_config('request.jwt.claim.sub','49000000-0000-0000-0000-000000000003',true);
 select throws_like($$select public.get_joint_workout_detail('49000000-0000-0000-0001-000000000001')$$,'joint workout unavailable','never-joined invitee cannot read private results');
