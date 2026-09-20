@@ -1,6 +1,7 @@
 import React from 'react';
 import TestRenderer, { act } from 'react-test-renderer';
 import { beforeEach, describe, expect, test, vi } from 'vitest';
+import { CURRENT_RELEASE } from '../constants/release';
 
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -56,7 +57,7 @@ describe('ShopProvider reward wallet refresh', () => {
 
     await act(async () => { renderer = TestRenderer.create(render()); });
     expect(wallet.claim).toHaveBeenCalledOnce();
-    expect(wallet.claimUpdates).toHaveBeenCalledWith(9);
+    expect(wallet.claimUpdates).toHaveBeenCalledWith(CURRENT_RELEASE.sequence);
     expect(wallet.load).not.toHaveBeenCalled();
     expect(current?.hydratedUserId).toBe('uid-1');
 
