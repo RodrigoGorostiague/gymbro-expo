@@ -2,7 +2,9 @@
 
 **Proposed direction: calm while lifting, expressive when achievement matters.** Modernize the complete journey rather than adding effects to existing screens. Start with a trustworthy finish and meaningful recap, then align entry, execution, planning, progress, community and settings.
 
-Status: proposal for product review, not approved implementation. Audited checkout: `aec6b24`, September 8, 2026. No production code, dependencies, database, commits or historical runtime evidence were changed.
+Estado actualizado (20/09/2026): propuesta histórica autorizada e implementada posteriormente en 14 cortes. Ver [registro de implementación](ux-modernization-implementation-2026-09-08.md) y [roadmap vigente](roadmap.md); aceptación física pendiente.
+
+Original audit context — audited checkout: `aec6b24`, September 8, 2026. No production code, dependencies, database, commits or historical runtime evidence were changed.
 
 ## Read this first
 

@@ -13,7 +13,7 @@ Implementado el 18 de septiembre de 2026. Componente SVG local, sin API de anato
 
 ## Interacción
 
-Dos siluetas con frente y espalda, selección por zona o nombre, leyenda, detalle y lista textual accesible. Las variantes compactas se expanden. Volumen, días y esfuerzo RIR/RPE se ofrecen según los datos disponibles. Ambos lados del cuerpo muestran la misma agregación: no se infiere lateralidad.
+Silueta automática según el sexo elegido en el registro (masculino: A; femenino: B), con frente y espalda, selección por zona o nombre, leyenda, detalle y lista textual accesible. El selector manual A/B fue retirado. La preferencia pertenece al usuario que está viendo la app y también se aplica a los mapas compartidos; el sexo privado de otros usuarios no se consulta ni se publica. En cuentas antiguas sin dato o si el perfil no está disponible se usa A como valor predeterminado. La selección se vuelve a cargar al completar el onboarding y se aísla por cuenta. Las variantes compactas se expanden. Volumen, días y esfuerzo RIR/RPE se ofrecen según los datos disponibles. Ambos lados del cuerpo muestran la misma agregación: no se infiere lateralidad.
 
 ## Datos y significado
 

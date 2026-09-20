@@ -1,6 +1,6 @@
 # Learn GymBro by completing a real workout
 
-**Status: implementation-ready design proposal, not implemented or usability-validated.**
+**Estado actualizado (20/09/2026): implementación adaptada al editor unificado, con verificación automatizada; aceptación física y de usabilidad pendiente.** Ver [implementación](functional-guidance-implementation-2026-09-20.md) y [roadmap vigente](roadmap.md). El resto del documento conserva el diseño original del 11/09 como referencia histórica; sus rutas, ejemplos y casillas no representan el estado actual.
 Code-inspected on 2026-09-11 against the current working tree, including existing uncommitted training changes. This document introduces no application code, migrations, training records, or native SDD lifecycle actions.
 
 ## Decision and quick path

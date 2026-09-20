@@ -1,52 +1,52 @@
 # GymBro
 
-App móvil (Expo) para crear rutinas de gimnasio, ejecutarlas con cronómetro y temporizador de descanso, y hacer seguimiento del progreso. Diseño glassmorphism con temas personalizables y modo dual para dos perfiles.
+Aplicación de entrenamiento con Expo y React Native: rutinas, mesociclos, registro de sesiones, progreso y comunidad.
 
-## Características
+**Versión integrada: 0.8.0.** Consulta [el roadmap](docs/roadmap.md) para conocer el estado actual. La guía contextual y los rangos musculares están implementados en el árbol de trabajo; requieren aceptación física y empaquetado de la próxima entrega.
 
-- **Rutinas (mesociclos)**: ejercicios, series, peso y repeticiones
-- **Ejecución**: cronómetro + descanso configurable entre series
-- **Progreso**: minutos, tonelaje y gráficos por ejercicio
-- **Tienda de temas**: gemas, preview y temas de perfil (naranja / rosa)
-- **Modo dual**: combinar tu tema con el de tu pareja (como el login)
-- **Sync Firebase** (opcional): mensajes entre perfiles y temas equipados
-- **Login** con dos perfiles:
-  - `rodaja` / `1234`
-  - `brisas` / `sonrisas`
+## Funciones
 
-## Ejecutar
+- Editor con borradores recuperables, catálogo, modalidades de carga, series por repeticiones o tiempo y objetivos RIR/RPE.
+- Mesociclos con calendario, reprogramación, recuperación, versiones históricas y evolución entre semanas.
+- Entrenamiento individual offline, sincronización posterior y continuidad entre dispositivos; sesiones conjuntas online.
+- Cierre revisable, historial, resumen semanal, récords, experiencia y gemas.
+- Mapas, volumen y rangos musculares con pausa de recuperación.
+- Comunidad, relaciones, invitaciones, publicaciones e intercambio de planes.
+- Medidas corporales sincronizadas y fotos locales en Android/iOS.
+- Ayuda opcional del primer entrenamiento y Más → Cómo usar GymBro.
+
+## Desarrollo
 
 ```bash
 npm install
-npm start
+npm run dev
 ```
 
-Expo Go (QR) o:
+El script local configura Expo contra Supabase local. Para usar la configuración pública de tu entorno: `npm start`. También existen `npm run android`, `npm run ios` y `npm run web`. Las cuentas actuales usan Supabase Auth; no hay credenciales de prueba publicadas aquí.
+
+Configura únicamente `EXPO_PUBLIC_SUPABASE_URL` y `EXPO_PUBLIC_SUPABASE_ANON_KEY` como variables públicas. Nunca incluyas claves administrativas. Consulta [operaciones de beta](docs/supabase-beta.md) antes de modificar bases existentes; no reinicies una base con datos para aplicar una migración.
+
+## Validación
 
 ```bash
-npm run android
-npm run ios
-npm run web
+npm test
+npx tsc --noEmit
+npx supabase test db
+RANK_SQL_TEST=1 npx vitest run tests/muscleRankSql.test.ts
+VOLUME_SQL_TEST=1 npx vitest run tests/muscleVolumeSql.test.ts
 ```
 
-## Firebase (opcional)
+Las pruebas SQL optativas requieren el contenedor local `supabase_db_gymbro`; crean y eliminan bases aisladas. Exportar Expo valida el empaquetado, pero no sustituye la [aceptación física](docs/beta-acceptance-2026-09-20.md).
 
-Configura tu proyecto en `app.json` → `expo.extra` y despliega reglas:
+## Estructura y tecnología
 
-```bash
-npx firebase-tools@latest deploy --only firestore:rules
-```
+- `app/`: rutas Expo Router.
+- `components/`, `context/`, `hooks/`: interfaz y estado.
+- `services/`, `utils/`: backend, persistencia local y reglas de dominio.
+- `supabase/`: migraciones y pruebas SQL.
+- `packages/contracts/`: contratos compartidos con web.
+- `docs/roadmap.md`: estado actual; `openspec/changes/`: planes y evidencia históricos.
 
-## Estructura
+El manifiesto actual usa **Expo SDK 57**, React 19, React Native, TypeScript, Reanimated y Supabase. AsyncStorage conserva preferencias y diarios locales. Quedan módulos/dependencias históricos de Firebase; no describen la arquitectura vigente de autenticación y entrenamiento. Sigue también `AGENTS.md` antes de escribir código.
 
-- `app/` — pantallas (Expo Router)
-- `components/` — UI, login dual, glass cards
-- `context/` — auth, temas, tienda, datos
-- `services/` — sync Firebase
-- `utils/` — storage y analíticas
-
-Los datos locales usan AsyncStorage.
-
-## Stack
-
-Expo SDK 56 · React Native · TypeScript · Reanimated · Firebase Firestore
+La plataforma web de escritorio tiene su propio repositorio hermano, `gymbro-web`, y su propio ciclo de entrega.
