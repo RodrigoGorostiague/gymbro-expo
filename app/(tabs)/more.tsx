@@ -8,6 +8,7 @@ import { GlassCard, ThemeBackground } from '../../components/GlassCard';
 import { HapticPressable } from '../../components/HapticPressable';
 import { useTheme } from '../../context/ThemeContext';
 const destinations = [
+  ['help-circle-outline', 'Cómo usar GymBro', 'Rutinas, entrenamientos, resultados y mesociclos', '/help/training'],
   ['body-outline', 'Evolución corporal', 'Peso, medidas y fotos comparables', '/body'],
   ['person-outline', 'Mi perfil', 'Identidad y privacidad', '/profile'],
   ['options-outline', 'Preferencias de entrenamiento', 'Movimiento, vibración y sonido', '/profile/preferences'],

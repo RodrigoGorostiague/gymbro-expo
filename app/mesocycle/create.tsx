@@ -1,5 +1,6 @@
 import { buildGuidedWeeks, REST_DAY } from '../../utils/planningPreview';
 import { deriveScheduleDateLabel } from '../../utils/mesocycles';
+import { TrainingHelp } from '../../components/TrainingHelp';
 import React, { useMemo, useState } from 'react';
 import { Alert, KeyboardAvoidingView, Platform, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { router } from 'expo-router';
@@ -97,6 +98,7 @@ export default function CreateMesocycleScreen() {
           <ScrollView contentContainerStyle={styles.scroll} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
             <Text style={[styles.title, { color: theme.text }]}>Crear mesociclo</Text>
             <Text style={[styles.subtitle, { color: theme.textMuted }]}>Define el bloque base antes de entrar a la planificación semanal.</Text>
+            <TrainingHelp topic="mesocycles" />
 
             <GlassCard style={styles.section}>
               <Text style={[styles.label, { color: theme.textMuted }]}>Nombre</Text>
@@ -110,6 +112,7 @@ export default function CreateMesocycleScreen() {
 
             <GlassCard style={styles.section}>
               <Text style={[styles.label, { color: theme.textMuted }]}>Estado</Text>
+              <Text style={{ color: theme.textMuted }}>Borrador: prepara el plan. Programado: déjalo previsto. Activo: permite iniciar las sesiones disponibles.</Text>
               <View style={styles.rowWrap}>
                 {STATUS_OPTIONS.map((option) => {
                   const selected = option.value === status;
@@ -136,6 +139,7 @@ export default function CreateMesocycleScreen() {
 
             <GlassCard style={styles.section}>
               <Text style={[styles.label, { color: theme.textMuted }]}>Duración (semanas)</Text>
+              <Text style={{ color: theme.textMuted }}>La semana base se repetirá durante este número de semanas. Después puedes ajustar el calendario.</Text>
               <GlassInput value={durationWeeks} onChangeText={setDurationWeeks} keyboardType="number-pad" placeholder="4" />
             </GlassCard>
 
@@ -153,6 +157,7 @@ export default function CreateMesocycleScreen() {
               <View style={{ gap: 8 }}>{[[REST_DAY, 'Descanso'], ...routines.map((routine) => [routine.id, routine.name])].map(([id, label]) => <GlassButton key={id} title={label} variant="secondary" onPress={() => setPlanningDays((current) => current.map((day, index) => index === selectedDay ? id : day))} />)}<GlassButton title="Dejar sin asignar" variant="secondary" onPress={() => setPlanningDays((current) => current.map((day, index) => index === selectedDay ? null : day))} /></View>
             </GlassCard>
             <GlassCard style={styles.section}>
+              <Text style={{ color: theme.textMuted }}>El plan conserva una copia de la rutina asignada. Editar la rutina de la biblioteca no actualiza automáticamente esa copia.</Text>
               <Text accessibilityRole="header" style={{ color: theme.text, fontSize: 22, fontWeight: '900' }}>Vista previa de tu bloque</Text>
               <Text style={{ color: theme.textMuted }}>{name.trim() || 'Tu próximo bloque'} · {Number.isInteger(parsedWeeks) && parsedWeeks > 0 && parsedWeeks <= 52 ? `${parsedWeeks} semanas` : 'Revisa la duración'} · {startDate || 'Inicio por definir'}</Text>
               <Text style={{ color: theme.textMuted }}>{routines.length ? `${planningDays.filter((day) => day && day !== REST_DAY).length} días de entrenamiento · ${planningDays.filter((day) => day === REST_DAY).length} descansos explícitos por semana. Puedes ajustar cada semana después.` : 'Primero puedes crear una rutina; no necesitas un mesociclo para empezar a entrenar.'}</Text>

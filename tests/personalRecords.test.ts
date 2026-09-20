@@ -246,7 +246,8 @@ test.each(['error', 'loading', 'wrong-owner'])('recap does not claim an award qu
   const tree = await render(React.createElement(PersonalWorkoutRecapScreen));
   expect(recordAwards).not.toHaveBeenCalled();
   expect(JSON.stringify(tree.toJSON())).not.toContain('Consultando premios…');
-  expect(JSON.stringify(tree.toJSON())).toContain('Los premios no están disponibles mientras no se pueda consultar tu historial confirmado.');
+  expect(JSON.stringify(tree.toJSON())).not.toContain('Tu trabajo, serie por serie');
+  expect(JSON.stringify(tree.toJSON())).toContain(state === 'loading' ? 'Cargando tu entrenamiento…' : 'Tu historial confirmado no está disponible.');
   const { act } = await import('react-test-renderer'); await act(async () => tree.unmount());
 });
 test('recap shows genuine award loading, failure, retry and empty receipt without inventing gems', async () => {

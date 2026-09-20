@@ -1,3 +1,5 @@
+import { FunctionalGuidanceCard } from '../../components/FunctionalGuidanceCard';
+import { useFunctionalGuidance } from '../../context/FunctionalGuidanceContext';
 import { PendingWorkoutReviews } from '../../components/PendingWorkoutReviews';
 import { TodayBriefing } from '../../components/TodayBriefing';
 import React, { useState } from 'react';
@@ -17,6 +19,7 @@ import { hasActiveWorkoutReentryIntegrity } from '../../utils/activeWorkoutReent
 export default function TrainEntryScreen() {
   const { offlineWorkoutEnabled, offlineWorkoutError, retryOfflineWorkout, routines, attempts = [], mesocycles = [], dataState, dataError, retryData, activeWorkoutDraft, cancelActiveWorkout } = useData();
   const { theme } = useTheme();
+  const guide = useFunctionalGuidance();
   const [selectedView, setSelectedView] = useState<TrainView | null>(null);
 
   if (offlineWorkoutEnabled && !activeWorkoutDraft) return <ThemeBackground><SafeAreaView style={{ flex: 1, justifyContent: 'center', padding: 24, gap: 12 }}>
@@ -55,11 +58,12 @@ export default function TrainEntryScreen() {
     };
     const navigation = <>
       <PendingWorkoutReviews />
-      <TodayBriefing mesocycle={activeMesocycle} routines={routines} attempts={attempts} active={!!resumableDraft} onRoutines={() => setSelectedView('routines')} />
+      {!guide.progress.visible && <TodayBriefing mesocycle={activeMesocycle} routines={routines} attempts={attempts} active={!!resumableDraft} onRoutines={() => setSelectedView('routines')} />}
       {resumableDraft ? <ActiveWorkoutCard draft={resumableDraft} onContinue={continueActiveWorkout} onCancel={() => Alert.alert('Cancelar entrenamiento', 'Se perderá el progreso de la sesión en curso.', [
         { text: 'Volver', style: 'cancel' },
         { text: 'Cancelar entrenamiento', style: 'destructive', onPress: () => void cancelActiveWorkout().catch((error) => Alert.alert('No se pudo cancelar el entrenamiento', error instanceof Error ? error.message : 'Inténtalo nuevamente.')) },
       ])} /> : null}
+      <FunctionalGuidanceCard />
       <TrainViewSwitcher value={view} onChange={setSelectedView} />
     </>;
     return view === 'mesocycles'

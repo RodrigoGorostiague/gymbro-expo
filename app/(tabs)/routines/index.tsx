@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import {
   Alert,
   FlatList,
+  ScrollView,
   StyleSheet,
   Text,
   View,
@@ -116,19 +117,18 @@ export default function RoutinesScreen({ navigation }: { navigation?: React.Reac
             </>
           }
         />
-        {navigation}
-
         {routines.length === 0 ? (
-          <GlassCard style={styles.emptyCard}>
+          <ScrollView contentContainerStyle={styles.list}>{navigation}<GlassCard style={styles.emptyCard}>
             <Text style={[styles.emptyTitle, { color: theme.text }]}>
               Aún no tienes rutinas
             </Text>
             <Text style={[styles.emptyText, { color: theme.textMuted }]}> 
               Crea tu primera rutina como una plantilla reutilizable de ejercicios y series.
             </Text>
-          </GlassCard>
+          </GlassCard></ScrollView>
         ) : (
           <FlatList
+            ListHeaderComponent={<>{navigation}</>}
             data={sections}
             keyExtractor={(section) => section.key}
             contentContainerStyle={styles.list}

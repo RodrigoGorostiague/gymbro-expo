@@ -1,3 +1,4 @@
+import { TrainingHelp } from '../../../components/TrainingHelp';
 import { MesocycleBodyMap } from '../../../components/TrainingBodyMap';
 import React, { useState } from 'react';
 import { ScrollView, StyleSheet, Text, View } from 'react-native';
@@ -51,6 +52,8 @@ export default function MesocycleSummaryScreen() {
 
   return <ThemeBackground><SafeAreaView style={styles.safe}><AppNavBar onBack={() => router.back()} trailing={<HapticPressable accessibilityRole="button" accessibilityLabel={`Compartir ${draft.name}`} accessibilityHint="Abre la lista de personas de tu círculo para enviar este mesociclo." onPress={share}><Text style={{ color: theme.primary, fontWeight: '800' }}>Compartir</Text></HapticPressable>} /><ScrollView contentContainerStyle={styles.scroll}>
     <Text style={[styles.title, { color: theme.text }]}>{draft.name}</Text><Text style={[styles.subtitle, { color: theme.textMuted }]}>Resumen ejecutable del mesociclo</Text>
+    <Text style={{ color: theme.textMuted }}>Revisa el estado y las fechas antes de iniciar una sesión. Guardar un plan no registra entrenamientos.</Text>
+    <TrainingHelp topic="mesocycles" />
     <SummaryHero mesocycle={draft} completed={adherence.completedSessions} planned={adherence.plannedSessions} weeks={adherence.weeks} theme={theme} onEdit={() => router.push(`/mesocycle/${id}`)} />
     <MesocycleTrainingCard evolution={evolution} finished={draft.status === 'completed' || draft.status === 'cancelled' || draft.status === 'archived'} training={training} catalogMuscleGroups={catalogMuscleGroups} theme={theme} expanded={showTrainingProgress ?? ['completed', 'cancelled', 'archived'].includes(draft.status)} onToggle={() => setShowTrainingProgress((current) => !(current ?? ['completed', 'cancelled', 'archived'].includes(draft.status)))} />
     <MesocycleBodyMap mesocycle={draft} routines={routines ?? []} attempts={ownAttempts} owner={user} />

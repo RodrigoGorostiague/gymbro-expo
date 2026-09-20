@@ -1,3 +1,4 @@
+import { ResultGuidance } from '../../../components/WorkoutGuidance';
 import { SessionBodyMap } from '../../../components/TrainingBodyMap';
 import { useAuth } from '../../../context/AuthContext';
 import { selectPersonalLoadRecords, selectPersonalRepRecords, selectPersonalVolumeRecords } from '../../../utils/personalRecords';
@@ -43,14 +44,15 @@ export default function PersonalWorkoutRecapScreen() {
       exercise.exerciseId === award.exerciseId && exercise.variant === award.variant
     )?.recordedName.trim() || 'Ejercicio';
     const { theme } = useTheme();
-    const session = sessions.find((candidate) => candidate.id === id);
+    const session = canQueryAwards ? sessions.find((candidate) => candidate.id === id) : undefined;
     const [expanded, setExpanded] = useState<string | null>(null);
     return <ThemeBackground><SafeAreaView style={styles.safe}>
     <AppNavBar onBack={() => router.back()} backLabel="Volver"/>
     <ScrollView contentContainerStyle={styles.content}>
-      {!session ? <Text accessibilityRole="alert" style={{ color: theme.text }}>{isLoading ? 'Cargando tu entrenamiento…' : 'Esta sesión no está disponible en tu historial.'}</Text> : <>
+      {!session ? <Text accessibilityRole="alert" style={{ color: theme.text }}>{isLoading || dataState === 'loading' ? 'Cargando tu entrenamiento…' : !canQueryAwards ? 'Tu historial confirmado no está disponible. Vuelve a Entrenar para reintentar la conexión.' : 'Esta sesión no está disponible en tu historial.'}</Text> : <>
         <WorkoutVictory session={session}/>
         <SessionBodyMap session={session} owner={user} />
+        <ResultGuidance sessionId={session.id} />
         {records.length ? <GlassCard blur={false}>
           <Text accessibilityRole="header" style={[styles.heading, { color: theme.text }]}>Mejor carga a iguales repeticiones</Text>
           <Text style={{ color: theme.textMuted }}>Comparación con tu historial anterior confirmado de la misma variante. Los registros sin variante no se incluyen. Esta comparación recalculada no confirma un premio.</Text>

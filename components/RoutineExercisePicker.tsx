@@ -22,11 +22,13 @@ const searchable = (text: string) =>
     .toLowerCase();
 export function RoutineExercisePicker({
   exercises,
+  routineMuscleGroups = [],
   onClose,
   onSelect,
   replacing = false,
 }: {
   exercises: Exercise[];
+  routineMuscleGroups?: string[];
   onClose: () => void;
   onSelect: (exercises: Exercise[]) => void;
   replacing?: boolean;
@@ -37,23 +39,42 @@ export function RoutineExercisePicker({
   const [group, setGroup] = useState<string | null>(null);
   const [equipment, setEquipment] = useState<string | null>(null);
   const [selected, setSelected] = useState<string[]>([]);
-  const groups = useMemo(
-    () => [...new Set(exercises.flatMap((exercise) => exercise.muscleGroups))],
-    [exercises],
+  const exerciseGroups = useMemo(
+    () => new Map(exercises.map((exercise) => [
+      exercise.id,
+      new Set(exercise.muscleGroups.flatMap((id) => [
+          id,
+          ...(catalogMuscleGroups.find((muscle) => muscle.id === id)?.parentIds ?? []),
+      ])),
+    ])),
+    [exercises, catalogMuscleGroups],
+  );
+  const groups = [...new Set(
+    routineMuscleGroups.length
+      ? routineMuscleGroups
+      : exercises.flatMap((exercise) => exercise.muscleGroups),
+  )];
+  const scopedExercises = useMemo(
+    () => routineMuscleGroups.length
+      ? exercises.filter((exercise) => routineMuscleGroups.some(
+          (id) => exerciseGroups.get(exercise.id)?.has(id),
+        ))
+      : exercises,
+    [exercises, routineMuscleGroups, exerciseGroups],
   );
   const equipments = useMemo(
     () => [
       ...new Set(
-        exercises.flatMap((exercise) =>
+        scopedExercises.flatMap((exercise) =>
           exercise.catalog?.equipment ? [exercise.catalog.equipment] : [],
         ),
       ),
     ],
-    [exercises],
+    [scopedExercises],
   );
-  const filtered = exercises.filter(
+  const filtered = scopedExercises.filter(
     (exercise) =>
-      (!group || exercise.muscleGroups.includes(group)) &&
+      (!group || exerciseGroups.get(exercise.id)?.has(group)) &&
       (!equipment || exercise.catalog?.equipment === equipment) &&
       searchable(`${exercise.name} ${exercise.variant}`).includes(
         searchable(search.trim()),
@@ -100,7 +121,7 @@ export function RoutineExercisePicker({
           style={styles.filters}
           contentContainerStyle={styles.row}
         >
-          {chip('Todos los músculos', !group, () => setGroup(null))}
+          {chip(routineMuscleGroups.length ? 'Grupos de la rutina' : 'Todos los músculos', !group, () => setGroup(null))}
           {groups.map((id) =>
             chip(muscleGroupLabel(catalogMuscleGroups, id), group === id, () =>
               setGroup(group === id ? null : id),

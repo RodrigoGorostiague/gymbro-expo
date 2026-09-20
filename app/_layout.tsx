@@ -1,3 +1,5 @@
+import { FunctionalGuidanceProvider } from '../components/FunctionalGuidanceProvider';
+import { BodyShapeProvider } from '../components/BodyShapeProvider';
 import { ReducedMotionConfig, ReduceMotion } from 'react-native-reanimated';
 import { useMotionPreference } from '../hooks/useSensoryPreferences';
 import 'react-native-gesture-handler';
@@ -75,7 +77,9 @@ export default function RootLayout() {
     <ReducedMotionConfig mode={motion ? ReduceMotion.System : ReduceMotion.Always} />
     <SafeAreaProvider>
       <AuthProvider>
+        <BodyShapeProvider>
         <DataProvider>
+          <FunctionalGuidanceProvider>
           <ShopProvider>
             <SocialProvider>
               <BackgroundParallaxProvider>
@@ -138,7 +142,9 @@ export default function RootLayout() {
               </BackgroundParallaxProvider>
             </SocialProvider>
           </ShopProvider>
+        </FunctionalGuidanceProvider>
         </DataProvider>
+      </BodyShapeProvider>
       </AuthProvider>
     </SafeAreaProvider>
     </GestureHandlerRootView>

@@ -1,3 +1,6 @@
+import { TrainingHelp } from './TrainingHelp';
+import { useFunctionalGuidance } from '../context/FunctionalGuidanceContext';
+import { isGuidanceRoutineUsable } from '../utils/functionalGuidance';
 import { RoutineBodyMap } from './TrainingBodyMap';
 import React, { useEffect, useRef, useState } from 'react';
 import {
@@ -93,6 +96,8 @@ function Editor({
     retryData,
   } = useData();
   const { theme } = useTheme();
+  const guide = useFunctionalGuidance();
+  const [preparedRoutine, setPreparedRoutine] = useState<Routine | null>(null);
   const {
     draft,
     status,
@@ -128,6 +133,7 @@ function Editor({
   const change: typeof changeDraft = (edit) => {
     if (savingRef.current) return;
     setUndo(null);
+    setPreparedRoutine(null);
     changeDraft(edit);
   };
   const [saving, setSaving] = useState(false);
@@ -137,6 +143,10 @@ function Editor({
   >('editor');
   const savingRef = useRef(false);
   const autoAdded = useRef<string | null>(null);
+  useEffect(() => { if (guide.active && sourceId !== 'new') guide.selectRoutine(sourceId); }, [guide.active, sourceId, guide.selectRoutine]);
+  const guideRoutine = preparedRoutine ?? (guide.preferences.selectedRoutineId === sourceId ? draft?.base : null);
+  const savedDraft = draft?.base ? seedRoutineDraft(owner, sourceId, draft.base, draft.operationId, draft.base) : null;
+  const guideRoutineIsSaved = !!savedDraft && JSON.stringify(draft?.routine) === JSON.stringify(savedDraft.routine) && JSON.stringify(draft?.inputs) === JSON.stringify(savedDraft.inputs);
   useDirtyExitGuard(
     status === 'writing' || (status === 'error' && !!draft),
     saving,
@@ -168,6 +178,7 @@ function Editor({
     edit: (value: RoutineEditorDraft) => RoutineEditorDraft,
   ) =>
     changeDraft((current) => {
+      setPreparedRoutine(null);
       setUndo(current);
       return edit(current);
     });
@@ -339,6 +350,8 @@ function Editor({
         draft.base,
         draft.operationId,
       );
+      setPreparedRoutine(result);
+      guide.selectRoutine(result.id);
       // Keep a clean recovery point even if removing the old local entry fails.
       changeDraft(() =>
         seedRoutineDraft(owner, sourceId, result, generateId(), result),
@@ -490,6 +503,15 @@ function Editor({
                     ? `${restored ? 'Borrador recuperado · ' : ''}Borrador en este dispositivo`
                     : 'No se pudo guardar el borrador'}
               </Text>
+              <Text style={{ color: theme.textMuted }}>Una rutina es una plantilla de ejercicios y series que puedes volver a usar. Prepara sus ejercicios aquí y guarda la rutina en tu biblioteca.</Text>
+              <TrainingHelp topic="routines" />
+              {guide.active && guideRoutine && guideRoutineIsSaved && isGuidanceRoutineUsable(guideRoutine) && !activeWorkoutDraft && dataState === 'ready' && <View style={{ gap: 8 }}>
+                <Text style={{ color: theme.text }}>Rutina preparada. Cuando estés listo, abre el entrenamiento.</Text>
+                <GlassButton title="Ir al entrenamiento" onPress={() => {
+                  const persisted = getRoutine(guideRoutine.id);
+                  if (persisted && isGuidanceRoutineUsable(persisted)) router.push(`/routine/execute/${persisted.id}`);
+                }} />
+              </View>}
               {button('Descartar borrador', discardDraft)}
               {error && (
                 <View>
@@ -534,6 +556,8 @@ function Editor({
                   />
                 )}
               </GlassCard>
+              <Text style={{ color: theme.textMuted }}>Estos son valores previstos. Durante el entrenamiento registrarás lo que realmente hagas.</Text>
+              <TrainingHelp topic="sets" />
               {draft.routine.exercises.length > 0 && <RoutineBodyMap routine={draft.routine} />}
         {!draft.routine.exercises.length && (
                 <GlassCard style={styles.section}>
@@ -1021,6 +1045,7 @@ function Editor({
         {picker && (
           <RoutineExercisePicker
             exercises={catalog}
+            routineMuscleGroups={draft?.routine.muscleGroups}
             replacing={picker !== 'add'}
             onClose={() => setPicker(false)}
             onSelect={selectExercises}

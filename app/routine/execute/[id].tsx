@@ -1,3 +1,4 @@
+import { RoutineBodyMap } from '../../../components/TrainingBodyMap';
 import { WorkoutExerciseCard } from '../../../components/WorkoutExerciseCard';
 import { setLoadBasis, routineSetLabels, continuesDropBlock } from '../../../utils/setPrescription';
 import { seedMesocycleWorkout } from '../../../utils/mesocycleContinuity';
@@ -60,6 +61,7 @@ import { getShopTheme } from '../../../constants/shopThemes';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import Animated, { cancelAnimation, Easing, FadeIn, ZoomIn, useAnimatedStyle, useSharedValue, withRepeat, withTiming } from 'react-native-reanimated';
+import { WorkoutGuidance } from '../../../components/WorkoutGuidance';
 import { WorkoutCompletionReview } from '../../../components/WorkoutCompletionReview';
 import { nextWorkoutSet } from '../../../utils/workoutExperience';
 import { getSensoryPreferences } from '../../../utils/sensoryPreferences';
@@ -1101,25 +1103,30 @@ export default function ExecuteRoutineScreen() {
       <ThemeBackground calm>
         <SafeAreaView style={styles.safe}>
           <AppNavBar onBack={() => router.back()} backLabel="Cancelar" />
-          <AppScreenHeader title={routine.name} subtitle="Configura el entrenamiento antes de iniciar" />
-          <GlassCard>
-            <Text style={{ color: theme.text, fontSize: 22, fontWeight: '900', marginBottom: 8 }}>Tu sesión, a tu ritmo</Text>
-            <Text style={{ color: theme.textMuted, marginBottom: 16 }}>{routine.exercises.length} ejercicios · {routine.exercises.reduce((sum, exercise) => sum + exercise.sets.length, 0)} series planificadas</Text>
-            <Text style={[styles.label, { color: theme.textMuted }]}>
-              Temporizador de descanso (segundos)
-            </Text>
-            <GlassInput
-              keyboardType="numeric"
-              value={restSeconds}
-              onChangeText={setRestSeconds}
-              placeholder="90"
-            />
-            {launchSeed?.restTimerSeconds !== undefined ? <Text style={{ color: theme.textMuted }}>Se usarán los últimos valores compatibles de este mesociclo. Los ajustes planificados se conservan.</Text> : null}
-            <Text style={[styles.hint, { color: theme.textMuted }]}>
-              Se reinicia al marcar una serie como completada. Al terminar el descanso recibirás
-              una alerta para continuar.
-            </Text>
-          </GlassCard>
+          <ScrollView style={{ flex: 1 }} contentContainerStyle={{ paddingBottom: 16 }} keyboardShouldPersistTaps="handled">
+            <AppScreenHeader title={routine.name} subtitle="Configura el entrenamiento antes de iniciar" />
+            <WorkoutGuidance phase="setup" />
+            <GlassCard>
+              <Text style={{ color: theme.text, fontSize: 22, fontWeight: '900', marginBottom: 8 }}>Tu sesión, a tu ritmo</Text>
+              <Text style={{ color: theme.textMuted, marginBottom: 16 }}>{routine.exercises.length} ejercicios · {routine.exercises.reduce((sum, exercise) => sum + exercise.sets.length, 0)} series planificadas</Text>
+              <Text style={[styles.label, { color: theme.textMuted }]}>
+                Temporizador de descanso (segundos)
+              </Text>
+              <GlassInput
+                keyboardType="numeric"
+                value={restSeconds}
+                onChangeText={setRestSeconds}
+                placeholder="90"
+              />
+              {launchSeed?.restTimerSeconds !== undefined ? <Text style={{ color: theme.textMuted }}>Se usarán los últimos valores compatibles de este mesociclo. Los ajustes planificados se conservan.</Text> : null}
+              <Text style={[styles.hint, { color: theme.textMuted }]}>
+                Se reinicia al marcar una serie como completada. Al terminar el descanso recibirás
+                una alerta para continuar.
+              </Text>
+            </GlassCard>
+            <View style={styles.spacer} />
+            <RoutineBodyMap routine={routine} />
+          </ScrollView>
           <View style={styles.spacer} />
           <GlassButton
             title={hasDifferentActiveWorkout ? 'Continuar entrenamiento en curso' : 'Iniciar entrenamiento'}
@@ -1219,6 +1226,7 @@ export default function ExecuteRoutineScreen() {
             onScroll={handleExerciseScroll}
             scrollEventThrottle={16}
             ListHeaderComponent={<View style={{ gap: 12, marginBottom: 16 }}>
+              <WorkoutGuidance phase="active" hasSavedSet={doneSets > 0 && pendingSaveCount === 0 && !offlineWorkoutError} />
               <Text accessibilityRole="header" style={{ color: theme.text, fontSize: 26, fontWeight: '900' }}>{routine.name}</Text>
               <Text style={{ color: theme.textMuted }}>{doneSets}/{totalSets} series realizadas{nextSet ? ` · Sigue: ${nextSet.exerciseName}, serie ${nextLabel}` : ' · Puedes finalizar la sesión'}</Text>
               <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
