@@ -1,3 +1,4 @@
+import { BodyShapeContext, bodyShapeForSex } from '../context/BodyShapeContext';
 import React from 'react';
 import { beforeEach, describe, expect, test } from 'vitest';
 import { render, press, resetRuntimeHarness, findTextsContaining, setMockData } from './helpers/runtimeHarness';
@@ -16,8 +17,7 @@ describe('MuscleBodyMap', () => {
     expect(findTextsContaining(tree.root, 'Grupos: Pectoral mayor')).toHaveLength(1);
     press(tree.root.findAll((node) => node.props.accessibilityLabel === 'Espalda')[0]);
     expect(tree.root.findAllByType('Svg' as any)).toHaveLength(1);
-    press(tree.root.findAll((node) => node.props.accessibilityLabel === 'Silueta B')[0]);
-    expect(tree.root.findByType('Svg' as any).props.viewBox).toBe('756 0 774 1448');
+    expect(tree.root.findAll((node) => node.props.accessibilityLabel === 'Silueta B')).toHaveLength(0);
   });
   test('effort view labels unavailable records rather than displaying zero', () => {
     const data = projectRecapBody([{ name: 'Press', muscleGroupIds: ['GM-101'], sets: [{ completed: true, reps: 8, weight: 20 }] }]);
@@ -30,7 +30,7 @@ describe('MuscleBodyMap', () => {
     const tree = render(React.createElement(SharedBodyMap, { distribution: [{ id: 'GM-101', value: 2 }] }));
     expect(tree.root.findAll((node) => node.props.accessibilityLabel === 'Silueta B')).toHaveLength(0);
     press(tree.root.findAll((node) => node.props.accessibilityLabel === 'Explorar mapa muscular')[0]);
-    expect(tree.root.findAll((node) => node.props.accessibilityLabel === 'Silueta B').length).toBeGreaterThan(0);
+    expect(tree.root.findAll((node) => node.props.accessibilityLabel === 'Silueta B')).toHaveLength(0);
     expect(findTextsContaining(tree.root, 'no equivale a series ni a esfuerzo')).toHaveLength(1);
   });
 });
@@ -56,4 +56,13 @@ test('higher volume changes opacity without replacing the selected theme color',
   const low = bodyAppearance({...entry,value:1},data,'volume',5,palette);
   const high = bodyAppearance({...entry,value:5},data,'volume',5,palette);
   expect(low.fill).toBe(palette.primary); expect(high.fill).toBe(palette.primary); expect(high.opacity).toBeGreaterThan(low.opacity);
+});
+
+
+test('onboarding sex selects both body views automatically without manual controls', () => {
+  for (const sex of ['male', 'female', null] as const) {
+    const tree = render(React.createElement(BodyShapeContext.Provider, { value: bodyShapeForSex(sex) }, React.createElement(MuscleBodyMap, { projection: projection() })));
+    expect(tree.root.findAllByType('Svg' as any).map(node => node.props.viewBox)).toEqual(sex === 'female' ? ['-50 -40 734 1538', '756 0 774 1448'] : ['0 80 724 1310', '724 80 724 1310']);
+    expect(tree.root.findAll(node => ['Silueta A', 'Silueta B'].includes(node.props.accessibilityLabel))).toHaveLength(0);
+  }
 });

@@ -1,7 +1,10 @@
+import { MuscleRankCard } from './MuscleRankCard';
+import { loadMuscleMapMode, saveMuscleMapMode, type MuscleMapMode } from '../services/muscleMapPreference';
+import { useBodyShape } from '../context/BodyShapeContext';
 import { MuscleBodyMap } from './MuscleBodyMap';
 import { projectVolumeBody, VOLUME_BODY_REGIONS } from '../utils/bodyMapProjection';
 import { useDirtyExitGuard } from '../hooks/useDirtyExitGuard';
-import React, { useCallback, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Pressable, StyleSheet, Switch, Text, TextInput, View } from 'react-native';
 import { useFocusEffect } from 'expo-router';
 import { useTheme } from '../context/ThemeContext';
@@ -13,10 +16,34 @@ import { MuscleRegionGlyph } from './MuscleRegionGlyph';
 const number = (value: number) => value.toLocaleString('es-AR', { maximumFractionDigits: 1 });
 const date = (value: string) => new Date(value).toLocaleDateString('es-AR', { day: 'numeric', month: 'short', timeZone: 'UTC' });
 
-export function MuscleVolumeCard({ subjectId, own = false, attempts = [], palette, revision = 0, localAvailable = true }: { subjectId: string; own?: boolean; attempts?: readonly WorkoutAttempt[]; palette?: AppTheme; revision?: number; localAvailable?: boolean }) {
+type MuscleMapProps = { subjectId: string; own?: boolean; attempts?: readonly WorkoutAttempt[]; palette?: AppTheme; revision?: number; localAvailable?: boolean };
+export function MuscleVolumeCard(props: MuscleMapProps) {
+  const { theme } = useTheme(); const colors = props.palette ?? theme;
+  const [mode, setMode] = useState<MuscleMapMode>('volume');
+  const [preview, setPreview] = useState(false), [editing, setEditing] = useState(false);
+  const [preferenceError, setPreferenceError] = useState(false);
+  const chosen = useRef(false);
+  useEffect(() => {
+    let active = true;
+    void loadMuscleMapMode().then(value => { if (active && !chosen.current) setMode(value); }).catch(() => undefined);
+    return () => { active = false; };
+  }, []);
+  const select = (value: MuscleMapMode) => {
+    chosen.current = true; setMode(value); setPreferenceError(false);
+    void saveMuscleMapMode(value).catch(() => setPreferenceError(true));
+  };
+  return <View style={styles.container}>
+    <View style={styles.row}>{(['volume', 'ranked'] as const).map(value => <Pressable key={value} accessibilityRole="button" accessibilityLabel={value === 'volume' ? 'Mapa de volumen' : 'Mapa Ranked'} accessibilityState={{ selected: mode === value, disabled: editing }} disabled={editing} onPress={() => select(value)} style={[styles.button, { borderColor: colors.glassBorder, backgroundColor: mode === value ? colors.primary : colors.glass }]}><Text style={{ color: mode === value ? colors.onPrimary : colors.text, fontWeight: '800' }}>{value === 'volume' ? 'Volumen' : 'Ranked'}</Text></Pressable>)}</View>
+    {preferenceError ? <Text style={{ color: colors.textMuted }}>No se pudo recordar el tipo de mapa en este dispositivo.</Text> : null}
+    {props.own ? <Pressable accessibilityRole="button" disabled={editing} accessibilityState={{ disabled: editing }} onPress={() => setPreview(!preview)} style={[styles.button, { borderColor: colors.glassBorder }]}><Text style={{ color: colors.primary }}>{preview ? 'Volver a mi vista' : 'Ver como otros'}</Text></Pressable> : null}
+    {mode === 'ranked' ? <MuscleRankCard key={`${props.subjectId}:${preview}`} subjectId={props.subjectId} own={!!props.own} preview={preview} palette={props.palette} revision={props.revision ?? 0} /> : <VolumeMapContent {...props} preview={preview} onEditingChange={setEditing} />}
+  </View>;
+}
+function VolumeMapContent({ subjectId, own = false, attempts = [], palette, revision = 0, localAvailable = true, preview, onEditingChange }: MuscleMapProps & { preview: boolean; onEditingChange: (editing: boolean) => void }) {
   const { theme } = useTheme(); const colors = palette ?? theme;
   const [days, setDays] = useState<VolumeDays>(28);
-  const [preview, setPreview] = useState(false); const [local, setLocal] = useState(false);
+  const [local, setLocal] = useState(false);
+  useEffect(() => { setLocal(false); }, [preview]);
   const [loaded, setLoaded] = useState<MuscleVolume | null>(null);
   const [loading, setLoading] = useState(true); const [error, setError] = useState<string | null>(null);
   const [now, setNow] = useState(Date.now());
@@ -25,8 +52,9 @@ export function MuscleVolumeCard({ subjectId, own = false, attempts = [], palett
   const [editing, setEditing] = useState(false); const [saving, setSaving] = useState(false);
   const [draft, setDraft] = useState<Record<string,string>>({}); const [share, setShare] = useState(false);
   const [selected, setSelected] = useState<string | null>(null);
-  const [shape, setShape] = useState<'a' | 'b'>('a');
+  const shape = useBodyShape();
   useDirtyExitGuard(editing, saving);
+  useEffect(() => { onEditingChange(editing); }, [editing, onEditingChange]);
   const [goalError, setGoalError] = useState<string | null>(null);
   const refresh = useCallback(async () => {
     const id = ++request.current; setLoading(true); setError(null); setLoaded(null); setNow(Date.now());
@@ -60,14 +88,14 @@ export function MuscleVolumeCard({ subjectId, own = false, attempts = [], palett
   return <View style={styles.container}>
     <View><Text style={[styles.eyebrow,{color:colors.primary}]}>TU VOLUMEN · MÚSCULO A MÚSCULO</Text><Text accessibilityRole="header" style={[styles.title,{color:colors.text}]}>Distribución muscular</Text><Text style={[styles.copy,{color:colors.textMuted}]}>Series directas + ½ indirectas. Una estimación del trabajo registrado.</Text></View>
     <View style={styles.row}>{([7,28,90] as const).map(n => button(`${n} días`,days===n,() => { setLoaded(null); setLoading(true); setDays(n); },editing))}</View>
-    {own ? <View style={styles.row}>{button(preview ? 'Volver a mi vista' : 'Ver como otros',preview,() => { setLoaded(null); setLoading(true); setPreview(!preview); setLocal(false); },editing)}{!preview ? button(local ? 'Ver sincronizado' : 'Incluir registros locales',local,() => setLocal(!local),editing || !localAvailable) : null}</View> : null}
+    {own ? <View style={styles.row}>{!preview ? button(local ? 'Ver sincronizado' : 'Incluir registros locales',local,() => setLocal(!local),editing || !localAvailable) : null}</View> : null}
     {preview ? <Text style={{color:colors.textMuted}}>Vista compartida con tus conexiones. Usa las preferencias guardadas.</Text> : null}
     {loading ? <Text accessibilityLiveRegion="polite" style={{color:colors.textMuted}}>Cargando distribución…</Text> : error ? <View style={styles.container}><Text accessibilityRole="alert" style={{color:colors.text}}>No pudimos consultar la distribución compartida. {error}</Text>{button('Reintentar',false,() => void refresh())}</View> : !volume ? <Text style={{color:colors.textMuted}}>La distribución muscular no está compartida.</Text> : null}
     {!loading && volume ? <>
       <View style={[styles.summary,{borderColor:colors.glassBorder,backgroundColor:colors.glass}]}><Text style={[styles.metric,{color:colors.text}]}>{number(volume.current.eligibleSets)} series de trabajo</Text><Text style={{color:colors.textMuted}}>{date(volume.current.start)} – {date(volume.current.end)} · corte UTC</Text><Text style={{color:colors.textMuted}}>Gráfico y barras: promedio semanal sobre {days} días.</Text></View>
       <Text style={[styles.copy,{color:colors.textMuted}]}>{provisional ? 'Vista local provisional: puede diferir de lo compartido hasta sincronizar. ' : `Datos sincronizados al ${new Date(volume.asOf).toLocaleString('es-AR')}. `}Basado en registros disponibles; cobertura histórica no verificada.</Text>
       <View style={styles.row}>{button('Sin comparación',comparison==='none',() => setComparison('none'))}{button('Período anterior',comparison==='previous',() => setComparison('previous'))}{Object.keys(volume.goals).length ? button('Objetivo',comparison==='goal',() => setComparison('goal')) : null}</View>
-      <MuscleBodyMap projection={projection!} title="Mapa muscular" scaleMax={max} palette={colors} shape={shape} onShapeChange={setShape} showRegionList={false} selectedRegions={selected ? VOLUME_BODY_REGIONS[selected] : []} onSelectRegion={region => {
+      <MuscleBodyMap projection={projection!} title="Mapa muscular" scaleMax={max} palette={colors} shape={shape} showRegionList={false} selectedRegions={selected ? VOLUME_BODY_REGIONS[selected] : []} onSelectRegion={region => {
         const candidates = current.filter(axis => VOLUME_BODY_REGIONS[axis.id]?.includes(region)).sort((a,b) => b.value-a.value);
         const id = candidates[0]?.id; if (id) setSelected(selected === id ? null : id);
       }} />

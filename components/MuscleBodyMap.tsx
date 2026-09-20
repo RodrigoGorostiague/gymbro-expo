@@ -1,3 +1,4 @@
+import { useBodyShape } from '../context/BodyShapeContext';
 import React, { memo, useMemo, useState } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 import Svg, { Path } from 'react-native-svg';
@@ -17,6 +18,7 @@ const metricLabels: Record<BodyMapMetric, string> = { volume: 'Volumen', frequen
 export const formatBodyValue = (value: number) => Number.isInteger(value) ? String(value) : value.toLocaleString('es', { maximumFractionDigits: 1 });
 export type BodyMapPalette = { primary: string; secondary: string; text: string; textMuted: string; glassBorder: string; glass: string };
 export function bodyAppearance(entry: BodyMapEntry | undefined, projection: BodyMapProjection, metric: BodyMapMetric, max: number, palette: BodyMapPalette) {
+  if (projection.mode === 'ranked') return { fill: entry?.rankColor ?? palette.glassBorder, opacity: entry?.rankColor ? 1 : .25 };
   const value = entry ? bodyMetricValue(entry, metric) : null;
   const level = bodyColorLevel(value, metric, max);
   const opacity = projection.mode === 'participation' && entry?.value ? entry.role === 'Principal' ? 1 : entry.role === 'Secundario' ? .5 : .3 : level ? INTENSITIES[level - 1] : .25;
@@ -47,17 +49,16 @@ const BodyCanvas = memo(function BodyCanvas({ shape, side, projection, metric, m
   </View>;
 });
 
-export function MuscleBodyMap({ projection, title = 'Mapa muscular', compact = false, scaleMax, palette: override, selectedRegions, onSelectRegion, shape: controlledShape, onShapeChange, showRegionList = true }: {
-  projection: BodyMapProjection; title?: string; compact?: boolean; scaleMax?: number; palette?: Partial<BodyMapPalette>; selectedRegions?: readonly BodyRegion[]; onSelectRegion?: (id: BodyRegion) => void; shape?: 'a' | 'b'; onShapeChange?: (shape: 'a' | 'b') => void; showRegionList?: boolean;
+export function MuscleBodyMap({ projection, title = 'Mapa muscular', compact = false, scaleMax, palette: override, selectedRegions, onSelectRegion, shape: controlledShape, showRegionList = true }: {
+  projection: BodyMapProjection; title?: string; compact?: boolean; scaleMax?: number; palette?: Partial<BodyMapPalette>; selectedRegions?: readonly BodyRegion[]; onSelectRegion?: (id: BodyRegion) => void; shape?: 'a' | 'b'; showRegionList?: boolean;
 }) {
   const { theme } = useTheme();
   const palette: BodyMapPalette = {
     primary: theme.primary ?? '#7C3AED', secondary: theme.secondary ?? '#22D3EE', text: theme.text ?? '#FFFFFF',
     textMuted: theme.textMuted ?? '#94A3B8', glassBorder: theme.glassBorder ?? '#64748B', glass: theme.glass ?? 'transparent', ...override,
   };
-  const [localShape, setLocalShape] = useState<'a' | 'b'>('a');
-  const shape = controlledShape ?? localShape;
-  const setShape = (value: 'a' | 'b') => { setLocalShape(value); onShapeChange?.(value); };
+  const profileShape = useBodyShape();
+  const shape = controlledShape ?? profileShape;
   const [view, setView] = useState<'both' | 'front' | 'back'>('both');
   const [selected, setSelected] = useState<BodyRegion | null>(null);
   const [requestedMetric, setMetric] = useState<BodyMapMetric>('volume');
@@ -74,6 +75,7 @@ export function MuscleBodyMap({ projection, title = 'Mapa muscular', compact = f
   const toggle = (id: BodyRegion) => { setSelected((current) => current === id ? null : id); onSelectRegion?.(id); };
   const chip = (label: string, chosen: boolean, action: () => void) => <HapticPressable key={label} accessibilityRole="button" accessibilityLabel={label} accessibilityState={{ selected: chosen }} onPress={action} style={[styles.control, { borderColor: chosen ? palette.primary : palette.glassBorder, backgroundColor: chosen ? palette.glass : 'transparent' }]}><Text style={{ color: chosen ? palette.primary : palette.textMuted, fontSize: 12, fontWeight: '700' }}>{label}</Text></HapticPressable>;
   const numeric = (entry: BodyMapEntry) => {
+    if (projection.mode === 'ranked') return entry.rankLabel ?? 'Sin registros';
     if (projection.mode === 'participation') return entry.value > 0 ? entry.role : 'Sin participación registrada';
     const value = bodyMetricValue(entry, metric);
     return value === null ? 'Sin registro' : formatBodyValue(value);
@@ -85,10 +87,9 @@ export function MuscleBodyMap({ projection, title = 'Mapa muscular', compact = f
       <View style={styles.controls}>{chip('Ambas vistas', view === 'both', () => setView('both'))}{chip('Frente', view === 'front', () => setView('front'))}{chip('Espalda', view === 'back', () => setView('back'))}</View>
     </>}
     <View style={styles.bodies}>{(isCompact || view === 'both' ? ['front', 'back'] as const : [view] as ('front' | 'back')[]).map((side) => <BodyCanvas key={side} shape={shape} side={side} projection={projection} metric={metric} max={max} selected={isCompact ? [] : selectedRegions ?? (selected ? [selected] : [])} onSelect={isCompact ? undefined : toggle} compact={isCompact} palette={palette} />)}</View>
-    {projection.mode === 'participation' ? <View style={styles.legend}>{(['Principal', 'Secundario', 'Rol sin especificar'] as const).map((label, index) => <View key={label} style={styles.legendItem}><View style={[styles.dot, { backgroundColor: palette.primary, opacity: [1, .5, .3][index] }]} /><Text style={{ color: palette.textMuted, fontSize: 11 }}>{label}</Text></View>)}</View> : <View style={styles.scale}><View style={styles.scaleBar}>{INTENSITIES.map((opacity) => <View key={opacity} style={[styles.scaleStep, { backgroundColor: palette.primary, opacity }]} />)}</View><View style={styles.scaleLabels}><Text style={{ color: palette.textMuted, fontSize: 11 }}>{metric === 'rir' ? '5 RIR · menor esfuerzo' : metric === 'rpe' ? '6 RPE' : 'Menor cantidad'}</Text><Text style={{ color: palette.textMuted, fontSize: 11 }}>{metric === 'rir' ? '0 RIR · mayor esfuerzo' : metric === 'rpe' ? '10 RPE' : `${formatBodyValue(max)} · máximo de la vista`}</Text></View></View>}
+    {projection.mode === 'ranked' ? null : projection.mode === 'participation' ? <View style={styles.legend}>{(['Principal', 'Secundario', 'Rol sin especificar'] as const).map((label, index) => <View key={label} style={styles.legendItem}><View style={[styles.dot, { backgroundColor: palette.primary, opacity: [1, .5, .3][index] }]} /><Text style={{ color: palette.textMuted, fontSize: 11 }}>{label}</Text></View>)}</View> : <View style={styles.scale}><View style={styles.scaleBar}>{INTENSITIES.map((opacity) => <View key={opacity} style={[styles.scaleStep, { backgroundColor: palette.primary, opacity }]} />)}</View><View style={styles.scaleLabels}><Text style={{ color: palette.textMuted, fontSize: 11 }}>{metric === 'rir' ? '5 RIR · menor esfuerzo' : metric === 'rpe' ? '6 RPE' : 'Menor cantidad'}</Text><Text style={{ color: palette.textMuted, fontSize: 11 }}>{metric === 'rir' ? '0 RIR · mayor esfuerzo' : metric === 'rpe' ? '10 RPE' : `${formatBodyValue(max)} · máximo de la vista`}</Text></View></View>}
     {!activeEntries.length && <Text style={{ color: palette.textMuted }}>Todavía no hay actividad representable en esta vista.</Text>}
     {!isCompact && <>
-      <View style={styles.controls}>{chip('Silueta A', shape === 'a', () => setShape('a'))}{chip('Silueta B', shape === 'b', () => setShape('b'))}</View>
       <Text style={[styles.subtitle, { color: palette.textMuted }]}>Toca una zona o elige su nombre para explorar. Las zonas agrupan músculos; ambos lados muestran el mismo registro.</Text>
       {showRegionList && <><View style={styles.regions}>{(allRegions ? projection.entries : activeEntries).map((entry) => <HapticPressable key={entry.id} accessibilityLabel={`${entry.label}: ${numeric(entry)}${projection.mode === 'participation' ? '' : ` ${unit}`}`} accessibilityState={{ selected: selected === entry.id }} onPress={() => toggle(entry.id)} style={[styles.region, { borderColor: selected === entry.id ? palette.primary : palette.glassBorder }]}><View style={[styles.dot, { backgroundColor: fillFor(entry, projection, metric, max, palette) }]} /><Text style={{ flex: 1, color: palette.text, fontSize: 12 }}>{entry.label}</Text><Text style={{ color: palette.textMuted, fontSize: 12 }}>{numeric(entry)}</Text></HapticPressable>)}</View>
       <HapticPressable onPress={() => setAllRegions(!allRegions)} accessibilityLabel={allRegions ? 'Mostrar solo zonas activas' : 'Mostrar todas las zonas'} style={styles.link}><Text style={{ color: palette.primary }}>{allRegions ? 'Solo zonas activas' : 'Ver todas las zonas'}</Text></HapticPressable>
@@ -99,6 +100,7 @@ export function MuscleBodyMap({ projection, title = 'Mapa muscular', compact = f
         {focused.exercises.length > 0 && <Text style={{ color: palette.textMuted }}>{focused.exercises.join(' · ')}</Text>}
       </View>}
       </>}{(projection.mode === 'planned' || projection.mode === 'completed') && <Text style={[styles.note, { color: palette.textMuted }]}>Color = series × relevancia del catálogo (máximo por zona y ejercicio). Sin calentamientos; cada bloque drop cuenta una vez. Sin ponderación disponible se cuentan asociaciones con rol no especificado. Más color no significa mejor entrenamiento.</Text>}
+      {projection.mode === 'ranked' && <Text style={[styles.note, { color: palette.textMuted }]}>Color = rango actual. Las superficies compartidas muestran el rango más alto; la lista conserva cada grupo por separado. No mide fuerza ni tamaño muscular.</Text>}
       {projection.mode === 'volume-summary' && <Text style={[styles.note, { color: palette.textMuted }]}>Volumen registrado: directas + ½ indirectas, como promedio semanal. Los grupos amplios colorean varias zonas sin atribuirles trabajo individual. En zonas superpuestas se muestra el grupo de mayor volumen.</Text>}
       {projection.mode === 'shared-sets' && <Text style={[styles.note, { color: palette.textMuted }]}>Solo series completadas del resumen. Este registro no distingue calentamientos, bloques drop ni roles musculares.</Text>}
       {projection.mode === 'distribution' && <Text style={[styles.note, { color: palette.textMuted }]}>Distribución compartida por grupos. Si varios grupos se superponen, la zona muestra el mayor valor; no equivale a series ni a esfuerzo.</Text>}

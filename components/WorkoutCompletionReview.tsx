@@ -1,3 +1,4 @@
+import { WorkoutMuscleRankProgress } from './WorkoutMuscleRankProgress';
 import { SessionBodyMap } from './TrainingBodyMap';
 import React, { useEffect, useRef, useState } from 'react';
 import { Modal, ScrollView, StyleSheet, Text, View } from 'react-native';
@@ -108,6 +109,7 @@ export function WorkoutCompletionReview({ session, experience, rewards, celebrat
   return <View style={styles.screen}>
     <ScrollView contentContainerStyle={styles.content}>
       <WorkoutVictory session={session} experience={experience} rewards={rewards} celebrate={celebrate} onDetails={onDetails} />
+      <WorkoutMuscleRankProgress attemptId={session.id} subjectId={user} confirmed={ready} />
       <SessionBodyMap session={session} owner={user} compact />
       {!ready ? <Text style={{ color: theme.textMuted }}>Preparando tus logros…</Text> : null}
       {preview?.reviewRequired && preview.records.length > 0 ? <View style={styles.section}>

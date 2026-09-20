@@ -1,8 +1,10 @@
+import { MUSCLE_RANKS, muscleRankIndex } from '../constants/muscleRanks';
+import { MUSCLE_VOLUME_AXES } from './muscleVolume';
 import type { ActualEffort, AttemptExerciseSnapshot, Exercise, Mesocycle, MuscleAttribution, CatalogMuscleParticipation, Routine, WorkoutAttempt, WorkoutRecapExercise, WorkoutSession } from '../types';
 import { BODY_REGIONS, BODY_REGION_IDS, BodyRegion, bodyMuscleLabel, bodyRegionsForMuscle } from '../constants/bodyMapMapping';
 import { isValidPerformance } from './workoutAttempts';
 
-export type BodyMapMode = 'participation' | 'planned' | 'completed' | 'shared-sets' | 'distribution' | 'volume-summary';
+export type BodyMapMode = 'participation' | 'planned' | 'completed' | 'shared-sets' | 'distribution' | 'volume-summary' | 'ranked';
 export type BodyMapMetric = 'volume' | 'frequency' | 'rir' | 'rpe';
 type EffortAggregate = { total: number; count: number };
 export interface BodyMapEntry {
@@ -10,6 +12,7 @@ export interface BodyMapEntry {
   role: 'Principal' | 'Secundario' | 'Sin especificar';
   sources: string[]; exercises: string[]; days: string[];
   rir: EffortAggregate; rpe: EffortAggregate; effortSets: number; frequency?: number;
+  rankColor?: string; rankLabel?: string; rankAxisId?: string;
 }
 export interface BodyMapProjection {
   version: 1; mode: BodyMapMode; entries: BodyMapEntry[];
@@ -219,3 +222,27 @@ export const VOLUME_BODY_REGIONS: Record<string, readonly BodyRegion[]> = {
     triceps: ['triceps'], forearms: ['forearm'], abs: ['abs','obliques'], glutes: ['gluteal'], quads: ['quadriceps'],
     hamstrings: ['hamstring'], adductors: ['adductors'], abductors: ['gluteal'], calves: ['calves'], tibialis: ['tibialis'], hipFlexors: [],
   };
+
+/** Keep ranks categorical and independent from volume's relative color scale. */
+export function projectRankBody(ranks: import('./muscleRank').MuscleRanks): BodyMapProjection {
+  const projection = blank('ranked');
+  projection.unit = 'Rango de constancia registrada';
+  for (const axis of ranks.axes) {
+    if (!axis.lastActivity) continue;
+    const label = MUSCLE_VOLUME_AXES.find(a => a.id === axis.id)!.label;
+    const regions = VOLUME_BODY_REGIONS[axis.id] ?? [];
+    if (!regions.length) projection.unmapped.push(label);
+    const rankIndex = muscleRankIndex(axis.xp);
+    for (const region of regions) {
+      const entry = projection.entries.find(e => e.id === region)!;
+      entry.sources.push(label);
+      // Consistent winner with list selection; stable taxonomy order breaks ties.
+      if (rankIndex + 1 <= entry.value) continue;
+      entry.value = rankIndex + 1;
+      entry.rankColor = MUSCLE_RANKS[rankIndex].color;
+      entry.rankLabel = MUSCLE_RANKS[rankIndex].name;
+      entry.rankAxisId = axis.id;
+    }
+  }
+  return projection;
+}

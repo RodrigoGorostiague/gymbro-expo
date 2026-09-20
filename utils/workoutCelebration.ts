@@ -34,6 +34,7 @@ export function celebrationRankChanged(steps: CelebrationStep[]) {
 
 export function rewardLabel(kind: string): string {
   const labels: Record<string, string> = {
+    muscle_rank_up: 'Ascenso de rango muscular',
     contextual_record: 'Récord personal', personal_record: 'Récord personal',
     set: 'Series realizadas', completed_set: 'Series realizadas', valid_sets: 'Series realizadas',
     routine_completion: 'Entrenamiento realizado', perfection: 'Todas las series', weekly_extra: 'Entrenamiento extra',
